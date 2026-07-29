@@ -1,156 +1,518 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Omnia</title>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  >
+
+  <meta
+    name="description"
+    content="AN.KI — интеллектуальная читалка без границ."
+  >
+
+  <meta name="theme-color" content="#0f1013">
+
+  <title>AN.KI</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="style.css" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body class="theme-dark">
-  <div class="app">
+
+  <main class="app">
 
     <!-- HOME / LIBRARY -->
+
     <section id="homeView" class="home-view">
+
       <header class="topbar">
+
         <div class="topbar-left">
-          <div class="brand-wrap">
-            <div class="brand">Omnia</div>
-            <div class="brand-sub">reading without borders</div>
+
+          <div class="brand-wrap" aria-label="AN.KI">
+            <div class="brand">AN.KI</div>
+
+            <div class="brand-key" aria-hidden="true">
+              <svg
+                viewBox="0 0 120 34"
+                role="img"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <line
+                  x1="2"
+                  y1="17"
+                  x2="41"
+                  y2="17"
+                  vector-effect="non-scaling-stroke"
+                />
+
+                <circle
+                  cx="55"
+                  cy="17"
+                  r="8"
+                  vector-effect="non-scaling-stroke"
+                />
+
+                <circle
+                  cx="55"
+                  cy="17"
+                  r="3"
+                  vector-effect="non-scaling-stroke"
+                />
+
+                <line
+                  x1="63"
+                  y1="17"
+                  x2="105"
+                  y2="17"
+                  vector-effect="non-scaling-stroke"
+                />
+
+                <line
+                  x1="91"
+                  y1="17"
+                  x2="91"
+                  y2="24"
+                  vector-effect="non-scaling-stroke"
+                />
+
+                <line
+                  x1="99"
+                  y1="17"
+                  x2="99"
+                  y2="22"
+                  vector-effect="non-scaling-stroke"
+                />
+
+                <line
+                  x1="105"
+                  y1="17"
+                  x2="114"
+                  y2="11"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+            </div>
           </div>
 
           <input
             id="searchInput"
             class="search-input"
-            type="text"
-            placeholder="Nietzsche, Plato, Dostoevsky..."
+            type="search"
+            placeholder="Автор или название"
+            autocomplete="off"
+            aria-label="Поиск книг"
           >
 
-          <select id="languageSelect" class="language-select">
+          <select
+            id="languageSelect"
+            class="language-select"
+            aria-label="Язык книги и перевода"
+          >
             <option value="">Все языки</option>
+            <option value="ru">Русский</option>
             <option value="en">English</option>
             <option value="de">Deutsch</option>
             <option value="fr">Français</option>
             <option value="it">Italiano</option>
             <option value="es">Español</option>
             <option value="pt">Português</option>
-            <option value="ru">Русский</option>
             <option value="zh">中文</option>
-            <option value="la">Latin</option>
+            <option value="la">Latina</option>
           </select>
 
-          <button id="searchBtn">Найти</button>
+          <button id="searchBtn" type="button">
+            Найти
+          </button>
+
         </div>
 
-        <div class="topbar-right">
-          <button id="themeDefaultBtn" title="Светлая">☀️</button>
-          <button id="themeDarkBtn" title="Тёмная">🌙</button>
-          <button id="themePurpleBtn" title="Фиолетовая">🟣</button>
-          <button id="themeRedBtn" title="Красная">🔴</button>
+        <div class="topbar-right" aria-label="Темы оформления">
+
+          <button
+            id="themeDefaultBtn"
+            class="theme-control"
+            type="button"
+            aria-label="Светлая тема"
+            title="Светлая тема"
+          >
+            Свет
+          </button>
+
+          <button
+            id="themeDarkBtn"
+            class="theme-control"
+            type="button"
+            aria-label="Тёмная тема"
+            title="Тёмная тема"
+          >
+            Тьма
+          </button>
+
+          <button
+            id="themePurpleBtn"
+            class="theme-control"
+            type="button"
+            aria-label="Фиолетовая тема"
+            title="Фиолетовая тема"
+          >
+            Фиолет
+          </button>
+
+          <button
+            id="themeRedBtn"
+            class="theme-control"
+            type="button"
+            aria-label="Бордовая тема"
+            title="Бордовая тема"
+          >
+            Бордо
+          </button>
+
         </div>
+
       </header>
 
-      <main class="home-layout">
-        <aside class="sidebar">
-          <h2 class="sidebar-title">Библиотека</h2>
-          <div class="sidebar-note">
-            Сейчас Omnia показывает твою локальную книгу и результаты поиска по внешней библиотеке.
-          </div>
+      <div class="home-layout">
 
-          <div id="results" class="results">
-            <div class="book-card">
-              <div class="book-title">Здесь будут книги</div>
-              <div class="book-meta">Введи автора или название сверху и нажми «Найти».</div>
-            </div>
-          </div>
+        <aside class="sidebar">
+
+          <h1 class="sidebar-title">
+            Библиотека
+          </h1>
+
+          <p class="sidebar-note">
+            Найди книгу и открой её внутри AN.KI.
+          </p>
+
+          <div
+            id="results"
+            class="results"
+            aria-live="polite"
+          ></div>
+
         </aside>
 
         <section class="home-preview">
-          <div class="preview-card">
-            <div class="preview-title">Omnia</div>
-            <div class="preview-text">
-              Открой книгу, чтобы перейти в режим чтения.
-              <br><br>
-              В reading mode останутся только:
-              <br>— тонкая строка главы сверху
-              <br>— текст
-              <br>— строка “до конца главы” снизу
+
+          <article class="preview-card">
+
+            <div class="preview-brand" aria-hidden="true">
+              <div class="preview-title">AN.KI</div>
+
+              <div class="preview-key">
+                <svg
+                  viewBox="0 0 160 44"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <line
+                    x1="2"
+                    y1="22"
+                    x2="57"
+                    y2="22"
+                    vector-effect="non-scaling-stroke"
+                  />
+
+                  <circle
+                    cx="72"
+                    cy="22"
+                    r="11"
+                    vector-effect="non-scaling-stroke"
+                  />
+
+                  <circle
+                    cx="72"
+                    cy="22"
+                    r="4"
+                    vector-effect="non-scaling-stroke"
+                  />
+
+                  <line
+                    x1="83"
+                    y1="22"
+                    x2="139"
+                    y2="22"
+                    vector-effect="non-scaling-stroke"
+                  />
+
+                  <line
+                    x1="119"
+                    y1="22"
+                    x2="119"
+                    y2="31"
+                    vector-effect="non-scaling-stroke"
+                  />
+
+                  <line
+                    x1="129"
+                    y1="22"
+                    x2="129"
+                    y2="28"
+                    vector-effect="non-scaling-stroke"
+                  />
+
+                  <line
+                    x1="139"
+                    y1="22"
+                    x2="153"
+                    y2="14"
+                    vector-effect="non-scaling-stroke"
+                  />
+                </svg>
+              </div>
             </div>
-          </div>
+
+            <p class="preview-text">
+              Читай тексты на разных языках, выделяй непонятные
+              фрагменты, получай перевод и объяснение, не покидая книгу.
+            </p>
+
+            <p class="preview-text">
+              В режиме чтения нажимай на левую или правую часть экрана,
+              чтобы переходить между фрагментами. Нажатие по центру
+              скрывает или возвращает элементы управления.
+            </p>
+
+          </article>
+
         </section>
-      </main>
-    </section>
 
-    <!-- READER -->
-    <section id="readerView" class="reader-view hidden">
-      <div id="readerOverlay" class="reader-overlay visible">
-        <div class="reader-overlay-top">
-          <button id="backToLibraryBtn" class="ghost-btn">← Библиотека</button>
-
-          <div class="reader-overlay-actions">
-            <button id="fontMinusBtn" class="ghost-btn">A−</button>
-            <button id="fontPlusBtn" class="ghost-btn">A+</button>
-            <button id="readerThemeBtn" class="ghost-btn">Тема</button>
-          </div>
-        </div>
       </div>
 
-      <div id="chapterLine" class="chapter-line">
-        Глава 1
+    </section>
+
+
+    <!-- READER -->
+
+    <section
+      id="readerView"
+      class="reader-view hidden"
+      aria-label="Режим чтения"
+    >
+
+      <div
+        id="readerOverlay"
+        class="reader-overlay visible"
+      >
+
+        <div class="reader-overlay-top">
+
+          <button
+            id="backToLibraryBtn"
+            class="ghost-btn"
+            type="button"
+            aria-label="Вернуться в библиотеку"
+          >
+            ← Библиотека
+          </button>
+
+          <div class="reader-overlay-actions">
+
+            <button
+              id="fontMinusBtn"
+              class="ghost-btn"
+              type="button"
+              aria-label="Уменьшить шрифт"
+            >
+              A−
+            </button>
+
+            <button
+              id="fontPlusBtn"
+              class="ghost-btn"
+              type="button"
+              aria-label="Увеличить шрифт"
+            >
+              A+
+            </button>
+
+            <button
+              id="readerThemeBtn"
+              class="ghost-btn"
+              type="button"
+              aria-label="Сменить тему чтения"
+            >
+              Тема
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <div
+        id="chapterLine"
+        class="chapter-line"
+        aria-live="polite"
+      >
+        Глава
       </div>
 
       <div class="reader-shell">
-        <div id="leftTapZone" class="tap-zone tap-zone-left" aria-hidden="true"></div>
-        <div id="centerTapZone" class="tap-zone tap-zone-center" aria-hidden="true"></div>
-        <div id="rightTapZone" class="tap-zone tap-zone-right" aria-hidden="true"></div>
 
-        <article id="viewer" class="viewer-text"></article>
+        <article
+          id="viewer"
+          class="viewer-text"
+          tabindex="0"
+          aria-label="Текст книги"
+        ></article>
+
       </div>
 
-      <div id="remainingLine" class="remaining-line">
-        До конца главы: 1 стр.
+      <div
+        id="remainingLine"
+        class="remaining-line"
+        aria-live="polite"
+      >
+        До конца главы: 0 стр.
       </div>
+
+      <div
+        id="leftTapZone"
+        class="tap-zone tap-zone-left"
+        aria-label="Предыдущая страница"
+      ></div>
+
+      <div
+        id="centerTapZone"
+        class="tap-zone tap-zone-center"
+        aria-label="Показать или скрыть управление"
+      ></div>
+
+      <div
+        id="rightTapZone"
+        class="tap-zone tap-zone-right"
+        aria-label="Следующая страница"
+      ></div>
+
     </section>
 
-    <!-- FLOATING SELECTION MENU -->
-    <div id="selectionToolbar" class="selection-toolbar">
-      <button id="toolbarTranslateBtn">Перевести</button>
-      <button id="toolbarExplainBtn">Объяснить</button>
-      <button id="toolbarSaveBtn">Сохранить</button>
+
+    <!-- SELECTION TOOLBAR -->
+
+    <div
+      id="selectionToolbar"
+      class="selection-toolbar"
+      role="toolbar"
+      aria-label="Действия с выделенным текстом"
+    >
+
+      <button
+        id="toolbarTranslateBtn"
+        type="button"
+      >
+        Перевести
+      </button>
+
+      <button
+        id="toolbarExplainBtn"
+        type="button"
+      >
+        Объяснить
+      </button>
+
+      <button
+        id="toolbarSaveBtn"
+        type="button"
+      >
+        Сохранить
+      </button>
+
     </div>
 
-    <!-- AI BOTTOM SHEET -->
-    <div id="sheetBackdrop" class="sheet-backdrop hidden"></div>
 
-    <section id="actionSheet" class="action-sheet hidden">
-      <div class="sheet-handle"></div>
+    <!-- ACTION SHEET -->
+
+    <div
+      id="sheetBackdrop"
+      class="sheet-backdrop hidden"
+    ></div>
+
+    <section
+      id="actionSheet"
+      class="action-sheet hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="actionSheetTitle"
+    >
+
+      <div class="sheet-handle" aria-hidden="true"></div>
 
       <div class="sheet-head">
-        <div class="sheet-title">Фрагмент</div>
-        <button id="closeActionSheetBtn" class="ghost-btn">✕</button>
+
+        <div
+          id="actionSheetTitle"
+          class="sheet-title"
+        >
+          Фрагмент
+        </div>
+
+        <button
+          id="closeActionSheetBtn"
+          class="ghost-btn"
+          type="button"
+          aria-label="Закрыть"
+        >
+          Закрыть
+        </button>
+
       </div>
 
-      <div id="selectedTextBox" class="selected-text-box">
-        Выделенный текст появится здесь.
-      </div>
+      <div
+        id="selectedTextBox"
+        class="selected-text-box"
+      ></div>
 
       <div class="sheet-actions">
-        <button id="translateBtn">Перевести</button>
-        <button id="explainBtn">Объяснить</button>
-        <button id="saveBtn">Сохранить</button>
+
+        <button
+          id="translateBtn"
+          type="button"
+        >
+          Перевести
+        </button>
+
+        <button
+          id="explainBtn"
+          type="button"
+        >
+          Объяснить
+        </button>
+
+        <button
+          id="saveBtn"
+          type="button"
+        >
+          Сохранить
+        </button>
+
       </div>
 
-      <div id="actionResult" class="action-result">
-        Здесь появится перевод или объяснение.
+      <div
+        id="actionResult"
+        class="action-result"
+        aria-live="polite"
+      >
+        Выбери действие.
       </div>
+
     </section>
 
-  </div>
+  </main>
 
   <script src="script.js"></script>
+
 </body>
 </html>
