@@ -10,18 +10,18 @@
 
   <meta
     name="description"
-    content="AN.KI — интеллектуальная читалка без границ."
+    content="AN.KI Atlas — интеллектуальная библиотека и читалка без границ."
   >
 
-  <meta name="theme-color" content="#0f1013">
+  <meta name="theme-color" content="#100b09">
 
-  <title>AN.KI</title>
+  <title>AN.KI Atlas</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
   <link
-    href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
     rel="stylesheet"
   >
 
@@ -32,268 +32,706 @@
 
   <main class="app">
 
-    <!-- HOME / LIBRARY -->
+    <!-- =====================================================
+         HOME
+         ===================================================== -->
 
     <section id="homeView" class="home-view">
 
-      <header class="topbar">
+      <!-- SIDEBAR -->
 
-        <div class="topbar-left">
+      <aside
+        id="siteSidebar"
+        class="site-sidebar"
+        aria-label="Основная навигация"
+      >
 
-          <div class="brand-wrap" aria-label="AN.KI">
-            <div class="brand">AN.KI</div>
+        <button
+          id="mobileMenuCloseBtn"
+          class="mobile-menu-close"
+          type="button"
+          aria-label="Закрыть меню"
+        >
+          ×
+        </button>
 
-            <div class="brand-key" aria-hidden="true">
-              <svg
-                viewBox="0 0 120 34"
-                role="img"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <line
-                  x1="2"
-                  y1="17"
-                  x2="41"
-                  y2="17"
-                  vector-effect="non-scaling-stroke"
-                />
+        <a
+          class="brand-lockup"
+          href="#hero"
+          aria-label="AN.KI Atlas — главная"
+        >
 
-                <circle
-                  cx="55"
-                  cy="17"
-                  r="8"
-                  vector-effect="non-scaling-stroke"
-                />
+          <span class="brand">
+            AN.KI
+          </span>
 
-                <circle
-                  cx="55"
-                  cy="17"
-                  r="3"
-                  vector-effect="non-scaling-stroke"
-                />
+          <span
+            class="brand-rule"
+            aria-hidden="true"
+          ></span>
 
-                <line
-                  x1="63"
-                  y1="17"
-                  x2="105"
-                  y2="17"
-                  vector-effect="non-scaling-stroke"
-                />
+          <span class="brand-subtitle">
+            ATLAS
+          </span>
 
-                <line
-                  x1="91"
-                  y1="17"
-                  x2="91"
-                  y2="24"
-                  vector-effect="non-scaling-stroke"
-                />
+        </a>
 
-                <line
-                  x1="99"
-                  y1="17"
-                  x2="99"
-                  y2="22"
-                  vector-effect="non-scaling-stroke"
-                />
+        <nav class="site-nav">
 
-                <line
-                  x1="105"
-                  y1="17"
-                  x2="114"
-                  y2="11"
-                  vector-effect="non-scaling-stroke"
-                />
-              </svg>
-            </div>
+          <a
+            class="nav-link active"
+            href="#hero"
+          >
+            Главная
+          </a>
+
+          <a
+            class="nav-link"
+            href="#collections"
+          >
+            Подборки
+          </a>
+
+          <a
+            class="nav-link"
+            href="#authors"
+          >
+            Авторы
+          </a>
+
+          <a
+            class="nav-link"
+            href="#academies"
+          >
+            Академии
+          </a>
+
+          <button
+            id="openSearchBtn"
+            class="nav-link nav-button"
+            type="button"
+          >
+            Поиск
+          </button>
+
+        </nav>
+
+        <div class="sidebar-bottom">
+
+          <p>
+            Вне времени.<br>
+            Вне границ. Читай.
+          </p>
+
+          <span>
+            AN.KI Atlas · 2026
+          </span>
+
+        </div>
+
+      </aside>
+
+      <div
+        id="sidebarBackdrop"
+        class="sidebar-backdrop hidden"
+      ></div>
+
+
+      <!-- MAIN CONTENT -->
+
+      <div class="home-main">
+
+        <!-- MOBILE HEADER -->
+
+        <header class="mobile-header">
+
+          <button
+            id="mobileMenuBtn"
+            class="icon-button"
+            type="button"
+            aria-label="Открыть меню"
+          >
+            ☰
+          </button>
+
+          <div class="mobile-brand">
+            AN.KI
+            <span>ATLAS</span>
           </div>
+
+          <button
+            id="mobileSearchBtn"
+            class="icon-button"
+            type="button"
+            aria-label="Открыть поиск"
+          >
+            ⌕
+          </button>
+
+        </header>
+
+
+        <!-- HERO -->
+
+        <section
+          id="hero"
+          class="hero"
+          aria-label="AN.KI Atlas"
+        >
+
+          <div
+            id="heroImageA"
+            class="hero-image hero-image-a active"
+          ></div>
+
+          <div
+            id="heroImageB"
+            class="hero-image hero-image-b"
+          ></div>
+
+          <div
+            class="hero-shade"
+            aria-hidden="true"
+          ></div>
+
+          <div class="hero-topline">
+
+            <span>
+              Цифровая библиотека
+            </span>
+
+            <span id="heroCounter">
+              01 / 45
+            </span>
+
+          </div>
+
+          <div class="hero-content">
+
+            <p class="eyebrow">
+              AN.KI ATLAS
+            </p>
+
+            <h1>
+              Вся мировая литература.<br>
+              В одном пространстве.
+            </h1>
+
+            <p class="hero-copy">
+              Читайте книги на языке оригинала или в переводе.
+              Выделяйте сложные фрагменты и получайте объяснение,
+              не покидая текст.
+            </p>
+
+            <div class="hero-actions">
+
+              <button
+                id="heroSearchBtn"
+                class="primary-button"
+                type="button"
+              >
+                Найти книгу
+              </button>
+
+              <a
+                class="text-link"
+                href="#collections"
+              >
+                Открыть подборки
+              </a>
+
+            </div>
+
+          </div>
+
+          <div
+            class="hero-controls"
+            aria-label="Управление изображениями"
+          >
+
+            <button
+              id="previousHeroBtn"
+              type="button"
+              aria-label="Предыдущее изображение"
+            >
+              ←
+            </button>
+
+            <button
+              id="nextHeroBtn"
+              type="button"
+              aria-label="Следующее изображение"
+            >
+              →
+            </button>
+
+          </div>
+
+        </section>
+
+
+        <!-- COLLECTIONS -->
+
+        <section
+          id="collections"
+          class="editorial-section"
+        >
+
+          <div class="section-heading">
+
+            <div>
+
+              <p class="eyebrow">
+                Кураторский выбор
+              </p>
+
+              <h2>
+                Подборки
+              </h2>
+
+            </div>
+
+            <button
+              class="section-link"
+              type="button"
+              data-search-query="классика"
+            >
+              Смотреть всё
+            </button>
+
+          </div>
+
+          <div class="collection-grid">
+
+            <article
+              class="collection-card collection-card-featured"
+            >
+
+              <div class="collection-number">
+                01
+              </div>
+
+              <div class="collection-card-body">
+
+                <p>
+                  Большая коллекция
+                </p>
+
+                <h3>
+                  Книги, изменившие европейскую мысль
+                </h3>
+
+                <button
+                  type="button"
+                  data-search-query="philosophy"
+                >
+                  Открыть коллекцию
+                </button>
+
+              </div>
+
+            </article>
+
+
+            <article class="collection-card">
+
+              <div class="collection-number">
+                02
+              </div>
+
+              <div class="collection-card-body">
+
+                <p>
+                  История
+                </p>
+
+                <h3>
+                  От античности до Нового времени
+                </h3>
+
+                <button
+                  type="button"
+                  data-search-query="history"
+                >
+                  Открыть коллекцию
+                </button>
+
+              </div>
+
+            </article>
+
+
+            <article class="collection-card">
+
+              <div class="collection-number">
+                03
+              </div>
+
+              <div class="collection-card-body">
+
+                <p>
+                  Литература
+                </p>
+
+                <h3>
+                  Великие романы XIX века
+                </h3>
+
+                <button
+                  type="button"
+                  data-search-query="novel"
+                >
+                  Открыть коллекцию
+                </button>
+
+              </div>
+
+            </article>
+
+
+            <article class="collection-card">
+
+              <div class="collection-number">
+                04
+              </div>
+
+              <div class="collection-card-body">
+
+                <p>
+                  Первоисточники
+                </p>
+
+                <h3>
+                  Тексты, с которых начинались эпохи
+                </h3>
+
+                <button
+                  type="button"
+                  data-search-query="classics"
+                >
+                  Открыть коллекцию
+                </button>
+
+              </div>
+
+            </article>
+
+          </div>
+
+        </section>
+
+
+        <!-- AUTHORS -->
+
+        <section
+          id="authors"
+          class="editorial-section authors-section"
+        >
+
+          <div class="section-heading">
+
+            <div>
+
+              <p class="eyebrow">
+                Личные библиотеки
+              </p>
+
+              <h2>
+                Авторы
+              </h2>
+
+            </div>
+
+          </div>
+
+          <div class="author-list">
+
+            <button
+              type="button"
+              data-search-query="William Shakespeare"
+            >
+
+              <span>
+                William Shakespeare
+              </span>
+
+              <span>
+                1564–1616
+              </span>
+
+            </button>
+
+
+            <button
+              type="button"
+              data-search-query="Dante Alighieri"
+            >
+
+              <span>
+                Dante Alighieri
+              </span>
+
+              <span>
+                1265–1321
+              </span>
+
+            </button>
+
+
+            <button
+              type="button"
+              data-search-query="Leo Tolstoy"
+            >
+
+              <span>
+                Leo Tolstoy
+              </span>
+
+              <span>
+                1828–1910
+              </span>
+
+            </button>
+
+
+            <button
+              type="button"
+              data-search-query="Friedrich Nietzsche"
+            >
+
+              <span>
+                Friedrich Nietzsche
+              </span>
+
+              <span>
+                1844–1900
+              </span>
+
+            </button>
+
+
+            <button
+              type="button"
+              data-search-query="Virginia Woolf"
+            >
+
+              <span>
+                Virginia Woolf
+              </span>
+
+              <span>
+                1882–1941
+              </span>
+
+            </button>
+
+          </div>
+
+        </section>
+
+
+        <!-- ACADEMIES -->
+
+        <section
+          id="academies"
+          class="editorial-section academy-section"
+        >
+
+          <div class="academy-panel">
+
+            <div class="academy-copy">
+
+              <p class="eyebrow">
+                AN.KI Academies
+              </p>
+
+              <h2>
+                Не просто читать.<br>
+                Понимать эпоху.
+              </h2>
+
+              <p>
+                Последовательные маршруты по философии,
+                литературе, истории и искусству:
+                первоисточники, контекст и интеллектуальные
+                связи между текстами.
+              </p>
+
+              <button
+                id="academySubscribeBtn"
+                class="primary-button"
+                type="button"
+              >
+                Посмотреть академии
+              </button>
+
+            </div>
+
+            <div
+              class="academy-index"
+              aria-hidden="true"
+            >
+
+              <span>I</span>
+              <span>II</span>
+              <span>III</span>
+              <span>IV</span>
+
+            </div>
+
+          </div>
+
+        </section>
+
+
+        <!-- FOOTER -->
+
+        <footer class="site-footer">
+
+          <div>
+            AN.KI Atlas
+          </div>
+
+          <p>
+            Интеллектуальная читалка без границ.
+          </p>
+
+        </footer>
+
+      </div>
+
+
+      <!-- ===================================================
+           SEARCH PANEL
+           =================================================== -->
+
+      <div
+        id="searchBackdrop"
+        class="search-backdrop hidden"
+      ></div>
+
+      <aside
+        id="searchPanel"
+        class="search-panel"
+        aria-label="Поиск книг"
+        aria-hidden="true"
+      >
+
+        <div class="search-panel-head">
+
+          <div>
+
+            <p class="eyebrow">
+              Библиотека
+            </p>
+
+            <h2>
+              Найти книгу
+            </h2>
+
+          </div>
+
+          <button
+            id="closeSearchBtn"
+            class="close-button"
+            type="button"
+            aria-label="Закрыть поиск"
+          >
+            ×
+          </button>
+
+        </div>
+
+        <div class="search-form">
+
+          <label for="searchInput">
+            Автор или название
+          </label>
 
           <input
             id="searchInput"
             class="search-input"
             type="search"
-            placeholder="Автор или название"
+            placeholder="Например: Данте или Божественная комедия"
             autocomplete="off"
-            aria-label="Поиск книг"
           >
+
+          <label for="languageSelect">
+            Язык
+          </label>
 
           <select
             id="languageSelect"
             class="language-select"
             aria-label="Язык книги и перевода"
           >
-            <option value="">Все языки</option>
-            <option value="ru">Русский</option>
-            <option value="en">English</option>
-            <option value="de">Deutsch</option>
-            <option value="fr">Français</option>
-            <option value="it">Italiano</option>
-            <option value="es">Español</option>
-            <option value="pt">Português</option>
-            <option value="zh">中文</option>
-            <option value="la">Latina</option>
+
+            <option value="">
+              Все языки
+            </option>
+
+            <option value="ru">
+              Русский
+            </option>
+
+            <option value="en">
+              English
+            </option>
+
+            <option value="de">
+              Deutsch
+            </option>
+
+            <option value="fr">
+              Français
+            </option>
+
+            <option value="it">
+              Italiano
+            </option>
+
+            <option value="es">
+              Español
+            </option>
+
+            <option value="pt">
+              Português
+            </option>
+
+            <option value="zh">
+              中文
+            </option>
+
+            <option value="la">
+              Latina
+            </option>
+
           </select>
 
-          <button id="searchBtn" type="button">
+          <button
+            id="searchBtn"
+            class="primary-button"
+            type="button"
+          >
             Найти
           </button>
 
         </div>
 
-        <div class="topbar-right" aria-label="Темы оформления">
+        <div
+          id="results"
+          class="results"
+          aria-live="polite"
+        ></div>
 
-          <button
-            id="themeDefaultBtn"
-            class="theme-control"
-            type="button"
-            aria-label="Светлая тема"
-            title="Светлая тема"
-          >
-            Свет
-          </button>
-
-          <button
-            id="themeDarkBtn"
-            class="theme-control"
-            type="button"
-            aria-label="Тёмная тема"
-            title="Тёмная тема"
-          >
-            Тьма
-          </button>
-
-          <button
-            id="themePurpleBtn"
-            class="theme-control"
-            type="button"
-            aria-label="Фиолетовая тема"
-            title="Фиолетовая тема"
-          >
-            Фиолет
-          </button>
-
-          <button
-            id="themeRedBtn"
-            class="theme-control"
-            type="button"
-            aria-label="Бордовая тема"
-            title="Бордовая тема"
-          >
-            Бордо
-          </button>
-
-        </div>
-
-      </header>
-
-      <div class="home-layout">
-
-        <aside class="sidebar">
-
-          <h1 class="sidebar-title">
-            Библиотека
-          </h1>
-
-          <p class="sidebar-note">
-            Найди книгу и открой её внутри AN.KI.
-          </p>
-
-          <div
-            id="results"
-            class="results"
-            aria-live="polite"
-          ></div>
-
-        </aside>
-
-        <section class="home-preview">
-
-          <article class="preview-card">
-
-            <div class="preview-brand" aria-hidden="true">
-              <div class="preview-title">AN.KI</div>
-
-              <div class="preview-key">
-                <svg
-                  viewBox="0 0 160 44"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <line
-                    x1="2"
-                    y1="22"
-                    x2="57"
-                    y2="22"
-                    vector-effect="non-scaling-stroke"
-                  />
-
-                  <circle
-                    cx="72"
-                    cy="22"
-                    r="11"
-                    vector-effect="non-scaling-stroke"
-                  />
-
-                  <circle
-                    cx="72"
-                    cy="22"
-                    r="4"
-                    vector-effect="non-scaling-stroke"
-                  />
-
-                  <line
-                    x1="83"
-                    y1="22"
-                    x2="139"
-                    y2="22"
-                    vector-effect="non-scaling-stroke"
-                  />
-
-                  <line
-                    x1="119"
-                    y1="22"
-                    x2="119"
-                    y2="31"
-                    vector-effect="non-scaling-stroke"
-                  />
-
-                  <line
-                    x1="129"
-                    y1="22"
-                    x2="129"
-                    y2="28"
-                    vector-effect="non-scaling-stroke"
-                  />
-
-                  <line
-                    x1="139"
-                    y1="22"
-                    x2="153"
-                    y2="14"
-                    vector-effect="non-scaling-stroke"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            <p class="preview-text">
-              Читай тексты на разных языках, выделяй непонятные
-              фрагменты, получай перевод и объяснение, не покидая книгу.
-            </p>
-
-            <p class="preview-text">
-              В режиме чтения нажимай на левую или правую часть экрана,
-              чтобы переходить между фрагментами. Нажатие по центру
-              скрывает или возвращает элементы управления.
-            </p>
-
-          </article>
-
-        </section>
-
-      </div>
+      </aside>
 
     </section>
 
 
-    <!-- READER -->
+    <!-- =====================================================
+         READER
+         ===================================================== -->
 
     <section
       id="readerView"
@@ -400,7 +838,9 @@
     </section>
 
 
-    <!-- SELECTION TOOLBAR -->
+    <!-- =====================================================
+         SELECTION TOOLBAR
+         ===================================================== -->
 
     <div
       id="selectionToolbar"
@@ -433,7 +873,9 @@
     </div>
 
 
-    <!-- ACTION SHEET -->
+    <!-- =====================================================
+         ACTION SHEET
+         ===================================================== -->
 
     <div
       id="sheetBackdrop"
@@ -448,7 +890,10 @@
       aria-labelledby="actionSheetTitle"
     >
 
-      <div class="sheet-handle" aria-hidden="true"></div>
+      <div
+        class="sheet-handle"
+        aria-hidden="true"
+      ></div>
 
       <div class="sheet-head">
 
