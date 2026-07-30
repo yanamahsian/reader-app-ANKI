@@ -1,1655 +1,3631 @@
-'use strict';
+```
+/* ========================================================================
+   AN.KI Reader Engine v2
+   Part 1
+   Core
+   ======================================================================== */
 
-/* =========================================================
-   AN.KI
-   Единая библиотека и интеллектуальная читалка
-   ========================================================= */
+"use strict";
 
+/* ========================================================================
+   CONFIG
+   ======================================================================== */
 
-/* =========================================================
-   SUPABASE EDGE FUNCTIONS
-   ========================================================= */
+const CONFIG = {
 
-const AI_ENDPOINT =
-  'https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-ai';
+    VERSION: "2.0",
 
-const LIBRARY_ENDPOINT =
-  'https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-library';
+    HERO_IMAGES: 45,
 
+    HERO_DELAY: 7000,
 
-/* =========================================================
-   LOCAL STORAGE
-   Старые технические ключи omnia_* сохраняются намеренно,
-   чтобы не потерять пользовательские настройки.
-   ========================================================= */
+    DEFAULT_THEME: "dark",
 
-const STORAGE_KEYS = {
-  theme: 'omnia_theme',
-  fontSize: 'omnia_font_size',
-  currentBook: 'omnia_current_book',
-  readingPosition: 'omnia_reading_position',
-  savedFragments: 'omnia_saved_fragments'
+    DEFAULT_FONT_SIZE: 22,
+
+    MIN_FONT_SIZE: 16,
+
+    MAX_FONT_SIZE: 34,
+
+    PAGE_TARGET_SIZE: 6500,
+
+    STORAGE_PREFIX: "anki_",
+
+    API: {
+
+        LIBRARY:
+            "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-library",
+
+        AI:
+            "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-ai"
+
+    }
+
 };
 
 
-/* =========================================================
+
+/* ========================================================================
+   STORAGE KEYS
+   ======================================================================== */
+
+const STORAGE = {
+
+    THEME:
+        CONFIG.STORAGE_PREFIX + "theme",
+
+    FONT:
+        CONFIG.STORAGE_PREFIX + "font",
+
+    BOOK:
+        CONFIG.STORAGE_PREFIX + "book",
+
+    POSITION:
+        CONFIG.STORAGE_PREFIX + "position",
+
+    FRAGMENTS:
+        CONFIG.STORAGE_PREFIX + "fragments"
+
+};
+
+
+
+/* ========================================================================
+   APPLICATION STATE
+   ======================================================================== */
+
+const APP = {
+
+    initialized: false,
+
+    currentBook: null,
+
+    currentPage: 0,
+
+    pages: [],
+
+    chapters: [],
+
+    plainText: "",
+
+    language: "ru",
+
+    theme: CONFIG.DEFAULT_THEME,
+
+    fontSize: CONFIG.DEFAULT_FONT_SIZE,
+
+    heroIndex: 0,
+
+    heroTimer: null,
+
+    searchController: null,
+
+    aiController: null,
+
+    selection: "",
+
+    touchStartX: 0,
+
+    touchStartY: 0,
+
+    touchEndX: 0,
+
+    touchEndY: 0,
+
+    isSelecting: false,
+
+    overlayVisible: true,
+
+    library: [],
+
+    cache: {
+
+        books: {},
+
+        ai: {},
+
+        translations: {}
+
+    }
+
+};
+
+
+
+/* ========================================================================
    DOM
-   ========================================================= */
+   ======================================================================== */
 
-const homeView = document.getElementById('homeView');
-const readerView = document.getElementById('readerView');
-
-const searchInput = document.getElementById('searchInput');
-const languageSelect = document.getElementById('languageSelect');
-const searchBtn = document.getElementById('searchBtn');
-const results = document.getElementById('results');
-
-const themeDefaultBtn = document.getElementById('themeDefaultBtn');
-const themeDarkBtn = document.getElementById('themeDarkBtn');
-const themePurpleBtn = document.getElementById('themePurpleBtn');
-const themeRedBtn = document.getElementById('themeRedBtn');
-
-const readerOverlay = document.getElementById('readerOverlay');
-const backToLibraryBtn = document.getElementById('backToLibraryBtn');
-const fontMinusBtn = document.getElementById('fontMinusBtn');
-const fontPlusBtn = document.getElementById('fontPlusBtn');
-const readerThemeBtn = document.getElementById('readerThemeBtn');
-
-const chapterLine = document.getElementById('chapterLine');
-const viewer = document.getElementById('viewer');
-const remainingLine = document.getElementById('remainingLine');
-
-const leftTapZone = document.getElementById('leftTapZone');
-const centerTapZone = document.getElementById('centerTapZone');
-const rightTapZone = document.getElementById('rightTapZone');
-
-const selectionToolbar = document.getElementById('selectionToolbar');
-const toolbarTranslateBtn = document.getElementById('toolbarTranslateBtn');
-const toolbarExplainBtn = document.getElementById('toolbarExplainBtn');
-const toolbarSaveBtn = document.getElementById('toolbarSaveBtn');
-
-const sheetBackdrop = document.getElementById('sheetBackdrop');
-const actionSheet = document.getElementById('actionSheet');
-const closeActionSheetBtn = document.getElementById('closeActionSheetBtn');
-
-const selectedTextBox = document.getElementById('selectedTextBox');
-const translateBtn = document.getElementById('translateBtn');
-const explainBtn = document.getElementById('explainBtn');
-const saveBtn = document.getElementById('saveBtn');
-const actionResult = document.getElementById('actionResult');
+const DOM = {};
 
 
-/* =========================================================
-   STATE
-   ========================================================= */
 
-const THEMES = ['default', 'dark', 'purple', 'red'];
+/* ========================================================================
+   HERO IMAGES
+   ======================================================================== */
 
-const MIN_FONT_SIZE = 16;
-const MAX_FONT_SIZE = 34;
-const FONT_STEP = 2;
+const HERO_IMAGES = [];
 
-const DEFAULT_FONT_SIZE = 22;
-const DEFAULT_TARGET_LANGUAGE = 'ru';
+for (let i = 1; i <= CONFIG.HERO_IMAGES; i++) {
 
-let currentTheme = 'dark';
-let currentFontSize = DEFAULT_FONT_SIZE;
+    HERO_IMAGES.push(
 
-let currentBook = null;
-let currentBookText = '';
-let currentSections = [];
-let currentSectionIndex = 0;
+        `Hero/hero_${i}.png`
 
-let selectedText = '';
-let touchStartX = 0;
-let touchStartY = 0;
-let overlayVisible = true;
+    );
 
-let searchRequestController = null;
-let bookRequestController = null;
-
-
-/* =========================================================
-   INITIALIZATION
-   ========================================================= */
-
-document.addEventListener('DOMContentLoaded', initializeApp);
-
-function initializeApp() {
-  restoreSettings();
-  bindEvents();
-  applyTheme(currentTheme);
-  applyFontSize(currentFontSize);
-  showInitialLibraryMessage();
 }
+
+
+
+/* ========================================================================
+   START
+   ======================================================================== */
+
+document.addEventListener(
+
+    "DOMContentLoaded",
+
+    initializeApplication
+
+);
+
+
+
+/* ========================================================================
+   INITIALIZATION
+   ======================================================================== */
+
+function initializeApplication() {
+
+    cacheDom();
+
+    restoreSettings();
+
+    bindEvents();
+
+    preloadHeroImages();
+
+    startHeroRotation();
+
+    APP.initialized = true;
+
+}
+
+
+
+/* ========================================================================
+   DOM CACHE
+   ======================================================================== */
+
+function cacheDom() {
+
+    DOM.body =
+        document.body;
+
+    DOM.home =
+        document.getElementById("homeView");
+
+    DOM.reader =
+        document.getElementById("readerView");
+
+    DOM.search =
+        document.getElementById("searchInput");
+
+    DOM.language =
+        document.getElementById("languageSelect");
+
+    DOM.searchButton =
+        document.getElementById("searchBtn");
+
+    DOM.results =
+        document.getElementById("results");
+
+    DOM.preview =
+        document.querySelector(".preview-card");
+
+    DOM.viewer =
+        document.getElementById("viewer");
+
+    DOM.overlay =
+        document.getElementById("readerOverlay");
+
+    DOM.chapter =
+        document.getElementById("chapterLine");
+
+    DOM.remaining =
+        document.getElementById("remainingLine");
+
+    DOM.toolbar =
+        document.getElementById("selectionToolbar");
+
+    DOM.sheet =
+        document.getElementById("actionSheet");
+
+    DOM.backdrop =
+        document.getElementById("sheetBackdrop");
+
+}
+
+
+
+/* ========================================================================
+   SETTINGS
+   ======================================================================== */
 
 function restoreSettings() {
-  const storedTheme = localStorage.getItem(STORAGE_KEYS.theme);
 
-  if (THEMES.includes(storedTheme)) {
-    currentTheme = storedTheme;
-  }
+    APP.theme =
 
-  const storedFontSize = Number(
-    localStorage.getItem(STORAGE_KEYS.fontSize)
-  );
+        localStorage.getItem(
 
-  if (
-    Number.isFinite(storedFontSize) &&
-    storedFontSize >= MIN_FONT_SIZE &&
-    storedFontSize <= MAX_FONT_SIZE
-  ) {
-    currentFontSize = storedFontSize;
-  }
+            STORAGE.THEME
+
+        ) ||
+
+        CONFIG.DEFAULT_THEME;
+
+    APP.fontSize =
+
+        Number(
+
+            localStorage.getItem(
+
+                STORAGE.FONT
+
+            )
+
+        ) ||
+
+        CONFIG.DEFAULT_FONT_SIZE;
+
+    applyTheme();
+
+    applyFontSize();
+
 }
+
+
+
+function applyTheme() {
+
+    DOM.body.classList.remove(
+
+        "theme-dark",
+
+        "theme-light",
+
+        "theme-sepia",
+
+        "theme-black"
+
+    );
+
+    DOM.body.classList.add(
+
+        "theme-" + APP.theme
+
+    );
+
+    localStorage.setItem(
+
+        STORAGE.THEME,
+
+        APP.theme
+
+    );
+
+}
+
+
+
+function applyFontSize() {
+
+    if (!DOM.viewer) return;
+
+    DOM.viewer.style.fontSize =
+
+        APP.fontSize + "px";
+
+    localStorage.setItem(
+
+        STORAGE.FONT,
+
+        APP.fontSize
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   HERO
+   ======================================================================== */
+
+function preloadHeroImages() {
+
+    HERO_IMAGES.forEach(path => {
+
+        const img = new Image();
+
+        img.src = path;
+
+    });
+
+}
+
+
+
+function startHeroRotation() {
+
+    if (!DOM.preview) return;
+
+    APP.heroIndex =
+
+        Math.floor(
+
+            Math.random() *
+
+            HERO_IMAGES.length
+
+        );
+
+    renderHero();
+
+    APP.heroTimer =
+
+        setInterval(
+
+            nextHero,
+
+            CONFIG.HERO_DELAY
+
+        );
+
+}
+
+
+
+function nextHero() {
+
+    let next = APP.heroIndex;
+
+    while (next === APP.heroIndex) {
+
+        next =
+
+            Math.floor(
+
+                Math.random() *
+
+                HERO_IMAGES.length
+
+            );
+
+    }
+
+    APP.heroIndex = next;
+
+    renderHero();
+
+}
+
+
+
+function renderHero() {
+
+    DOM.preview.style.backgroundImage =
+
+        `linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.65)),url("${HERO_IMAGES[APP.heroIndex]}")`;
+
+}
+
+
+
+/* ========================================================================
+   EVENTS
+   ======================================================================== */
 
 function bindEvents() {
-  searchBtn.addEventListener('click', searchBooks);
 
-  searchInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter') {
-      searchBooks();
-    }
-  });
+    if (DOM.searchButton) {
 
-  themeDefaultBtn.addEventListener('click', () => {
-    applyTheme('default');
-  });
+        DOM.searchButton.addEventListener(
 
-  themeDarkBtn.addEventListener('click', () => {
-    applyTheme('dark');
-  });
+            "click",
 
-  themePurpleBtn.addEventListener('click', () => {
-    applyTheme('purple');
-  });
+            searchBooks
 
-  themeRedBtn.addEventListener('click', () => {
-    applyTheme('red');
-  });
+        );
 
-  backToLibraryBtn.addEventListener('click', closeReader);
-
-  fontMinusBtn.addEventListener('click', event => {
-    event.stopPropagation();
-    changeFontSize(-FONT_STEP);
-  });
-
-  fontPlusBtn.addEventListener('click', event => {
-    event.stopPropagation();
-    changeFontSize(FONT_STEP);
-  });
-
-  readerThemeBtn.addEventListener('click', event => {
-    event.stopPropagation();
-    cycleTheme();
-  });
-
-  leftTapZone.addEventListener('click', event => {
-    if (shouldIgnoreReaderTap(event)) {
-      return;
     }
 
-    showPreviousSection();
-  });
+    if (DOM.search) {
 
-  centerTapZone.addEventListener('click', event => {
-    if (shouldIgnoreReaderTap(event)) {
-      return;
+        DOM.search.addEventListener(
+
+            "keydown",
+
+            event => {
+
+                if (event.key === "Enter") {
+
+                    searchBooks();
+
+                }
+
+            }
+
+        );
+
     }
 
-    toggleReaderOverlay();
-  });
-
-  rightTapZone.addEventListener('click', event => {
-    if (shouldIgnoreReaderTap(event)) {
-      return;
-    }
-
-    showNextSection();
-  });
-
-  readerView.addEventListener('touchstart', handleTouchStart, {
-    passive: true
-  });
-
-  readerView.addEventListener('touchend', handleTouchEnd, {
-    passive: true
-  });
-
-  document.addEventListener('selectionchange', handleSelectionChange);
-
-  viewer.addEventListener('mouseup', () => {
-    window.setTimeout(showSelectionToolbar, 20);
-  });
-
-  viewer.addEventListener('touchend', () => {
-    window.setTimeout(showSelectionToolbar, 120);
-  });
-
-  toolbarTranslateBtn.addEventListener('click', () => {
-    openActionSheet('translate');
-  });
-
-  toolbarExplainBtn.addEventListener('click', () => {
-    openActionSheet('explain');
-  });
-
-  toolbarSaveBtn.addEventListener('click', () => {
-    openActionSheet('save');
-  });
-
-  translateBtn.addEventListener('click', translateSelection);
-  explainBtn.addEventListener('click', explainSelection);
-  saveBtn.addEventListener('click', saveSelection);
-
-  closeActionSheetBtn.addEventListener('click', closeActionSheet);
-  sheetBackdrop.addEventListener('click', closeActionSheet);
-
-  window.addEventListener('resize', hideSelectionToolbar);
-
-  document.addEventListener('keydown', handleGlobalKeydown);
 }
 
 
-/* =========================================================
-   THEME
-   ========================================================= */
 
-function applyTheme(theme) {
-  const safeTheme = THEMES.includes(theme) ? theme : 'dark';
-
-  document.body.classList.remove(
-    'theme-default',
-    'theme-dark',
-    'theme-purple',
-    'theme-red'
-  );
-
-  document.body.classList.add(`theme-${safeTheme}`);
-
-  currentTheme = safeTheme;
-
-  localStorage.setItem(STORAGE_KEYS.theme, safeTheme);
-
-  updateThemeColor(safeTheme);
-  updateThemeButtons();
-}
-
-function cycleTheme() {
-  const currentIndex = THEMES.indexOf(currentTheme);
-  const nextIndex = (currentIndex + 1) % THEMES.length;
-
-  applyTheme(THEMES[nextIndex]);
-}
-
-function updateThemeButtons() {
-  const buttonMap = {
-    default: themeDefaultBtn,
-    dark: themeDarkBtn,
-    purple: themePurpleBtn,
-    red: themeRedBtn
-  };
-
-  Object.entries(buttonMap).forEach(([theme, button]) => {
-    if (!button) {
-      return;
-    }
-
-    button.setAttribute(
-      'aria-pressed',
-      theme === currentTheme ? 'true' : 'false'
-    );
-  });
-}
-
-function updateThemeColor(theme) {
-  const themeColors = {
-    default: '#f4efe6',
-    dark: '#0c0d10',
-    purple: '#22172b',
-    red: '#2a1014'
-  };
-
-  const themeColorMeta = document.querySelector(
-    'meta[name="theme-color"]'
-  );
-
-  if (themeColorMeta) {
-    themeColorMeta.setAttribute(
-      'content',
-      themeColors[theme] || themeColors.dark
-    );
-  }
-}
-
-
-/* =========================================================
-   SEARCH
-   ========================================================= */
+/* ========================================================================
+   PLACEHOLDERS
+   ======================================================================== */
 
 async function searchBooks() {
-  const query = searchInput.value.trim();
-  const language = languageSelect.value.trim();
 
-  if (!query) {
-    showResultsMessage(
-      'Введите автора или название книги.'
-    );
+    // Part 2
 
-    searchInput.focus();
-    return;
-  }
+}
 
-  if (searchRequestController) {
-    searchRequestController.abort();
-  }
+function openBook(book) {
 
-  searchRequestController = new AbortController();
+    // Part 3
 
-  setSearchLoading(true);
-  showResultsMessage('Ищу книги…');
+}
 
-  try {
-    const response = await fetch(LIBRARY_ENDPOINT, {
-      method: 'POST',
+function renderPage(index) {
 
-      headers: {
-        'Content-Type': 'application/json'
-      },
+    // Part 4
 
-      body: JSON.stringify({
-        action: 'search',
-        query,
-        language
-      }),
+}
 
-      signal: searchRequestController.signal
-    });
+function translateSelection() {
 
-    const payload = await parseJsonResponse(response);
+    // Part 5
 
-    if (!response.ok) {
-      throw new Error(
-        payload.error ||
-        payload.message ||
-        'Не удалось выполнить поиск.'
-      );
+}
+
+function explainSelection() {
+
+    // Part 5
+
+}
+
+function saveFragment() {
+
+    // Part 6
+
+}
+
+/* ========================================================================
+   PART 2
+   Library Search Engine
+   ======================================================================== */
+
+
+
+/* ========================================================================
+   SEARCH
+   ======================================================================== */
+
+async function searchBooks() {
+
+    const query = DOM.search.value.trim();
+
+    if (!query.length) {
+
+        clearResults();
+
+        return;
+
     }
 
-    const books = normalizeBookList(payload);
+    if (APP.searchController) {
 
-    renderSearchResults(books);
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      return;
+        APP.searchController.abort();
+
     }
 
-    console.error('Search error:', error);
+    APP.searchController = new AbortController();
 
-    showResultsMessage(
-      error.message ||
-      'Поиск временно недоступен. Попробуйте ещё раз.'
-    );
-  } finally {
-    setSearchLoading(false);
-  }
+    showSearchLoading();
+
+    try {
+
+        const response = await fetch(
+
+            CONFIG.API.LIBRARY,
+
+            {
+
+                method: "POST",
+
+                headers: {
+
+                    "Content-Type": "application/json"
+
+                },
+
+                body: JSON.stringify({
+
+                    query,
+
+                    language:
+
+                        DOM.language?.value ||
+
+                        APP.language
+
+                }),
+
+                signal:
+
+                    APP.searchController.signal
+
+            }
+
+        );
+
+        if (!response.ok) {
+
+            throw new Error("Library error");
+
+        }
+
+        const books =
+
+            await response.json();
+
+        APP.library = books;
+
+        renderSearchResults(books);
+
+    }
+
+    catch (error) {
+
+        if (error.name !== "AbortError") {
+
+            console.error(error);
+
+            renderSearchError(
+
+                "Ошибка поиска."
+
+            );
+
+        }
+
+    }
+
+    finally {
+
+        hideSearchLoading();
+
+    }
+
 }
 
-function normalizeBookList(payload) {
-  const sourceList = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload.books)
-      ? payload.books
-      : Array.isArray(payload.results)
-        ? payload.results
-        : [];
 
-  return sourceList
-    .map((book, index) => normalizeBook(book, index))
-    .filter(book => book.id && book.title);
+
+/* ========================================================================
+   RESULTS
+   ======================================================================== */
+
+function clearResults() {
+
+    DOM.results.innerHTML = "";
+
 }
 
-function normalizeBook(book, index) {
-  const authors = normalizeAuthors(
-    book.authors ||
-    book.author ||
-    book.creator ||
-    book.creators
-  );
 
-  const languages = normalizeLanguages(
-    book.languages ||
-    book.language
-  );
 
-  return {
-    id: String(
-      book.id ||
-      book.bookId ||
-      book.key ||
-      book.identifier ||
-      `book-${index}`
-    ),
+function showSearchLoading() {
 
-    title: String(
-      book.title ||
-      book.name ||
-      'Без названия'
-    ).trim(),
+    DOM.searchButton.disabled = true;
 
-    authors,
-    languages,
+    DOM.searchButton.textContent =
 
-    description: String(
-      book.description ||
-      book.summary ||
-      ''
-    ).trim()
-  };
+        "Поиск...";
+
 }
 
-function normalizeAuthors(value) {
-  if (!value) {
-    return [];
-  }
 
-  if (typeof value === 'string') {
-    return value
-      .split(/\s*;\s*|\s*\|\s*/)
-      .map(item => item.trim())
-      .filter(Boolean);
-  }
 
-  if (!Array.isArray(value)) {
-    return [];
-  }
+function hideSearchLoading() {
 
-  return value
-    .map(author => {
-      if (typeof author === 'string') {
-        return author.trim();
-      }
+    DOM.searchButton.disabled = false;
 
-      if (author && typeof author === 'object') {
-        return String(
-          author.name ||
-          author.fullName ||
-          author.displayName ||
-          ''
-        ).trim();
-      }
+    DOM.searchButton.textContent =
 
-      return '';
-    })
-    .filter(Boolean);
+        "Поиск";
+
 }
 
-function normalizeLanguages(value) {
-  if (!value) {
-    return [];
-  }
 
-  if (typeof value === 'string') {
-    return value
-      .split(/[\s,;|]+/)
-      .map(item => item.trim())
-      .filter(Boolean);
-  }
 
-  if (!Array.isArray(value)) {
-    return [];
-  }
+function renderSearchError(message) {
 
-  return value
-    .map(item => String(item).trim())
-    .filter(Boolean);
+    DOM.results.innerHTML =
+
+        `
+
+        <div class="search-error">
+
+            ${message}
+
+        </div>
+
+    `;
+
 }
+
+
 
 function renderSearchResults(books) {
-  results.innerHTML = '';
 
-  if (!books.length) {
-    showResultsMessage(
-      'В AN.KI не найдено книг, которые можно открыть для чтения.'
+    clearResults();
+
+    if (!Array.isArray(books)) {
+
+        renderSearchError(
+
+            "Некорректный ответ."
+
+        );
+
+        return;
+
+    }
+
+    if (books.length === 0) {
+
+        renderSearchError(
+
+            "Ничего не найдено."
+
+        );
+
+        return;
+
+    }
+
+    const fragment =
+
+        document.createDocumentFragment();
+
+    books.forEach(book => {
+
+        fragment.appendChild(
+
+            createBookCard(book)
+
+        );
+
+    });
+
+    DOM.results.appendChild(
+
+        fragment
+
     );
 
-    return;
-  }
-
-  books.forEach(book => {
-    results.appendChild(createBookCard(book));
-  });
 }
+
+
+
+/* ========================================================================
+   BOOK CARD
+   ======================================================================== */
 
 function createBookCard(book) {
-  const card = document.createElement('article');
-  card.className = 'book-card';
 
-  const title = document.createElement('div');
-  title.className = 'book-title';
-  title.textContent = book.title;
+    const card =
 
-  const meta = document.createElement('div');
-  meta.className = 'book-meta';
+        document.createElement("article");
 
-  const authorText = book.authors.length
-    ? book.authors.join(', ')
-    : 'Автор не указан';
+    card.className =
 
-  const languageText = book.languages.length
-    ? book.languages
-      .map(getLanguageName)
-      .join(', ')
-    : 'Язык не указан';
+        "book-card";
 
-  meta.textContent = `${authorText} · ${languageText}`;
+    const cover =
 
-  const actions = document.createElement('div');
-  actions.className = 'book-actions';
+        book.cover ||
 
-  const readButton = document.createElement('button');
-  readButton.type = 'button';
-  readButton.textContent = 'Читать';
+        "images/no-cover.webp";
 
-  readButton.addEventListener('click', () => {
-    openBook(book, readButton);
-  });
+    const language =
 
-  actions.appendChild(readButton);
+        book.language ||
 
-  card.appendChild(title);
-  card.appendChild(meta);
+        "";
 
-  if (book.description) {
-    const description = document.createElement('div');
-    description.className = 'book-meta';
-    description.textContent = truncateText(book.description, 220);
+    const author =
 
-    card.appendChild(description);
-  }
+        book.author ||
 
-  card.appendChild(actions);
+        "";
 
-  return card;
-}
+    const year =
 
-function showInitialLibraryMessage() {
-  showResultsMessage(
-    'Введите автора или название книги.'
-  );
-}
+        book.year ||
 
-function showResultsMessage(message) {
-  results.innerHTML = '';
+        "";
 
-  const element = document.createElement('div');
-  element.className = 'book-meta';
-  element.textContent = message;
+    card.innerHTML =
 
-  results.appendChild(element);
-}
+        `
 
-function setSearchLoading(isLoading) {
-  searchBtn.disabled = isLoading;
-  searchInput.disabled = isLoading;
-  languageSelect.disabled = isLoading;
+        <div class="book-cover">
 
-  searchBtn.textContent = isLoading
-    ? 'Поиск…'
-    : 'Найти';
-}
+            <img
 
+                loading="lazy"
 
-/* =========================================================
-   OPEN BOOK
-   ========================================================= */
+                src="${cover}"
 
-async function openBook(book, button) {
-  if (!book || !book.id) {
-    return;
-  }
+                alt="">
 
-  if (bookRequestController) {
-    bookRequestController.abort();
-  }
+        </div>
 
-  bookRequestController = new AbortController();
+        <div class="book-content">
 
-  const originalButtonText = button.textContent;
+            <h3>
 
-  button.disabled = true;
-  button.textContent = 'Открываю…';
+                ${book.title}
 
-  try {
-    const response = await fetch(LIBRARY_ENDPOINT, {
-      method: 'POST',
+            </h3>
 
-      headers: {
-        'Content-Type': 'application/json'
-      },
+            <div class="book-author">
 
-      body: JSON.stringify({
-        action: 'read',
-        id: book.id
-      }),
+                ${author}
 
-      signal: bookRequestController.signal
-    });
+            </div>
 
-    const payload = await parseJsonResponse(response);
+            <div class="book-meta">
 
-    if (!response.ok) {
-      throw new Error(
-        payload.error ||
-        payload.message ||
-        'Не удалось открыть книгу.'
-      );
-    }
+                <span>${language}</span>
 
-    const loadedBook = normalizeLoadedBook(payload, book);
+                <span>${year}</span>
 
-    if (!loadedBook.text) {
-      throw new Error(
-        'Для этой книги не удалось получить текст.'
-      );
-    }
+            </div>
 
-    initializeReader(loadedBook);
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      return;
-    }
+        </div>
 
-    console.error('Book loading error:', error);
+    `;
 
-    button.textContent = 'Ошибка';
+    card.addEventListener(
 
-    window.setTimeout(() => {
-      button.textContent = originalButtonText;
-      button.disabled = false;
-    }, 1600);
+        "click",
 
-    showResultsMessage(
-      error.message ||
-      'Книга временно недоступна.'
+        () => {
+
+            openBook(book);
+
+        }
+
     );
-  } finally {
-    if (button.textContent === 'Открываю…') {
-      button.textContent = originalButtonText;
-      button.disabled = false;
+
+    return card;
+
+}
+
+
+
+/* ========================================================================
+   BOOK
+   ======================================================================== */
+
+async function openBook(book) {
+
+    APP.currentBook = book;
+
+    localStorage.setItem(
+
+        STORAGE.BOOK,
+
+        JSON.stringify(book)
+
+    );
+
+    try {
+
+        const response =
+
+            await fetch(book.url);
+
+        if (!response.ok) {
+
+            throw new Error(
+
+                "Book loading failed"
+
+            );
+
+        }
+
+        const text =
+
+            await response.text();
+
+        prepareBook(text);
+
     }
-  }
+
+    catch (error) {
+
+        console.error(error);
+
+        alert(
+
+            "Не удалось открыть книгу."
+
+        );
+
+    }
+
 }
 
-function normalizeLoadedBook(payload, fallbackBook) {
-  const source = payload.book || payload.result || payload;
 
-  const rawText =
-    source.text ||
-    source.content ||
-    source.plainText ||
-    source.body ||
-    '';
 
-  return {
-    id: String(
-      source.id ||
-      fallbackBook.id
-    ),
+/* ========================================================================
+   BOOK PREPARATION
+   ======================================================================== */
 
-    title: String(
-      source.title ||
-      fallbackBook.title ||
-      'Без названия'
-    ).trim(),
+function prepareBook(text) {
 
-    authors: normalizeAuthors(
-      source.authors ||
-      source.author ||
-      fallbackBook.authors
-    ),
+    APP.plainText =
 
-    languages: normalizeLanguages(
-      source.languages ||
-      source.language ||
-      fallbackBook.languages
-    ),
+        normalizeBook(text);
 
-    text: cleanBookText(String(rawText))
-  };
+    APP.pages =
+
+        paginateText(
+
+            APP.plainText
+
+        );
+
+    APP.currentPage =
+
+        restoreBookPosition();
+
+    showReader();
+
+    renderPage(
+
+        APP.currentPage
+
+    );
+
 }
 
-function initializeReader(book) {
-  currentBook = {
-    id: book.id,
-    title: book.title,
-    authors: book.authors,
-    languages: book.languages
-  };
 
-  currentBookText = book.text;
-  currentSections = splitTextIntoSections(currentBookText);
 
-  if (!currentSections.length) {
-    currentSections = [currentBookText];
-  }
+/* ========================================================================
+   NORMALIZER
+   ======================================================================== */
 
-  currentSectionIndex = restoreReadingPosition(book.id);
+function normalizeBook(text) {
 
-  if (
-    currentSectionIndex < 0 ||
-    currentSectionIndex >= currentSections.length
-  ) {
-    currentSectionIndex = 0;
-  }
+    return text
 
-  localStorage.setItem(
-    STORAGE_KEYS.currentBook,
-    JSON.stringify(currentBook)
-  );
+        .replace(/\r/g, "")
 
-  showReader();
-  renderCurrentSection();
+        .replace(/\t/g, " ")
 
-  window.scrollTo({
-    top: 0,
-    behavior: 'auto'
-  });
+        .replace(/\u00A0/g, " ")
+
+        .replace(/\n{3,}/g, "\n\n")
+
+        .trim();
+
 }
+
+
+
+/* ========================================================================
+   READER
+   ======================================================================== */
 
 function showReader() {
-  homeView.classList.add('hidden');
-  readerView.classList.remove('hidden');
 
-  overlayVisible = true;
-  readerOverlay.classList.add('visible');
+    DOM.home.hidden = true;
 
-  document.body.style.overflow = 'hidden';
-}
+    DOM.reader.hidden = false;
 
-function closeReader() {
-  saveReadingPosition();
-
-  hideSelectionToolbar();
-  closeActionSheet();
-
-  readerView.classList.add('hidden');
-  homeView.classList.remove('hidden');
-
-  document.body.style.overflow = '';
 }
 
 
-/* =========================================================
-   TEXT PREPARATION
-   ========================================================= */
 
-function cleanBookText(text) {
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{4,}/g, '\n\n\n')
-    .trim();
-}
+/* ========================================================================
+   POSITION
+   ======================================================================== */
 
-function splitTextIntoSections(text) {
-  const normalizedText = cleanBookText(text);
+function restoreBookPosition() {
 
-  if (!normalizedText) {
-    return [];
-  }
+    const saved =
 
-  const chapterPattern =
-    /(?=^(?:chapter|book|part|volume|глава|часть|книга|том)\s+(?:[ivxlcdm\d]+|[а-яёa-z]+)[^\n]*$)/gimu;
+        Number(
 
-  const chapterParts = normalizedText
-    .split(chapterPattern)
-    .map(part => part.trim())
-    .filter(Boolean);
+            localStorage.getItem(
 
-  const sourceParts = chapterParts.length > 1
-    ? chapterParts
-    : [normalizedText];
+                STORAGE.POSITION
 
-  const sections = [];
+            )
 
-  sourceParts.forEach(part => {
-    const chunks = splitLongSection(part, 6500);
-
-    chunks.forEach(chunk => {
-      if (chunk.trim()) {
-        sections.push(chunk.trim());
-      }
-    });
-  });
-
-  return sections;
-}
-
-function splitLongSection(text, preferredLength) {
-  if (text.length <= preferredLength) {
-    return [text];
-  }
-
-  const paragraphs = text
-    .split(/\n{2,}/)
-    .map(paragraph => paragraph.trim())
-    .filter(Boolean);
-
-  const chunks = [];
-  let currentChunk = '';
-
-  paragraphs.forEach(paragraph => {
-    const nextChunk = currentChunk
-      ? `${currentChunk}\n\n${paragraph}`
-      : paragraph;
+        );
 
     if (
-      nextChunk.length <= preferredLength ||
-      !currentChunk
+
+        Number.isNaN(saved)
+
     ) {
-      currentChunk = nextChunk;
-      return;
+
+        return 0;
+
     }
 
-    chunks.push(currentChunk);
-    currentChunk = paragraph;
-  });
+    return Math.min(
 
-  if (currentChunk) {
-    chunks.push(currentChunk);
-  }
+        saved,
 
-  return chunks.flatMap(chunk => {
-    if (chunk.length <= preferredLength * 1.5) {
-      return [chunk];
-    }
+        APP.pages.length - 1
 
-    return splitOversizedParagraph(chunk, preferredLength);
-  });
-}
-
-function splitOversizedParagraph(text, preferredLength) {
-  const sentences = text.match(/[^.!?…]+[.!?…]+|[^.!?…]+$/g);
-
-  if (!sentences) {
-    return [
-      text.slice(0, preferredLength),
-      ...splitOversizedParagraph(
-        text.slice(preferredLength),
-        preferredLength
-      )
-    ].filter(Boolean);
-  }
-
-  const chunks = [];
-  let currentChunk = '';
-
-  sentences.forEach(sentence => {
-    const cleanSentence = sentence.trim();
-
-    if (!cleanSentence) {
-      return;
-    }
-
-    const nextChunk = currentChunk
-      ? `${currentChunk} ${cleanSentence}`
-      : cleanSentence;
-
-    if (
-      nextChunk.length <= preferredLength ||
-      !currentChunk
-    ) {
-      currentChunk = nextChunk;
-    } else {
-      chunks.push(currentChunk);
-      currentChunk = cleanSentence;
-    }
-  });
-
-  if (currentChunk) {
-    chunks.push(currentChunk);
-  }
-
-  return chunks;
-}
-
-
-/* =========================================================
-   READER RENDERING
-   ========================================================= */
-
-function renderCurrentSection() {
-  const section = currentSections[currentSectionIndex] || '';
-
-  viewer.innerHTML = '';
-
-  const paragraphs = section
-    .split(/\n{2,}/)
-    .map(paragraph => paragraph.trim())
-    .filter(Boolean);
-
-  if (!paragraphs.length) {
-    viewer.textContent = section;
-  } else {
-    paragraphs.forEach(paragraphText => {
-      const paragraph = document.createElement('p');
-      paragraph.textContent = paragraphText;
-
-      viewer.appendChild(paragraph);
-    });
-  }
-
-  chapterLine.textContent = buildChapterLine(section);
-
-  const remaining = Math.max(
-    currentSections.length - currentSectionIndex - 1,
-    0
-  );
-
-  remainingLine.textContent =
-    `До конца книги: ${remaining} ${getPageWord(remaining)}`;
-
-  saveReadingPosition();
-
-  viewer.scrollTop = 0;
-
-  window.scrollTo({
-    top: 0,
-    behavior: 'auto'
-  });
-
-  hideSelectionToolbar();
-}
-
-function buildChapterLine(section) {
-  const firstLine = section
-    .split('\n')
-    .map(line => line.trim())
-    .find(Boolean);
-
-  const bookTitle = currentBook?.title || 'AN.KI';
-
-  if (
-    firstLine &&
-    firstLine.length <= 110 &&
-    /^(chapter|book|part|volume|глава|часть|книга|том)\b/i.test(firstLine)
-  ) {
-    return `${bookTitle} · ${firstLine}`;
-  }
-
-  return `${bookTitle} · ${currentSectionIndex + 1} / ${currentSections.length}`;
-}
-
-function showNextSection() {
-  if (currentSectionIndex >= currentSections.length - 1) {
-    return;
-  }
-
-  currentSectionIndex += 1;
-  renderCurrentSection();
-}
-
-function showPreviousSection() {
-  if (currentSectionIndex <= 0) {
-    return;
-  }
-
-  currentSectionIndex -= 1;
-  renderCurrentSection();
-}
-
-function saveReadingPosition() {
-  if (!currentBook?.id) {
-    return;
-  }
-
-  const positions = readStoredPositions();
-
-  positions[currentBook.id] = {
-    sectionIndex: currentSectionIndex,
-    updatedAt: new Date().toISOString()
-  };
-
-  localStorage.setItem(
-    STORAGE_KEYS.readingPosition,
-    JSON.stringify(positions)
-  );
-}
-
-function restoreReadingPosition(bookId) {
-  const positions = readStoredPositions();
-  const position = positions[bookId];
-
-  if (!position) {
-    return 0;
-  }
-
-  return Number(position.sectionIndex) || 0;
-}
-
-function readStoredPositions() {
-  try {
-    const stored = localStorage.getItem(
-      STORAGE_KEYS.readingPosition
     );
 
-    const parsed = stored
-      ? JSON.parse(stored)
-      : {};
-
-    return parsed && typeof parsed === 'object'
-      ? parsed
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 
-/* =========================================================
-   FONT SIZE
-   ========================================================= */
 
-function changeFontSize(amount) {
-  const nextSize = Math.min(
-    MAX_FONT_SIZE,
-    Math.max(
-      MIN_FONT_SIZE,
-      currentFontSize + amount
-    )
-  );
+function saveCurrentPosition() {
 
-  applyFontSize(nextSize);
+    localStorage.setItem(
+
+        STORAGE.POSITION,
+
+        APP.currentPage
+
+    );
+
+}
+/* ========================================================================
+   PART 3
+   Pagination Engine
+   ======================================================================== */
+
+
+
+/* ========================================================================
+   PAGINATION
+   ======================================================================== */
+
+function paginateText(text) {
+
+    const pages = [];
+
+    let cursor = 0;
+
+    while (cursor < text.length) {
+
+        let end =
+
+            cursor +
+
+            CONFIG.PAGE_TARGET_SIZE;
+
+        if (end >= text.length) {
+
+            pages.push(
+
+                text.substring(cursor)
+
+            );
+
+            break;
+
+        }
+
+        while (
+
+            end < text.length &&
+
+            text[end] !== "\n" &&
+
+            text[end] !== "." &&
+
+            text[end] !== "!" &&
+
+            text[end] !== "?"
+
+        ) {
+
+            end++;
+
+        }
+
+        pages.push(
+
+            text.substring(
+
+                cursor,
+
+                end + 1
+
+            )
+
+        );
+
+        cursor = end + 1;
+
+    }
+
+    return pages;
+
 }
 
-function applyFontSize(size) {
-  currentFontSize = size;
 
-  viewer.style.fontSize = `${size}px`;
 
-  localStorage.setItem(
-    STORAGE_KEYS.fontSize,
-    String(size)
-  );
+/* ========================================================================
+   PAGE
+   ======================================================================== */
+
+function renderPage(index) {
+
+    if (!APP.pages.length) {
+
+        return;
+
+    }
+
+    index = Math.max(
+
+        0,
+
+        Math.min(
+
+            index,
+
+            APP.pages.length - 1
+
+        )
+
+    );
+
+    APP.currentPage = index;
+
+    DOM.viewer.innerHTML =
+
+        formatPage(
+
+            APP.pages[index]
+
+        );
+
+    updateProgress();
+
+    updateChapter();
+
+    saveCurrentPosition();
+
 }
 
 
-/* =========================================================
-   READER CONTROLS
-   ========================================================= */
 
-function toggleReaderOverlay() {
-  overlayVisible = !overlayVisible;
+/* ========================================================================
+   FORMATTER
+   ======================================================================== */
 
-  readerOverlay.classList.toggle(
-    'visible',
-    overlayVisible
-  );
-}
+function formatPage(text) {
 
-function shouldIgnoreReaderTap(event) {
-  if (
-    actionSheet &&
-    !actionSheet.classList.contains('hidden')
-  ) {
-    return true;
-  }
+    return text
 
-  const selection = window.getSelection();
+        .split("\n\n")
 
-  if (
-    selection &&
-    selection.toString().trim()
-  ) {
-    return true;
-  }
+        .map(
 
-  return Boolean(
-    event.target.closest(
-      'button, input, select, a, .selection-toolbar, .action-sheet'
-    )
-  );
+            paragraph =>
+
+                `<p>${escapeHtml(paragraph)}</p>`
+
+        )
+
+        .join("");
+
 }
 
 
-/* =========================================================
+
+/* ========================================================================
+   HTML ESCAPE
+   ======================================================================== */
+
+function escapeHtml(text) {
+
+    return text
+
+        .replaceAll("&", "&amp;")
+
+        .replaceAll("<", "&lt;")
+
+        .replaceAll(">", "&gt;")
+
+        .replaceAll('"', "&quot;")
+
+        .replaceAll("'", "&#39;");
+
+}
+
+
+
+/* ========================================================================
+   PROGRESS
+   ======================================================================== */
+
+function updateProgress() {
+
+    if (!DOM.remaining) {
+
+        return;
+
+    }
+
+    const percent =
+
+        Math.round(
+
+            (
+
+                (APP.currentPage + 1)
+
+                /
+
+                APP.pages.length
+
+            ) * 100
+
+        );
+
+    DOM.remaining.textContent =
+
+        `${percent}%`;
+
+}
+
+
+
+/* ========================================================================
+   CHAPTER DETECTION
+   ======================================================================== */
+
+function updateChapter() {
+
+    if (!DOM.chapter) {
+
+        return;
+
+    }
+
+    const page =
+
+        APP.pages[APP.currentPage];
+
+    const lines =
+
+        page
+
+        .split("\n")
+
+        .map(
+
+            line =>
+
+                line.trim()
+
+        )
+
+        .filter(Boolean);
+
+    let title =
+
+        "Чтение";
+
+    for (const line of lines) {
+
+        if (
+
+            line.length < 70 &&
+
+            line === line.toUpperCase()
+
+        ) {
+
+            title = line;
+
+            break;
+
+        }
+
+        if (
+
+            /^chapter/i.test(line)
+
+        ) {
+
+            title = line;
+
+            break;
+
+        }
+
+        if (
+
+            /^глава/i.test(line)
+
+        ) {
+
+            title = line;
+
+            break;
+
+        }
+
+    }
+
+    DOM.chapter.textContent =
+
+        title;
+
+}
+
+
+
+/* ========================================================================
+   NAVIGATION
+   ======================================================================== */
+
+function nextPage() {
+
+    if (
+
+        APP.currentPage >=
+
+        APP.pages.length - 1
+
+    ) {
+
+        return;
+
+    }
+
+    renderPage(
+
+        APP.currentPage + 1
+
+    );
+
+}
+
+
+
+function previousPage() {
+
+    if (
+
+        APP.currentPage <= 0
+
+    ) {
+
+        return;
+
+    }
+
+    renderPage(
+
+        APP.currentPage - 1
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   TOUCH
+   ======================================================================== */
+
+function bindReaderTouch() {
+
+    if (!DOM.viewer) {
+
+        return;
+
+    }
+
+    DOM.viewer.addEventListener(
+
+        "touchstart",
+
+        event => {
+
+            APP.touchStartX =
+
+                event.changedTouches[0].clientX;
+
+            APP.touchStartY =
+
+                event.changedTouches[0].clientY;
+
+        },
+
+        {
+
+            passive: true
+
+        }
+
+    );
+
+    DOM.viewer.addEventListener(
+
+        "touchend",
+
+        event => {
+
+            APP.touchEndX =
+
+                event.changedTouches[0].clientX;
+
+            APP.touchEndY =
+
+                event.changedTouches[0].clientY;
+
+            handleSwipe();
+
+        },
+
+        {
+
+            passive: true
+
+        }
+
+    );
+
+}
+
+
+
+/* ========================================================================
    SWIPE
-   ========================================================= */
+   ======================================================================== */
 
-function handleTouchStart(event) {
-  if (!event.changedTouches.length) {
-    return;
-  }
+function handleSwipe() {
 
-  touchStartX = event.changedTouches[0].clientX;
-  touchStartY = event.changedTouches[0].clientY;
-}
+    const dx =
 
-function handleTouchEnd(event) {
-  if (!event.changedTouches.length) {
-    return;
-  }
+        APP.touchEndX -
 
-  if (
-    actionSheet &&
-    !actionSheet.classList.contains('hidden')
-  ) {
-    return;
-  }
+        APP.touchStartX;
 
-  const endX = event.changedTouches[0].clientX;
-  const endY = event.changedTouches[0].clientY;
+    const dy =
 
-  const deltaX = endX - touchStartX;
-  const deltaY = endY - touchStartY;
+        APP.touchEndY -
 
-  if (
-    Math.abs(deltaX) < 55 ||
-    Math.abs(deltaX) <= Math.abs(deltaY)
-  ) {
-    return;
-  }
+        APP.touchStartY;
 
-  const selection = window.getSelection();
+    if (
 
-  if (
-    selection &&
-    selection.toString().trim()
-  ) {
-    return;
-  }
+        Math.abs(dx) < 70 ||
 
-  if (deltaX < 0) {
-    showNextSection();
-  } else {
-    showPreviousSection();
-  }
+        Math.abs(dx) < Math.abs(dy)
+
+    ) {
+
+        return;
+
+    }
+
+    if (dx < 0) {
+
+        nextPage();
+
+    }
+
+    else {
+
+        previousPage();
+
+    }
+
 }
 
 
-/* =========================================================
-   TEXT SELECTION
-   ========================================================= */
+
+/* ========================================================================
+   KEYBOARD
+   ======================================================================== */
+
+function bindKeyboard() {
+
+    window.addEventListener(
+
+        "keydown",
+
+        event => {
+
+            switch (event.key) {
+
+                case "ArrowRight":
+
+                case "PageDown":
+
+                case " ":
+
+                    event.preventDefault();
+
+                    nextPage();
+
+                    break;
+
+                case "ArrowLeft":
+
+                case "PageUp":
+
+                    event.preventDefault();
+
+                    previousPage();
+
+                    break;
+
+            }
+
+        }
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   START READER
+   ======================================================================== */
+
+function initializeReader() {
+
+    bindReaderTouch();
+
+    bindKeyboard();
+
+}
+
+/* ========================================================================
+   PART 4
+   Selection Engine
+   AI Panel
+   ======================================================================== */
+
+
+
+/* ========================================================================
+   SELECTION
+   ======================================================================== */
+
+function initializeSelection() {
+
+    if (!DOM.viewer) return;
+
+    document.addEventListener(
+
+        "selectionchange",
+
+        handleSelectionChange
+
+    );
+
+}
+
+
 
 function handleSelectionChange() {
-  const selection = window.getSelection();
 
-  if (!selection || selection.rangeCount === 0) {
-    selectedText = '';
-    hideSelectionToolbar();
-    return;
-  }
+    if (!DOM.viewer) return;
 
-  const text = selection.toString().trim();
+    const selection = window.getSelection();
 
-  if (!text || !isSelectionInsideViewer(selection)) {
-    selectedText = '';
-    hideSelectionToolbar();
-    return;
-  }
+    if (!selection) return;
 
-  selectedText = text.slice(0, 12000);
+    if (selection.rangeCount === 0) {
+
+        hideSelectionToolbar();
+
+        return;
+
+    }
+
+    const text =
+
+        selection.toString().trim();
+
+    if (!text.length) {
+
+        hideSelectionToolbar();
+
+        return;
+
+    }
+
+    if (!DOM.viewer.contains(
+
+        selection.anchorNode
+
+    )) {
+
+        hideSelectionToolbar();
+
+        return;
+
+    }
+
+    APP.selection = text;
+
+    showSelectionToolbar(
+
+        selection
+
+    );
+
 }
 
-function isSelectionInsideViewer(selection) {
-  if (!selection.rangeCount) {
-    return false;
-  }
 
-  const range = selection.getRangeAt(0);
-  const commonAncestor = range.commonAncestorContainer;
 
-  const element = commonAncestor.nodeType === Node.ELEMENT_NODE
-    ? commonAncestor
-    : commonAncestor.parentElement;
+/* ========================================================================
+   TOOLBAR
+   ======================================================================== */
 
-  return Boolean(element && viewer.contains(element));
+function showSelectionToolbar(selection) {
+
+    if (!DOM.toolbar) return;
+
+    const rect =
+
+        selection
+
+        .getRangeAt(0)
+
+        .getBoundingClientRect();
+
+    DOM.toolbar.hidden = false;
+
+    DOM.toolbar.style.left =
+
+        rect.left +
+
+        rect.width / 2 +
+
+        window.scrollX +
+
+        "px";
+
+    DOM.toolbar.style.top =
+
+        rect.top +
+
+        window.scrollY -
+
+        56 +
+
+        "px";
+
 }
 
-function showSelectionToolbar() {
-  const selection = window.getSelection();
 
-  if (
-    !selection ||
-    selection.rangeCount === 0 ||
-    !selectedText ||
-    !isSelectionInsideViewer(selection)
-  ) {
-    hideSelectionToolbar();
-    return;
-  }
-
-  const range = selection.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
-
-  if (!rect || (!rect.width && !rect.height)) {
-    hideSelectionToolbar();
-    return;
-  }
-
-  selectionToolbar.style.display = 'flex';
-
-  const toolbarRect = selectionToolbar.getBoundingClientRect();
-
-  let left =
-    rect.left +
-    rect.width / 2 -
-    toolbarRect.width / 2;
-
-  let top =
-    rect.top -
-    toolbarRect.height -
-    10;
-
-  left = Math.max(
-    8,
-    Math.min(
-      left,
-      window.innerWidth - toolbarRect.width - 8
-    )
-  );
-
-  if (top < 8) {
-    top = rect.bottom + 10;
-  }
-
-  selectionToolbar.style.left = `${left}px`;
-  selectionToolbar.style.top = `${top}px`;
-}
 
 function hideSelectionToolbar() {
-  selectionToolbar.style.display = 'none';
+
+    if (!DOM.toolbar) return;
+
+    DOM.toolbar.hidden = true;
+
 }
 
 
-/* =========================================================
+
+/* ========================================================================
+   TOOLBAR EVENTS
+   ======================================================================== */
+
+function bindToolbarButtons() {
+
+    const translate =
+
+        document.getElementById(
+
+            "translateBtn"
+
+        );
+
+    const explain =
+
+        document.getElementById(
+
+            "explainBtn"
+
+        );
+
+    const quote =
+
+        document.getElementById(
+
+            "saveQuoteBtn"
+
+        );
+
+    translate?.addEventListener(
+
+        "click",
+
+        translateSelection
+
+    );
+
+    explain?.addEventListener(
+
+        "click",
+
+        explainSelection
+
+    );
+
+    quote?.addEventListener(
+
+        "click",
+
+        saveFragment
+
+    );
+
+}
+
+
+
+/* ========================================================================
    ACTION SHEET
-   ========================================================= */
+   ======================================================================== */
 
-function openActionSheet(initialAction = '') {
-  if (!selectedText) {
-    return;
-  }
+function openActionSheet(title, html) {
 
-  selectedTextBox.textContent = selectedText;
-  actionResult.textContent = 'Выбери действие.';
+    if (
 
-  sheetBackdrop.classList.remove('hidden');
-  actionSheet.classList.remove('hidden');
+        !DOM.sheet ||
 
-  hideSelectionToolbar();
+        !DOM.backdrop
 
-  if (initialAction === 'translate') {
-    translateSelection();
-  }
+    ) return;
 
-  if (initialAction === 'explain') {
-    explainSelection();
-  }
+    DOM.sheet.innerHTML =
 
-  if (initialAction === 'save') {
-    saveSelection();
-  }
+        `
+
+        <div class="sheet-header">
+
+            ${title}
+
+        </div>
+
+        <div class="sheet-content">
+
+            ${html}
+
+        </div>
+
+        `;
+
+    DOM.backdrop.hidden = false;
+
+    DOM.sheet.hidden = false;
+
+    requestAnimationFrame(() => {
+
+        DOM.backdrop.classList.add(
+
+            "visible"
+
+        );
+
+        DOM.sheet.classList.add(
+
+            "visible"
+
+        );
+
+    });
+
 }
+
+
 
 function closeActionSheet() {
-  sheetBackdrop.classList.add('hidden');
-  actionSheet.classList.add('hidden');
 
-  actionResult.textContent = 'Выбери действие.';
+    if (
 
-  clearNativeSelection();
+        !DOM.sheet ||
+
+        !DOM.backdrop
+
+    ) return;
+
+    DOM.sheet.classList.remove(
+
+        "visible"
+
+    );
+
+    DOM.backdrop.classList.remove(
+
+        "visible"
+
+    );
+
+    setTimeout(() => {
+
+        DOM.sheet.hidden = true;
+
+        DOM.backdrop.hidden = true;
+
+    }, 250);
+
 }
 
-function clearNativeSelection() {
-  const selection = window.getSelection();
 
-  if (selection) {
-    selection.removeAllRanges();
-  }
 
-  hideSelectionToolbar();
+/* ========================================================================
+   BACKDROP
+   ======================================================================== */
+
+function bindActionSheet() {
+
+    DOM.backdrop?.addEventListener(
+
+        "click",
+
+        closeActionSheet
+
+    );
+
 }
 
 
-/* =========================================================
-   AI
-   ========================================================= */
+
+/* ========================================================================
+   OVERLAY
+   ======================================================================== */
+
+function toggleOverlay() {
+
+    APP.overlayVisible =
+
+        !APP.overlayVisible;
+
+    if (
+
+        APP.overlayVisible
+
+    ) {
+
+        DOM.overlay.classList.remove(
+
+            "hidden"
+
+        );
+
+    }
+
+    else {
+
+        DOM.overlay.classList.add(
+
+            "hidden"
+
+        );
+
+    }
+
+}
+
+
+
+/* ========================================================================
+   TAP ZONES
+   ======================================================================== */
+
+function initializeTapZones() {
+
+    const left =
+
+        document.getElementById(
+
+            "leftTapZone"
+
+        );
+
+    const center =
+
+        document.getElementById(
+
+            "centerTapZone"
+
+        );
+
+    const right =
+
+        document.getElementById(
+
+            "rightTapZone"
+
+        );
+
+    left?.addEventListener(
+
+        "click",
+
+        previousPage
+
+    );
+
+    center?.addEventListener(
+
+        "click",
+
+        toggleOverlay
+
+    );
+
+    right?.addEventListener(
+
+        "click",
+
+        nextPage
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   FONT
+   ======================================================================== */
+
+function increaseFontSize() {
+
+    APP.fontSize = Math.min(
+
+        CONFIG.MAX_FONT_SIZE,
+
+        APP.fontSize + 1
+
+    );
+
+    applyFontSize();
+
+    APP.pages = paginateText(
+
+        APP.plainText
+
+    );
+
+    renderPage(
+
+        APP.currentPage
+
+    );
+
+}
+
+
+
+function decreaseFontSize() {
+
+    APP.fontSize = Math.max(
+
+        CONFIG.MIN_FONT_SIZE,
+
+        APP.fontSize - 1
+
+    );
+
+    applyFontSize();
+
+    APP.pages = paginateText(
+
+        APP.plainText
+
+    );
+
+    renderPage(
+
+        APP.currentPage
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   THEME
+   ======================================================================== */
+
+function setTheme(theme) {
+
+    APP.theme = theme;
+
+    applyTheme();
+
+}
+
+
+
+/* ========================================================================
+   READER STARTUP
+   ======================================================================== */
+
+function initializeReaderUI() {
+
+    initializeReader();
+
+    initializeSelection();
+
+    initializeTapZones();
+
+    bindToolbarButtons();
+
+    bindActionSheet();
+
+}
+
+/* ========================================================================
+   PART 5
+   AI ENGINE
+   Translation
+   Explanation
+   ======================================================================== */
+
+
+
+/* ========================================================================
+   AI REQUEST
+   ======================================================================== */
+
+async function requestAI(action, payload) {
+
+    if (APP.aiController) {
+
+        APP.aiController.abort();
+
+    }
+
+    APP.aiController =
+
+        new AbortController();
+
+    const response = await fetch(
+
+        CONFIG.API.AI,
+
+        {
+
+            method: "POST",
+
+            headers: {
+
+                "Content-Type":
+
+                    "application/json"
+
+            },
+
+            signal:
+
+                APP.aiController.signal,
+
+            body: JSON.stringify({
+
+                action,
+
+                ...payload
+
+            })
+
+        }
+
+    );
+
+    if (!response.ok) {
+
+        throw new Error(
+
+            "AI request failed"
+
+        );
+
+    }
+
+    return await response.json();
+
+}
+
+
+
+/* ========================================================================
+   TRANSLATE
+   ======================================================================== */
 
 async function translateSelection() {
-  if (!selectedText) {
-    return;
-  }
 
-  const targetLanguage =
-    languageSelect.value ||
-    DEFAULT_TARGET_LANGUAGE;
+    if (!APP.selection.length) {
 
-  setActionLoading(
-    true,
-    'Перевожу…'
-  );
+        return;
 
-  try {
-    const result = await callAI({
-      action: 'translate',
-      text: selectedText,
-      targetLanguage
-    });
+    }
 
-    actionResult.textContent = result;
-  } catch (error) {
-    console.error('Translation error:', error);
+    const cacheKey =
 
-    actionResult.textContent =
-      error.message ||
-      'Не удалось выполнить перевод.';
-  } finally {
-    setActionLoading(false);
-  }
+        "translate_" +
+
+        APP.selection;
+
+    if (
+
+        APP.cache.translations[cacheKey]
+
+    ) {
+
+        openActionSheet(
+
+            "Перевод",
+
+            APP.cache.translations[cacheKey]
+
+        );
+
+        return;
+
+    }
+
+    openActionSheet(
+
+        "Перевод",
+
+        loadingTemplate()
+
+    );
+
+    try {
+
+        const result =
+
+            await requestAI(
+
+                "translate",
+
+                {
+
+                    text:
+
+                        APP.selection,
+
+                    language:
+
+                        APP.language
+
+                }
+
+            );
+
+        APP.cache.translations[cacheKey] =
+
+            result.translation;
+
+        updateActionSheet(
+
+            result.translation
+
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        updateActionSheet(
+
+            errorTemplate()
+
+        );
+
+    }
+
 }
+
+
+
+/* ========================================================================
+   EXPLAIN
+   ======================================================================== */
 
 async function explainSelection() {
-  if (!selectedText) {
-    return;
-  }
 
-  setActionLoading(
-    true,
-    'Объясняю…'
-  );
+    if (!APP.selection.length) {
 
-  try {
-    const result = await callAI({
-      action: 'explain',
-      text: selectedText,
-      targetLanguage:
-        languageSelect.value ||
-        DEFAULT_TARGET_LANGUAGE
+        return;
+
+    }
+
+    const cacheKey =
+
+        "explain_" +
+
+        APP.selection;
+
+    if (
+
+        APP.cache.ai[cacheKey]
+
+    ) {
+
+        openActionSheet(
+
+            "Объяснение",
+
+            APP.cache.ai[cacheKey]
+
+        );
+
+        return;
+
+    }
+
+    openActionSheet(
+
+        "Объяснение",
+
+        loadingTemplate()
+
+    );
+
+    try {
+
+        const result =
+
+            await requestAI(
+
+                "explain",
+
+                {
+
+                    text:
+
+                        APP.selection,
+
+                    language:
+
+                        APP.language
+
+                }
+
+            );
+
+        APP.cache.ai[cacheKey] =
+
+            result.answer;
+
+        updateActionSheet(
+
+            result.answer
+
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        updateActionSheet(
+
+            errorTemplate()
+
+        );
+
+    }
+
+}
+
+
+
+/* ========================================================================
+   SHEET UPDATE
+   ======================================================================== */
+
+function updateActionSheet(html) {
+
+    const body =
+
+        DOM.sheet.querySelector(
+
+            ".sheet-content"
+
+        );
+
+    if (!body) {
+
+        return;
+
+    }
+
+    body.innerHTML = html;
+
+}
+
+
+
+/* ========================================================================
+   LOADING TEMPLATE
+   ======================================================================== */
+
+function loadingTemplate() {
+
+    return `
+
+        <div class="sheet-loading">
+
+            <div class="loader"></div>
+
+            <p>
+
+                AI думает...
+
+            </p>
+
+        </div>
+
+    `;
+
+}
+
+
+
+/* ========================================================================
+   ERROR TEMPLATE
+   ======================================================================== */
+
+function errorTemplate() {
+
+    return `
+
+        <div class="sheet-error">
+
+            Не удалось получить ответ.
+
+        </div>
+
+    `;
+
+}
+
+
+
+/* ========================================================================
+   SUMMARY
+   ======================================================================== */
+
+async function summarizeCurrentPage() {
+
+    openActionSheet(
+
+        "Краткое содержание",
+
+        loadingTemplate()
+
+    );
+
+    try {
+
+        const result =
+
+            await requestAI(
+
+                "summary",
+
+                {
+
+                    text:
+
+                        APP.pages[
+
+                            APP.currentPage
+
+                        ]
+
+                }
+
+            );
+
+        updateActionSheet(
+
+            result.summary
+
+        );
+
+    }
+
+    catch {
+
+        updateActionSheet(
+
+            errorTemplate()
+
+        );
+
+    }
+
+}
+
+
+
+/* ========================================================================
+   ASK AI
+   ======================================================================== */
+
+async function askAI(question) {
+
+    if (
+
+        !question ||
+
+        !question.trim()
+
+    ) {
+
+        return;
+
+    }
+
+    openActionSheet(
+
+        "Ответ",
+
+        loadingTemplate()
+
+    );
+
+    try {
+
+        const result =
+
+            await requestAI(
+
+                "question",
+
+                {
+
+                    question,
+
+                    context:
+
+                        APP.pages[
+
+                            APP.currentPage
+
+                        ]
+
+                }
+
+            );
+
+        updateActionSheet(
+
+            result.answer
+
+        );
+
+    }
+
+    catch {
+
+        updateActionSheet(
+
+            errorTemplate()
+
+        );
+
+    }
+
+}
+
+
+
+/* ========================================================================
+   CUSTOM PROMPT
+   ======================================================================== */
+
+function showAskDialog() {
+
+    openActionSheet(
+
+        "Задать вопрос",
+
+        `
+
+        <textarea
+
+            id="aiQuestion"
+
+            class="ai-question"
+
+            placeholder="Введите вопрос..."></textarea>
+
+        <button
+
+            id="sendQuestion"
+
+            class="primary-button">
+
+            Спросить
+
+        </button>
+
+        `
+
+    );
+
+    document
+
+        .getElementById(
+
+            "sendQuestion"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            () => {
+
+                const question =
+
+                    document
+
+                    .getElementById(
+
+                        "aiQuestion"
+
+                    )
+
+                    .value;
+
+                askAI(
+
+                    question
+
+                );
+
+            }
+
+        );
+
+}
+
+
+
+/* ========================================================================
+   TOOLBAR AI
+   ======================================================================== */
+
+function bindAITools() {
+
+    document
+
+        .getElementById(
+
+            "summaryBtn"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            summarizeCurrentPage
+
+        );
+
+    document
+
+        .getElementById(
+
+            "askAiBtn"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            showAskDialog
+
+        );
+
+}
+
+/* ========================================================================
+   PART 6
+   Bookmarks
+   Quotes
+   Reading History
+   ======================================================================== */
+
+
+
+/* ========================================================================
+   FRAGMENTS
+   ======================================================================== */
+
+function saveFragment() {
+
+    if (!APP.selection.trim()) {
+
+        return;
+
+    }
+
+    const fragments =
+
+        loadFragments();
+
+    fragments.unshift({
+
+        id: crypto.randomUUID(),
+
+        book: APP.currentBook?.title || "",
+
+        author: APP.currentBook?.author || "",
+
+        page: APP.currentPage,
+
+        text: APP.selection,
+
+        created:
+
+            Date.now()
+
     });
 
-    actionResult.textContent = result;
-  } catch (error) {
-    console.error('Explanation error:', error);
+    localStorage.setItem(
 
-    actionResult.textContent =
-      error.message ||
-      'Не удалось получить объяснение.';
-  } finally {
-    setActionLoading(false);
-  }
-}
+        STORAGE.FRAGMENTS,
 
-async function callAI({
-  action,
-  text,
-  targetLanguage
-}) {
-  const response = await fetch(AI_ENDPOINT, {
-    method: 'POST',
+        JSON.stringify(fragments)
 
-    headers: {
-      'Content-Type': 'application/json'
-    },
-
-    body: JSON.stringify({
-      action,
-      text,
-      targetLanguage
-    })
-  });
-
-  const payload = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    throw new Error(
-      payload.error ||
-      payload.message ||
-      'Сервис временно недоступен.'
-    );
-  }
-
-  const result =
-    payload.result ||
-    payload.output ||
-    payload.text ||
-    '';
-
-  if (!result) {
-    throw new Error(
-      'Сервис вернул пустой ответ.'
-    );
-  }
-
-  return String(result).trim();
-}
-
-function setActionLoading(isLoading, message = '') {
-  translateBtn.disabled = isLoading;
-  explainBtn.disabled = isLoading;
-  saveBtn.disabled = isLoading;
-
-  toolbarTranslateBtn.disabled = isLoading;
-  toolbarExplainBtn.disabled = isLoading;
-  toolbarSaveBtn.disabled = isLoading;
-
-  if (isLoading && message) {
-    actionResult.textContent = message;
-  }
-}
-
-
-/* =========================================================
-   SAVE FRAGMENT
-   ========================================================= */
-
-function saveSelection() {
-  if (!selectedText) {
-    return;
-  }
-
-  const savedFragments = readSavedFragments();
-
-  const fragment = {
-    id: createLocalId(),
-    text: selectedText,
-    bookId: currentBook?.id || null,
-    bookTitle: currentBook?.title || 'Без названия',
-    authors: currentBook?.authors || [],
-    sectionIndex: currentSectionIndex,
-    createdAt: new Date().toISOString()
-  };
-
-  savedFragments.unshift(fragment);
-
-  localStorage.setItem(
-    STORAGE_KEYS.savedFragments,
-    JSON.stringify(savedFragments.slice(0, 500))
-  );
-
-  actionResult.textContent =
-    'Фрагмент сохранён в памяти браузера.';
-}
-
-function readSavedFragments() {
-  try {
-    const stored = localStorage.getItem(
-      STORAGE_KEYS.savedFragments
     );
 
-    const parsed = stored
-      ? JSON.parse(stored)
-      : [];
+    updateSavedCounter();
 
-    return Array.isArray(parsed)
-      ? parsed
-      : [];
-  } catch {
-    return [];
-  }
+    hideSelectionToolbar();
+
 }
 
 
-/* =========================================================
-   KEYBOARD
-   ========================================================= */
 
-function handleGlobalKeydown(event) {
-  if (readerView.classList.contains('hidden')) {
-    return;
-  }
+/* ========================================================================
+   LOAD FRAGMENTS
+   ======================================================================== */
 
-  if (
-    actionSheet &&
-    !actionSheet.classList.contains('hidden')
-  ) {
-    if (event.key === 'Escape') {
-      closeActionSheet();
+function loadFragments() {
+
+    try {
+
+        return JSON.parse(
+
+            localStorage.getItem(
+
+                STORAGE.FRAGMENTS
+
+            ) || "[]"
+
+        );
+
     }
 
-    return;
-  }
+    catch {
 
-  const activeTag =
-    document.activeElement?.tagName?.toLowerCase();
+        return [];
 
-  if (
-    activeTag === 'input' ||
-    activeTag === 'select' ||
-    activeTag === 'textarea'
-  ) {
-    return;
-  }
+    }
 
-  if (
-    event.key === 'ArrowRight' ||
-    event.key === 'PageDown'
-  ) {
-    event.preventDefault();
-    showNextSection();
-  }
-
-  if (
-    event.key === 'ArrowLeft' ||
-    event.key === 'PageUp'
-  ) {
-    event.preventDefault();
-    showPreviousSection();
-  }
-
-  if (event.key === 'Escape') {
-    closeReader();
-  }
-
-  if (event.key === '+') {
-    changeFontSize(FONT_STEP);
-  }
-
-  if (event.key === '-') {
-    changeFontSize(-FONT_STEP);
-  }
 }
 
 
-/* =========================================================
-   HELPERS
-   ========================================================= */
 
-async function parseJsonResponse(response) {
-  const rawText = await response.text();
+/* ========================================================================
+   DELETE FRAGMENT
+   ======================================================================== */
 
-  if (!rawText) {
-    return {};
-  }
+function deleteFragment(id) {
 
-  try {
-    return JSON.parse(rawText);
-  } catch {
-    if (!response.ok) {
-      throw new Error(rawText);
+    const fragments =
+
+        loadFragments()
+
+        .filter(
+
+            item =>
+
+                item.id !== id
+
+        );
+
+    localStorage.setItem(
+
+        STORAGE.FRAGMENTS,
+
+        JSON.stringify(
+
+            fragments
+
+        )
+
+    );
+
+    renderFragments();
+
+}
+
+
+
+/* ========================================================================
+   CLEAR FRAGMENTS
+   ======================================================================== */
+
+function clearFragments() {
+
+    localStorage.removeItem(
+
+        STORAGE.FRAGMENTS
+
+    );
+
+    renderFragments();
+
+}
+
+
+
+/* ========================================================================
+   RENDER FRAGMENTS
+   ======================================================================== */
+
+function renderFragments() {
+
+    const container =
+
+        document.getElementById(
+
+            "savedFragments"
+
+        );
+
+    if (!container) return;
+
+    const fragments =
+
+        loadFragments();
+
+    if (!fragments.length) {
+
+        container.innerHTML =
+
+            `
+
+            <div class="empty-state">
+
+                Нет сохранённых цитат
+
+            </div>
+
+            `;
+
+        return;
+
     }
 
-    return {
-      text: rawText
+    container.innerHTML =
+
+        fragments
+
+        .map(
+
+            fragment =>
+
+            `
+
+            <article
+
+                class="saved-fragment"
+
+                data-id="${fragment.id}">
+
+                <header>
+
+                    <strong>
+
+                        ${fragment.book}
+
+                    </strong>
+
+                    <span>
+
+                        стр. ${fragment.page + 1}
+
+                    </span>
+
+                </header>
+
+                <p>
+
+                    ${fragment.text}
+
+                </p>
+
+                <footer>
+
+                    <button
+
+                        class="fragment-open"
+
+                        data-open="${fragment.page}">
+
+                        Открыть
+
+                    </button>
+
+                    <button
+
+                        class="fragment-delete"
+
+                        data-delete="${fragment.id}">
+
+                        Удалить
+
+                    </button>
+
+                </footer>
+
+            </article>
+
+            `
+
+        )
+
+        .join("");
+
+    bindFragmentButtons();
+
+}
+
+
+
+/* ========================================================================
+   FRAGMENT BUTTONS
+   ======================================================================== */
+
+function bindFragmentButtons() {
+
+    document
+
+        .querySelectorAll(
+
+            ".fragment-delete"
+
+        )
+
+        .forEach(button => {
+
+            button.addEventListener(
+
+                "click",
+
+                () => {
+
+                    deleteFragment(
+
+                        button.dataset.delete
+
+                    );
+
+                }
+
+            );
+
+        });
+
+    document
+
+        .querySelectorAll(
+
+            ".fragment-open"
+
+        )
+
+        .forEach(button => {
+
+            button.addEventListener(
+
+                "click",
+
+                () => {
+
+                    renderPage(
+
+                        Number(
+
+                            button.dataset.open
+
+                        )
+
+                    );
+
+                    closeActionSheet();
+
+                }
+
+            );
+
+        });
+
+}
+
+
+
+/* ========================================================================
+   HISTORY
+   ======================================================================== */
+
+function saveReadingHistory() {
+
+    if (!APP.currentBook) return;
+
+    const history =
+
+        loadReadingHistory()
+
+        .filter(
+
+            book =>
+
+                book.id !==
+
+                APP.currentBook.id
+
+        );
+
+    history.unshift({
+
+        id:
+
+            APP.currentBook.id,
+
+        title:
+
+            APP.currentBook.title,
+
+        author:
+
+            APP.currentBook.author,
+
+        cover:
+
+            APP.currentBook.cover,
+
+        page:
+
+            APP.currentPage,
+
+        progress:
+
+            Math.round(
+
+                (
+
+                    (APP.currentPage + 1)
+
+                    /
+
+                    APP.pages.length
+
+                ) * 100
+
+            ),
+
+        updated:
+
+            Date.now()
+
+    });
+
+    localStorage.setItem(
+
+        "anki_history",
+
+        JSON.stringify(
+
+            history.slice(0, 30)
+
+        )
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   LOAD HISTORY
+   ======================================================================== */
+
+function loadReadingHistory() {
+
+    try {
+
+        return JSON.parse(
+
+            localStorage.getItem(
+
+                "anki_history"
+
+            ) || "[]"
+
+        );
+
+    }
+
+    catch {
+
+        return [];
+
+    }
+
+}
+
+
+
+/* ========================================================================
+   AUTO SAVE
+   ======================================================================== */
+
+function autoSaveReader() {
+
+    saveCurrentPosition();
+
+    saveReadingHistory();
+
+}
+
+
+
+/* ========================================================================
+   INTERVAL
+   ======================================================================== */
+
+function startAutoSave() {
+
+    setInterval(
+
+        autoSaveReader,
+
+        30000
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   COUNTER
+   ======================================================================== */
+
+function updateSavedCounter() {
+
+    const counter =
+
+        document.getElementById(
+
+            "savedCounter"
+
+        );
+
+    if (!counter) return;
+
+    counter.textContent =
+
+        loadFragments()
+
+        .length;
+
+}
+
+
+
+/* ========================================================================
+   BOOKMARK
+   ======================================================================== */
+
+function createBookmark() {
+
+    localStorage.setItem(
+
+        "anki_bookmark",
+
+        JSON.stringify({
+
+            page:
+
+                APP.currentPage,
+
+            book:
+
+                APP.currentBook,
+
+            created:
+
+                Date.now()
+
+        })
+
+    );
+
+}
+
+
+
+/* ========================================================================
+   RESTORE BOOKMARK
+   ======================================================================== */
+
+function restoreBookmark() {
+
+    try {
+
+        return JSON.parse(
+
+            localStorage.getItem(
+
+                "anki_bookmark"
+
+            )
+
+        );
+
+    }
+
+    catch {
+
+        return null;
+
+    }
+
+}
+
+
+
+/* ========================================================================
+   INIT STORAGE
+   ======================================================================== */
+
+function initializeStorage() {
+
+    updateSavedCounter();
+
+    renderFragments();
+
+    startAutoSave();
+
+}
+
+/* ========================================================================
+   PART 7
+   Settings
+   Themes
+   Utilities
+   Application Bootstrap
+   ======================================================================== */
+
+
+
+/* ========================================================================
+   SETTINGS PANEL
+   ======================================================================== */
+
+function initializeSettings() {
+
+    bindThemeButtons();
+
+    bindFontButtons();
+
+    bindReaderButtons();
+
+}
+
+
+
+/* ========================================================================
+   THEMES
+   ======================================================================== */
+
+function bindThemeButtons() {
+
+    document
+
+        .querySelectorAll(
+
+            "[data-theme]"
+
+        )
+
+        .forEach(button => {
+
+            button.addEventListener(
+
+                "click",
+
+                () => {
+
+                    setTheme(
+
+                        button.dataset.theme
+
+                    );
+
+                }
+
+            );
+
+        });
+
+}
+
+
+
+/* ========================================================================
+   FONT
+   ======================================================================== */
+
+function bindFontButtons() {
+
+    document
+
+        .getElementById(
+
+            "fontPlus"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            increaseFontSize
+
+        );
+
+    document
+
+        .getElementById(
+
+            "fontMinus"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            decreaseFontSize
+
+        );
+
+}
+
+
+
+/* ========================================================================
+   READER BUTTONS
+   ======================================================================== */
+
+function bindReaderButtons() {
+
+    document
+
+        .getElementById(
+
+            "backButton"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            returnHome
+
+        );
+
+    document
+
+        .getElementById(
+
+            "bookmarkButton"
+
+        )
+
+        ?.addEventListener(
+
+            "click",
+
+            createBookmark
+
+        );
+
+}
+
+
+
+/* ========================================================================
+   HOME
+   ======================================================================== */
+
+function returnHome() {
+
+    DOM.reader.hidden = true;
+
+    DOM.home.hidden = false;
+
+    hideSelectionToolbar();
+
+    closeActionSheet();
+
+}
+
+
+
+/* ========================================================================
+   UTILITIES
+   ======================================================================== */
+
+function debounce(callback, delay = 300) {
+
+    let timer;
+
+    return (...args) => {
+
+        clearTimeout(timer);
+
+        timer = setTimeout(
+
+            () => callback(...args),
+
+            delay
+
+        );
+
     };
-  }
+
 }
 
-function truncateText(text, maxLength) {
-  if (text.length <= maxLength) {
-    return text;
-  }
 
-  return `${text.slice(0, maxLength).trim()}…`;
+
+function throttle(callback, delay = 100) {
+
+    let waiting = false;
+
+    return (...args) => {
+
+        if (waiting) {
+
+            return;
+
+        }
+
+        waiting = true;
+
+        callback(...args);
+
+        setTimeout(
+
+            () => {
+
+                waiting = false;
+
+            },
+
+            delay
+
+        );
+
+    };
+
 }
 
-function getLanguageName(code) {
-  const normalizedCode = String(code)
-    .trim()
-    .toLowerCase();
 
-  const languages = {
-    ru: 'Русский',
-    en: 'English',
-    de: 'Deutsch',
-    fr: 'Français',
-    it: 'Italiano',
-    es: 'Español',
-    pt: 'Português',
-    zh: '中文',
-    la: 'Latina',
-    uk: 'Українська',
-    pl: 'Polski',
-    nl: 'Nederlands',
-    sv: 'Svenska',
-    no: 'Norsk',
-    da: 'Dansk',
-    fi: 'Suomi',
-    el: 'Ελληνικά',
-    grc: 'Древнегреческий'
-  };
 
-  return languages[normalizedCode] || code;
+function sleep(ms) {
+
+    return new Promise(
+
+        resolve =>
+
+            setTimeout(
+
+                resolve,
+
+                ms
+
+            )
+
+    );
+
 }
 
-function getPageWord(number) {
-  const absoluteNumber = Math.abs(number) % 100;
-  const lastDigit = absoluteNumber % 10;
 
-  if (
-    absoluteNumber > 10 &&
-    absoluteNumber < 20
-  ) {
-    return 'страниц';
-  }
 
-  if (lastDigit === 1) {
-    return 'страница';
-  }
+/* ========================================================================
+   COPY
+   ======================================================================== */
 
-  if (
-    lastDigit >= 2 &&
-    lastDigit <= 4
-  ) {
-    return 'страницы';
-  }
+async function copy(text) {
 
-  return 'страниц';
+    try {
+
+        await navigator.clipboard.writeText(
+
+            text
+
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+    }
+
 }
 
-function createLocalId() {
-  if (
-    typeof crypto !== 'undefined' &&
-    typeof crypto.randomUUID === 'function'
-  ) {
-    return crypto.randomUUID();
-  }
 
-  return [
-    Date.now().toString(36),
-    Math.random().toString(36).slice(2)
-  ].join('-');
+
+/* ========================================================================
+   DOWNLOAD
+   ======================================================================== */
+
+function downloadText(filename, text) {
+
+    const blob = new Blob(
+
+        [
+
+            text
+
+        ],
+
+        {
+
+            type:
+
+                "text/plain"
+
+        }
+
+    );
+
+    const url =
+
+        URL.createObjectURL(blob);
+
+    const link =
+
+        document.createElement(
+
+            "a"
+
+        );
+
+    link.href = url;
+
+    link.download = filename;
+
+    link.click();
+
+    URL.revokeObjectURL(
+
+        url
+
+    );
+
 }
+
+
+
+/* ========================================================================
+   NOTIFICATION
+   ======================================================================== */
+
+function notify(message) {
+
+    const toast =
+
+        document.createElement(
+
+            "div"
+
+        );
+
+    toast.className =
+
+        "toast";
+
+    toast.textContent =
+
+        message;
+
+    document.body.appendChild(
+
+        toast
+
+    );
+
+    requestAnimationFrame(() => {
+
+        toast.classList.add(
+
+            "visible"
+
+        );
+
+    });
+
+    setTimeout(() => {
+
+        toast.classList.remove(
+
+            "visible"
+
+        );
+
+        setTimeout(() => {
+
+            toast.remove();
+
+        }, 300);
+
+    }, 2000);
+
+}
+
+
+
+/* ========================================================================
+   VISIBILITY
+   ======================================================================== */
+
+document.addEventListener(
+
+    "visibilitychange",
+
+    () => {
+
+        if (
+
+            document.hidden
+
+        ) {
+
+            autoSaveReader();
+
+        }
+
+    }
+
+);
+
+
+
+/* ========================================================================
+   BEFORE UNLOAD
+   ======================================================================== */
+
+window.addEventListener(
+
+    "beforeunload",
+
+    () => {
+
+        autoSaveReader();
+
+    }
+
+);
+
+
+
+/* ========================================================================
+   STARTUP
+   ======================================================================== */
+
+function bootApplication() {
+
+    initializeReaderUI();
+
+    initializeStorage();
+
+    initializeSettings();
+
+    bindAITools();
+
+}
+
+
+
+/* ========================================================================
+   FINAL BOOT
+   ======================================================================== */
+
+document.addEventListener(
+
+    "DOMContentLoaded",
+
+    () => {
+
+        bootApplication();
+
+    }
+
+);
+
+
+
+/* ========================================================================
+   VERSION
+   ======================================================================== */
+
+console.log(
+
+    "%cAN.KI Reader Engine v2",
+
+    "color:#c9a96a;font-weight:bold;"
+
+);
+
+console.log(
+
+    "Application initialized."
+
+);
+
+/* ========================================================================
+   END OF SCRIPT
+   ======================================================================== */
