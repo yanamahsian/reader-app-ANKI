@@ -10,6 +10,11 @@ export interface Book {
   year?: number | string;
   cover?: string;
   url: string;
+  // Explicit format hint from the library API, when it provides one.
+  // Falls back to detecting by book.url's file extension (see
+  // formats/detect.ts) when absent — omnia-library's contract is not
+  // being changed to require this field.
+  format?: "epub" | "plaintext" | "fb2" | "pdf";
 }
 
 export interface Fragment {

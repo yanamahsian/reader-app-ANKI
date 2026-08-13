@@ -1,8 +1,10 @@
 import type { Book, Fragment } from "./types";
 import type { ProgressStore } from "../progressStore/progressStore";
-import { normalizeBook, paginateText, formatPage, detectChapterTitle } from "./pagination";
+import { detectChapterTitle } from "./pagination";
 import { createSelectionController, type SelectionController } from "./selection";
 import { translateText, explainText } from "../../../api/ai";
+import { detectLoader } from "./formats/detect";
+import type { LoadedDocument } from "./formats/types";
 
 const THEMES = ["dark", "default", "purple", "red"] as const;
 type Theme = (typeof THEMES)[number];
@@ -25,13 +27,47 @@ export interface ReaderEngine {
   destroy(): void;
 }
 
+// The engine keeps a single flat page array for navigation (tap
+// zones, swipe, keyboard, progressStore position all stay exactly as
+// they were before formats/ existed) — chapter awareness is layered
+// on top per page rather than changing how paging itself works.
+interface FlatPage {
+  html: string;
+  rawText: string;
+  chapterIndex: number;
+  pageIndexInChapter: number;
+  pagesInChapter: number;
+  chapterTitle: string | null;
+}
+
+function flattenDocument(doc: LoadedDocument): FlatPage[] {
+
+  const flat: FlatPage[] = [];
+
+  doc.chapters.forEach((chapter, chapterIndex) => {
+    chapter.pages.forEach((page, pageIndexInChapter) => {
+      flat.push({
+        html: page.html,
+        rawText: page.rawText,
+        chapterIndex,
+        pageIndexInChapter,
+        pagesInChapter: chapter.pages.length,
+        chapterTitle: chapter.title
+      });
+    });
+  });
+
+  return flat;
+
+}
+
 export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
   const { container, progressStore, onExit } = options;
 
   let currentBook: Book | null = null;
-  let plainText = "";
-  let pages: string[] = [];
+  let loadedDocument: LoadedDocument | null = null;
+  let pages: FlatPage[] = [];
   let currentPage = 0;
   let fontSize = Number(localStorage.getItem(FONT_KEY)) || DEFAULT_FONT_SIZE;
   let theme: Theme = (localStorage.getItem(THEME_KEY) as Theme) || "dark";
@@ -339,21 +375,35 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     if (!pages.length) return;
 
     currentPage = Math.max(0, Math.min(index, pages.length - 1));
-    viewer.innerHTML = formatPage(pages[currentPage]);
+    const page = pages[currentPage];
+    viewer.innerHTML = page.html;
 
-    // TEMPORARY (phase 2): plain text has no reliable chapter
-    // boundaries, so we show overall book progress here instead of
-    // "pages left in this chapter". This is a placeholder, not the
-    // intended final UX — do not read it as "pages to end of
-    // chapter" and do not fake a chapter-relative count from
-    // heuristics. The correct fix is real per-chapter page counts
-    // once documents are parsed into structure_nodes (EPUB/FB2
-    // phases) and pagination is computed per chapter rather than
-    // per whole book. Revisit this line then, not before.
-    const percent = Math.round(((currentPage + 1) / pages.length) * 100);
-    remainingLine.textContent = `${percent}% книги`;
+    if (loadedDocument?.hasRealChapters) {
 
-    chapterLine.textContent = detectChapterTitle(pages[currentPage]) || "Чтение";
+      // Real chapter structure (EPUB): the indicator promised back in
+      // phase 2 — actual pages left in the actual current chapter,
+      // not a percentage of the whole book.
+      chapterLine.textContent = page.chapterTitle || "Чтение";
+
+      const remaining = page.pagesInChapter - page.pageIndexInChapter - 1;
+      remainingLine.textContent = remaining > 0
+        ? `До конца главы — ${remaining} стр.`
+        : "Последняя страница главы";
+
+    } else {
+
+      // TEMPORARY, plain text only: no reliable chapter boundaries
+      // exist for raw .txt, so overall book progress is shown instead
+      // of a chapter-relative count, and the chapter line falls back
+      // to the heading heuristic — unchanged from phase 2. Do not
+      // fake a chapter-relative count here; EPUB above already has
+      // the real version of this indicator.
+      chapterLine.textContent = detectChapterTitle(page.rawText) || "Чтение";
+
+      const percent = Math.round(((currentPage + 1) / pages.length) * 100);
+      remainingLine.textContent = `${percent}% книги`;
+
+    }
 
     if (currentBook) {
       progressStore.savePosition(currentBook.id, currentPage);
@@ -370,9 +420,11 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   }
 
   function repaginate(): void {
-    pages = paginateText(plainText);
+    if (!loadedDocument) return;
+    pages = flattenDocument(loadedDocument);
     renderPage(currentPage);
   }
+
 
   /* ------------------------------------------------------------------
      Overlay toggle
@@ -476,16 +528,9 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
     currentBook = book;
 
-    const response = await fetch(book.url);
-
-    if (!response.ok) {
-      throw new Error("Book loading failed");
-    }
-
-    const text = await response.text();
-
-    plainText = normalizeBook(text);
-    pages = paginateText(plainText);
+    const loader = detectLoader(book);
+    loadedDocument = await loader.load(book);
+    pages = flattenDocument(loadedDocument);
 
     const savedPosition = progressStore.getPosition(book.id);
     currentPage = savedPosition !== null ? Math.min(savedPosition, pages.length - 1) : 0;
