@@ -12,7 +12,14 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Deliberately false (not true) for the Pages deploy workflow: if a
+  # new run cancels a deployment mid-creation on GitHub's side, the
+  # "github-pages" environment can be left in an inconsistent state
+  # that then makes every subsequent deployment-creation call fail
+  # with a 502, even on retry. This matches GitHub's own official
+  # static-site Pages workflow template, which uses false here for
+  # the same reason.
+  cancel-in-progress: false
 
 jobs:
   build:
