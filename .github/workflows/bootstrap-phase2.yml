@@ -6,8 +6,17 @@ name: Bootstrap Phase 2 file tree
 # flattened into the repo root during a failed web upload -- and
 # rewrites the entire Phase 2 project with the correct nested folder
 # structure, using a GitHub-hosted runner instead of the web upload UI
-# (which does not preserve folder paths). Safe to delete this workflow
-# file afterwards; it is not needed again once the tree is correct.
+# (which does not preserve folder paths).
+#
+# File contents are written across several separate `run:` steps
+# rather than one single step, because GitHub Actions caps any single
+# workflow value (including a `run: |` block) at 21,000 characters;
+# each step below is kept well under that limit. Large files
+# (src/styles/global.css) are themselves split across steps using
+# `cat >>` to append.
+#
+# Safe to delete this workflow file afterwards; it is not needed again
+# once the tree is correct.
 
 on:
   workflow_dispatch:
@@ -21,19 +30,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Rebuild Phase 2 file tree
+      - name: Clean working tree
         run: |
           set -e
-
           echo "Removing everything except .git (clears stray root files from the failed upload)..."
           for item in $(ls -A); do
             if [ "$item" = ".git" ]; then continue; fi
             rm -rf -- "$item"
           done
-
-          echo "Writing the Phase 2 file tree..."
-
+      - name: Write Phase 2 files (part 1/7)
+        run: |
+          set -e
           mkdir -p ".github/workflows"
           cat > ".github/workflows/deploy.yml" << '__PHASE2_FILE_EOF__'
           name: Deploy to GitHub Pages
@@ -414,6 +421,9 @@ jobs:
           }
           __PHASE2_FILE_EOF__
 
+      - name: Write Phase 2 files (part 2/7)
+        run: |
+          set -e
           mkdir -p "src/features/home"
           cat > "src/features/home/HomeView.tsx" << '__PHASE2_FILE_EOF__'
           import { useState } from "react";
@@ -887,6 +897,9 @@ jobs:
           }
           __PHASE2_FILE_EOF__
 
+      - name: Write Phase 2 files (part 3/7)
+        run: |
+          set -e
           mkdir -p "src/features/reader"
           cat > "src/features/reader/ReaderView.tsx" << '__PHASE2_FILE_EOF__'
           import { useEffect, useRef } from "react";
@@ -1041,6 +1054,9 @@ jobs:
           }
           __PHASE2_FILE_EOF__
 
+      - name: Write Phase 2 files (part 4/7)
+        run: |
+          set -e
           mkdir -p "src/features/reader/engine"
           cat > "src/features/reader/engine/readerEngine.ts" << '__PHASE2_FILE_EOF__'
           import type { Book, Fragment } from "./types";
@@ -1507,6 +1523,13 @@ jobs:
 
             viewer.addEventListener("touchstart", handleTouchStart, { passive: true });
             viewer.addEventListener("touchend", handleTouchEnd, { passive: true });
+          __PHASE2_FILE_EOF__
+
+      - name: Write Phase 2 files (part 5/7)
+        run: |
+          set -e
+          mkdir -p "src/features/reader/engine"
+          cat >> "src/features/reader/engine/readerEngine.ts" << '__PHASE2_FILE_EOF__'
 
             window.addEventListener("keydown", handleKeydown);
 
@@ -1796,6 +1819,9 @@ jobs:
           );
           __PHASE2_FILE_EOF__
 
+      - name: Write Phase 2 files (part 6/7)
+        run: |
+          set -e
           mkdir -p "src/styles"
           cat > "src/styles/global.css" << '__PHASE2_FILE_EOF__'
           :root {
@@ -2717,6 +2743,13 @@ jobs:
             width: 100%;
             height: 100%;
 
+          __PHASE2_FILE_EOF__
+
+      - name: Write Phase 2 files (part 7/7)
+        run: |
+          set -e
+          mkdir -p "src/styles"
+          cat >> "src/styles/global.css" << '__PHASE2_FILE_EOF__'
             font-family: "Cormorant Garamond", serif;
             font-size: 22px;
             color: var(--home-gold);
@@ -3532,10 +3565,14 @@ jobs:
           });
           __PHASE2_FILE_EOF__
 
+      - name: Create public asset folders
+        run: |
+          set -e
           mkdir -p public/Hero public/books
           touch public/Hero/.gitkeep public/books/.gitkeep
-
-          echo "Committing..."
+      - name: Commit and push
+        run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
