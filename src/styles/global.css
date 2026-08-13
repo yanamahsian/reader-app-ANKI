@@ -121,6 +121,11 @@ a {
   display: none !important;
 }
 
+/* base reader theme (dark) — kept as an explicit no-op class so
+   applyTheme() in script.js always has a class to toggle */
+body.theme-dark {
+}
+
 .app {
   min-height: 100vh;
 }
@@ -874,17 +879,70 @@ a {
 }
 
 .book-card {
+  display: flex;
+  gap: 14px;
+
   padding: 18px 0;
 
   border-bottom: 1px solid var(--home-border);
+
+  cursor: pointer;
 }
 
-.book-title {
-  margin-bottom: 8px;
+.book-cover {
+  flex: 0 0 auto;
+
+  width: 64px;
+  height: 92px;
+
+  overflow: hidden;
+  border-radius: 4px;
+
+  background: var(--home-surface-soft);
+}
+
+.book-cover img {
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover;
+  display: block;
+}
+
+.book-cover-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  height: 100%;
 
   font-family: "Cormorant Garamond", serif;
-  font-size: 28px;
-  line-height: 1.05;
+  font-size: 22px;
+  color: var(--home-gold);
+
+  background: var(--home-surface-soft);
+}
+
+.book-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.book-title,
+.book-content h3 {
+  margin: 0 0 8px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.book-author {
+  margin-bottom: 6px;
+
+  color: var(--home-muted);
+  font-size: 13px;
 }
 
 .book-meta {
@@ -1549,4 +1607,82 @@ a {
 
 .hero-image.active{
     animation:heroZoom 10s linear forwards;
+}
+
+/* =========================================================
+   STEP 1 ADDITIONS
+   Elements already produced by script.js that had no
+   matching styles yet: toasts, loading/error states,
+   the free-question textarea.
+   ========================================================= */
+
+.search-error,
+.empty-state,
+.sheet-error {
+  padding: 16px 0;
+
+  color: var(--home-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.sheet-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+
+  padding: 20px 0;
+
+  color: var(--reader-meta);
+  font-size: 13px;
+}
+
+.loader {
+  width: 22px;
+  height: 22px;
+
+  border: 2px solid var(--reader-border);
+  border-top-color: var(--reader-gold);
+  border-radius: 50%;
+
+  animation: loaderSpin 0.8s linear infinite;
+}
+
+@keyframes loaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+
+  z-index: 999999;
+
+  transform: translate(-50%, 12px);
+
+  padding: 10px 18px;
+
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+
+  background: var(--reader-sheet);
+  color: var(--reader-text);
+
+  font-size: 13px;
+
+  opacity: 0;
+  pointer-events: none;
+
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

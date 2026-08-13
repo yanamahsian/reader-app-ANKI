@@ -1,0 +1,56 @@
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onOpenSearch: () => void;
+}
+
+export function Sidebar({ isOpen, onClose, onOpenSearch }: SidebarProps) {
+
+  return (
+    <>
+      <aside
+        id="siteSidebar"
+        className={"site-sidebar" + (isOpen ? " open" : "")}
+        aria-label="Основная навигация"
+      >
+
+        <button
+          className="mobile-menu-close"
+          type="button"
+          aria-label="Закрыть меню"
+          onClick={onClose}
+        >
+          ×
+        </button>
+
+        <a className="brand-lockup" href="#hero" aria-label="AN.KI Atlas — главная">
+          <span className="brand">AN.KI</span>
+          <span className="brand-rule" aria-hidden="true" />
+          <span className="brand-subtitle">ATLAS</span>
+        </a>
+
+        <nav className="site-nav">
+          <a className="nav-link active" href="#hero">Главная</a>
+          <a className="nav-link" href="#collections">Подборки</a>
+          <a className="nav-link" href="#authors">Авторы</a>
+          <a className="nav-link" href="#academies">Академии</a>
+          <button className="nav-link nav-button" type="button" onClick={onOpenSearch}>
+            Поиск
+          </button>
+        </nav>
+
+        <div className="sidebar-bottom">
+          <p>Вне времени.<br />Вне границ. Читай.</p>
+          <span>AN.KI Atlas · 2026</span>
+        </div>
+
+      </aside>
+
+      <div
+        className={"sidebar-backdrop" + (isOpen ? "" : " hidden")}
+        onClick={onClose}
+      />
+    </>
+  );
+
+}
