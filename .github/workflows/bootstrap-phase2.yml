@@ -1,19 +1,31 @@
 name: Bootstrap Phase 2 file tree
 
 # ONE-TIME, manually triggered workflow. Run it once from the Actions
-# tab ("Run workflow"). It wipes the repository's tracked working tree
-# (except .git) -- which clears out the files that were accidentally
-# flattened into the repo root during a failed web upload -- and
-# rewrites the entire Phase 2 project with the correct nested folder
-# structure, using a GitHub-hosted runner instead of the web upload UI
-# (which does not preserve folder paths).
+# tab ("Run workflow"). It wipes stray top-level files from the repo
+# root (left over from a failed web upload) and rewrites the Phase 2
+# project tree with the correct nested folder structure.
+#
+# IMPORTANT SCOPE LIMITS, both deliberate:
+#  1. This workflow never creates, modifies, or deletes anything
+#     under .github/workflows/ -- not even itself, and not
+#     deploy.yml. The default GITHUB_TOKEN used by a workflow run does
+#     not carry the "workflows" permission, so any attempt to write a
+#     second workflow file from within a running workflow is rejected
+#     by GitHub ("refusing to allow a GitHub App to create or update
+#     workflow ... without 'workflows' permission"). deploy.yml is
+#     added separately, by hand, through the GitHub web UI, after this
+#     bootstrap has run successfully.
+#  2. The cleanup step below only ever touches top-level items in the
+#     repo root, and explicitly skips both .git and .github -- so it
+#     can never delete this workflow file (or any other workflow file)
+#     while it is running.
 #
 # File contents are written across several separate `run:` steps
-# rather than one single step, because GitHub Actions caps any single
-# workflow value (including a `run: |` block) at 21,000 characters;
-# each step below is kept well under that limit. Large files
-# (src/styles/global.css) are themselves split across steps using
-# `cat >>` to append.
+# rather than one, because GitHub Actions caps any single workflow
+# value (including a `run: |` block) at 21,000 characters; every step
+# below stays well under that limit. The one large file
+# (src/styles/global.css) is itself split across steps using `cat >>`
+# to append.
 #
 # Safe to delete this workflow file afterwards; it is not needed again
 # once the tree is correct.
@@ -33,74 +45,14 @@ jobs:
       - name: Clean working tree
         run: |
           set -e
-          echo "Removing everything except .git (clears stray root files from the failed upload)..."
+          echo "Removing stray top-level files/folders from the failed upload (never touching .git or .github)..."
           for item in $(ls -A); do
-            if [ "$item" = ".git" ]; then continue; fi
+            if [ "$item" = ".git" ] || [ "$item" = ".github" ]; then continue; fi
             rm -rf -- "$item"
           done
       - name: Write Phase 2 files (part 1/7)
         run: |
           set -e
-          mkdir -p ".github/workflows"
-          cat > ".github/workflows/deploy.yml" << '__PHASE2_FILE_EOF__'
-          name: Deploy to GitHub Pages
-
-          on:
-            push:
-              branches: [main]
-            workflow_dispatch:
-
-          permissions:
-            contents: read
-            pages: write
-            id-token: write
-
-          concurrency:
-            group: pages
-            cancel-in-progress: true
-
-          jobs:
-            build:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@v4
-
-                - name: Setup Node
-                  uses: actions/setup-node@v4
-                  with:
-                    node-version: 20
-
-                - name: Install dependencies
-                  # TEMPORARY (first Phase 2 deployment): no package-lock.json
-                  # exists yet, so `npm ci` cannot run and `cache: npm` above is
-                  # deliberately omitted (it requires a lockfile to key the
-                  # cache off). Once a real package-lock.json is generated and
-                  # committed separately, switch this back to `npm ci` and
-                  # restore `cache: npm` on setup-node for faster, reproducible
-                  # installs.
-                  run: npm install
-
-                - name: Build
-                  run: npm run build
-
-                - name: Upload build artifact
-                  uses: actions/upload-pages-artifact@v3
-                  with:
-                    path: dist
-
-            deploy:
-              needs: build
-              runs-on: ubuntu-latest
-              environment:
-                name: github-pages
-                url: ${{ steps.deployment.outputs.page_url }}
-              steps:
-                - name: Deploy to GitHub Pages
-                  id: deployment
-                  uses: actions/deploy-pages@v4
-          __PHASE2_FILE_EOF__
-
           cat > ".gitignore" << '__PHASE2_FILE_EOF__'
           node_modules
           dist
@@ -3576,5 +3528,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: rebuild Phase 2 file tree via bootstrap workflow" || echo "Nothing to commit"
+          git commit -m "chore: rebuild Phase 2 file tree via bootstrap workflow (excluding deploy.yml)" || echo "Nothing to commit"
           git push origin HEAD:main
