@@ -4,7 +4,7 @@ const HERO_COUNT = 45;
 const HERO_DELAY = 7000;
 
 function heroImagePath(n: number): string {
-  return `${import.meta.env.BASE_URL}Hero/hero_${n}.png`;
+return `${import.meta.env.BASE_URL}Hero/hero_${n}.webp`;
 }
 
 function heroBackground(n: number): string {
