@@ -453,6 +453,28 @@ body.theme-dark {
   border-bottom: 1px solid var(--home-gold);
 }
 
+/* .text-link is also used on real <button> elements (Collections
+   back navigation). Buttons carry browser default chrome (white
+   background, beveled border) that .text-link above never reset,
+   since it was originally written for <a> only — this rule clears
+   that chrome without touching the existing <a>.text-link look
+   (e.g. Hero's "Открыть подборки"), and without introducing a new
+   class. Size/position/font come from the shared rule above and are
+   unchanged. */
+button.text-link {
+  appearance: none;
+  -webkit-appearance: none;
+
+  border: 0;
+  border-bottom: 1px solid var(--home-gold);
+  border-radius: 0;
+
+  background: transparent;
+  color: var(--home-gold);
+
+  cursor: pointer;
+}
+
 .hero-controls {
   position: absolute;
   right: 42px;
