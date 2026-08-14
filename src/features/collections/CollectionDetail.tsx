@@ -1,13 +1,11 @@
 import { useState } from "react";
 import type { Collection, Book as CatalogBook } from "../../catalog/types";
-import type { Book as ReaderBook } from "../reader/engine/types";
 import { getBooksByCollection } from "../../catalog";
-import { pickPreferredFile, toReaderBook } from "../../catalog/toReaderBook";
 
 interface CollectionDetailProps {
   collection: Collection;
   onBack: () => void;
-  onOpenBook: (book: ReaderBook) => void;
+  onOpenBookDetail: (bookId: string) => void;
 }
 
 function coverFallback(title: string): string {
@@ -15,29 +13,16 @@ function coverFallback(title: string): string {
   return initial;
 }
 
-// Same availability rule as SearchPanel's BookCard (Phase 5): a book
-// with no file is shown, never clickable, never attempts to open.
-// Kept as its own small component here (not imported from
-// SearchPanel.tsx) so that file — explicitly out of scope this
-// phase — does not need to change or export anything new.
-function CollectionBookCard({ book, onOpen }: { book: CatalogBook; onOpen: (book: ReaderBook) => void }) {
+// Book Detail decides everything about availability/reading now — a
+// card here is always clickable and always goes there first, per
+// Phase 7 ("книга сначала должна открываться как объект каталога").
+function CollectionBookCard({ book, onOpen }: { book: CatalogBook; onOpen: (bookId: string) => void }) {
 
   const [coverFailed, setCoverFailed] = useState(false);
   const showCover = Boolean(book.cover) && !coverFailed;
 
-  const file = pickPreferredFile(book.files);
-  const available = file !== null;
-
-  function handleClick(): void {
-    if (!file) return;
-    onOpen(toReaderBook(book, file));
-  }
-
   return (
-    <article
-      className={"book-card" + (available ? "" : " book-card-unavailable")}
-      onClick={available ? handleClick : undefined}
-    >
+    <article className="book-card" onClick={() => onOpen(book.id)}>
 
       <div className="book-cover">
         {showCover ? (
@@ -59,9 +44,6 @@ function CollectionBookCard({ book, onOpen }: { book: CatalogBook; onOpen: (book
           <span>{book.originalLanguage}</span>
           <span>{book.publicationYear ?? ""}</span>
         </div>
-        {!available && (
-          <div className="book-unavailable-note">Книга пока недоступна для чтения</div>
-        )}
       </div>
 
     </article>
@@ -69,7 +51,7 @@ function CollectionBookCard({ book, onOpen }: { book: CatalogBook; onOpen: (book
 
 }
 
-export function CollectionDetail({ collection, onBack, onOpenBook }: CollectionDetailProps) {
+export function CollectionDetail({ collection, onBack, onOpenBookDetail }: CollectionDetailProps) {
 
   // Books are always derived from the catalog by collectionIds —
   // never duplicated or hand-listed here.
@@ -107,7 +89,7 @@ export function CollectionDetail({ collection, onBack, onOpenBook }: CollectionD
 
       <div className="collection-detail-books">
         {books.map(book => (
-          <CollectionBookCard key={book.id} book={book} onOpen={onOpenBook} />
+          <CollectionBookCard key={book.id} book={book} onOpen={onOpenBookDetail} />
         ))}
       </div>
 

@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import type { Book as ReaderBook } from "../reader/engine/types";
 import type { Author, Book as CatalogBook } from "../../catalog/types";
 import { searchCatalog, type SearchResult } from "../../catalog/search";
-import { pickPreferredFile, toReaderBook } from "../../catalog/toReaderBook";
 
 interface SearchPanelProps {
   isOpen: boolean;
   prefillQuery: string | null;
+  prefillLanguage: string;
   onClose: () => void;
-  onOpenBook: (book: ReaderBook) => void;
+  onOpenBookDetail: (bookId: string, query: string, language: string) => void;
 }
 
 type Status = "idle" | "empty" | "success";
@@ -32,24 +31,17 @@ function coverFallback(title: string): string {
   return initial;
 }
 
-function BookCard({ book, onOpen }: { book: CatalogBook; onOpen: (book: ReaderBook) => void }) {
+// Book Detail decides everything about availability/reading now — a
+// search result card is always clickable and always goes there first,
+// per Phase 7 ("книга сначала должна открываться как объект
+// каталога"). No file-availability check happens here anymore.
+function BookCard({ book, onOpen }: { book: CatalogBook; onOpen: (bookId: string) => void }) {
 
   const [coverFailed, setCoverFailed] = useState(false);
   const showCover = Boolean(book.cover) && !coverFailed;
 
-  const file = pickPreferredFile(book.files);
-  const available = file !== null;
-
-  function handleClick(): void {
-    if (!file) return;
-    onOpen(toReaderBook(book, file));
-  }
-
   return (
-    <article
-      className={"book-card" + (available ? "" : " book-card-unavailable")}
-      onClick={available ? handleClick : undefined}
-    >
+    <article className="book-card" onClick={() => onOpen(book.id)}>
 
       <div className="book-cover">
         {showCover ? (
@@ -71,9 +63,6 @@ function BookCard({ book, onOpen }: { book: CatalogBook; onOpen: (book: ReaderBo
           <span>{book.originalLanguage}</span>
           <span>{book.publicationYear ?? ""}</span>
         </div>
-        {!available && (
-          <div className="book-unavailable-note">Книга пока недоступна для чтения</div>
-        )}
       </div>
 
     </article>
@@ -92,7 +81,7 @@ function AuthorMatch({ author }: { author: Author }) {
 
 const EMPTY_RESULT: SearchResult = { query: "", matchedAuthors: [], books: [] };
 
-export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: SearchPanelProps) {
+export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, onOpenBookDetail }: SearchPanelProps) {
 
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState("");
@@ -124,7 +113,8 @@ export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: Searc
 
     if (prefillQuery !== null) {
       setQuery(prefillQuery);
-      runSearch(prefillQuery, language);
+      setLanguage(prefillLanguage);
+      runSearch(prefillQuery, prefillLanguage);
     }
 
     inputRef.current?.focus();
@@ -137,6 +127,10 @@ export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: Searc
     if (query.trim().length) {
       runSearch(query, nextLanguage);
     }
+  }
+
+  function handleOpenBook(bookId: string): void {
+    onOpenBookDetail(bookId, query, language);
   }
 
   return (
@@ -203,7 +197,7 @@ export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: Searc
           ))}
 
           {status === "success" && result.books.map(({ book }) => (
-            <BookCard key={book.id} book={book} onOpen={onOpenBook} />
+            <BookCard key={book.id} book={book} onOpen={handleOpenBook} />
           ))}
 
         </div>

@@ -1,24 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { collections } from "../../catalog/collections";
 import { getBooksByCollection } from "../../catalog";
-import type { Book as ReaderBook } from "../reader/engine/types";
 import { CollectionCard } from "./CollectionCard";
 import { CollectionDetail } from "./CollectionDetail";
 
 interface CollectionsViewProps {
-  onOpenBook: (book: ReaderBook) => void;
+  onOpenBookDetail: (bookId: string, collectionId: string) => void;
   onBack: () => void;
+  // Set when arriving here via "← Назад" from Book Detail (or a
+  // direct link to a collection) — jumps straight to that
+  // collection's detail instead of showing the grid first.
+  initialCollectionId: string | null;
 }
 
 // Internal list/detail navigation via plain useState, matching the
 // rest of this codebase (no router anywhere yet) — introducing one
 // just for this screen was explicitly out of scope. Real consequence:
-// this state resets on unmount, and browser back/forward does not
-// step through it — see the written summary for why that trade-off
-// was accepted rather than worked around.
-export function CollectionsView({ onOpenBook, onBack }: CollectionsViewProps) {
+// browser back/forward does not step through it — see the written
+// summary for why that trade-off was accepted rather than worked
+// around.
+export function CollectionsView({ onOpenBookDetail, onBack, initialCollectionId }: CollectionsViewProps) {
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialCollectionId);
+
+  useEffect(() => {
+    setSelectedId(initialCollectionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selected = selectedId
     ? collections.find(collection => collection.id === selectedId) ?? null
@@ -29,7 +37,7 @@ export function CollectionsView({ onOpenBook, onBack }: CollectionsViewProps) {
       <CollectionDetail
         collection={selected}
         onBack={() => setSelectedId(null)}
-        onOpenBook={onOpenBook}
+        onOpenBookDetail={bookId => onOpenBookDetail(bookId, selected.id)}
       />
     );
   }

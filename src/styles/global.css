@@ -1937,3 +1937,129 @@ button.text-link {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+
+/* =========================================================
+   BOOK DETAIL (Phase 7)
+   Same editorial/museum language as .collection-detail: dark,
+   generous spacing, serif headings, thin gold rules — no cards,
+   no rounded corners, no shadows, no placeholder covers.
+   ========================================================= */
+
+.book-detail {
+  max-width: 720px;
+
+  padding: 64px 7.5% 140px;
+
+  background: var(--home-bg);
+}
+
+.book-detail-header {
+  margin: 28px 0 20px;
+}
+
+.book-detail-title {
+  margin: 6px 0 8px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: clamp(38px, 4.4vw, 58px);
+  line-height: 1.03;
+}
+
+.book-detail-original-title {
+  margin: 0 0 14px;
+
+  color: var(--home-muted);
+
+  font-family: "Cormorant Garamond", serif;
+  font-style: italic;
+  font-size: 19px;
+}
+
+.book-detail-author-link {
+  padding: 0 0 3px;
+
+  border: 0;
+  border-bottom: 1px solid var(--home-gold);
+  border-radius: 0;
+
+  background: transparent;
+  color: var(--home-gold);
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 20px;
+
+  cursor: pointer;
+}
+
+.book-detail-read {
+  margin: 26px 0 34px;
+}
+
+.book-detail-unavailable {
+  margin: 0;
+
+  color: var(--home-muted);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.book-detail-description {
+  margin: 0 0 40px;
+
+  color: rgba(246, 237, 224, 0.86);
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 19px;
+  line-height: 1.6;
+}
+
+.book-detail-meta {
+  margin: 0 0 40px;
+
+  border-top: 1px solid var(--home-border);
+}
+
+.book-detail-meta-row {
+  display: flex;
+  gap: 24px;
+
+  padding: 14px 0;
+
+  border-bottom: 1px solid var(--home-border);
+}
+
+.book-detail-meta-row dt {
+  flex: 0 0 180px;
+
+  color: rgba(202, 160, 88, 0.8);
+
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.book-detail-meta-row dd {
+  margin: 0;
+
+  color: rgba(246, 237, 224, 0.86);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.book-detail-collections-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+
+  margin-top: 10px;
+}
+
+.book-detail-not-found {
+  margin-top: 28px;
+
+  color: var(--home-muted);
+  font-size: 15px;
+}

@@ -1,23 +1,29 @@
-import { useState } from "react";
-import type { Book } from "../reader/engine/types";
+import { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Hero } from "./Hero";
 import { SearchPanel } from "./SearchPanel";
 
 interface HomeViewProps {
-  onOpenBook: (book: Book) => void;
+  onOpenBookDetail: (bookId: string, query: string, language: string) => void;
   onOpenCollections: () => void;
+  // When set, the search panel opens immediately on mount with this
+  // exact query and language re-run — how "← Назад" from Book Detail
+  // gets back to the same results, and how clicking an author's name
+  // on Book Detail lands on their works.
+  restoreSearch: { query: string; language: string } | null;
 }
 
-export function HomeView({ onOpenBook, onOpenCollections }: HomeViewProps) {
+export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }: HomeViewProps) {
 
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
   const [searchPrefill, setSearchPrefill] = useState<string | null>(null);
+  const [searchPrefillLanguage, setSearchPrefillLanguage] = useState("");
 
-  function openSearch(query?: string): void {
+  function openSearch(query?: string, language?: string): void {
     setSidebarOpen(false);
     setSearchPrefill(query ?? "");
+    setSearchPrefillLanguage(language ?? "");
     setSearchOpen(true);
   }
 
@@ -25,6 +31,13 @@ export function HomeView({ onOpenBook, onOpenCollections }: HomeViewProps) {
     setSearchOpen(false);
     setSearchPrefill(null);
   }
+
+  useEffect(() => {
+    if (restoreSearch) {
+      openSearch(restoreSearch.query, restoreSearch.language);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <section id="homeView" className="home-view">
@@ -173,10 +186,6 @@ export function HomeView({ onOpenBook, onOpenCollections }: HomeViewProps) {
                 первоисточники, контекст и интеллектуальные
                 связи между текстами.
               </p>
-              {/* Same as the original markup: this button is not wired
-                  to any behaviour yet — its intended destination
-                  (academies catalogue) does not exist yet, and that is
-                  a product decision, not something to guess at here. */}
               <button className="primary-button" type="button">
                 Посмотреть академии
               </button>
@@ -203,8 +212,9 @@ export function HomeView({ onOpenBook, onOpenCollections }: HomeViewProps) {
       <SearchPanel
         isOpen={isSearchOpen}
         prefillQuery={searchPrefill}
+        prefillLanguage={searchPrefillLanguage}
         onClose={closeSearch}
-        onOpenBook={onOpenBook}
+        onOpenBookDetail={onOpenBookDetail}
       />
 
     </section>
