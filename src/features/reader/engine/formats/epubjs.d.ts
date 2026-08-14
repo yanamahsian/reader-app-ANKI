@@ -5,33 +5,36 @@
 // be verified offline in this environment — a small, explicit
 // contract here is safer than an unverified one.
 //
-// Updated after a real bug: Section#load/Section#unload and
-// Book#load/Book#canonical below are the methods epub.js's own
-// official documentation (epubjs.org/documentation/0.3/) describes
-// for resolving and loading a spine section's content — confirmed
-// against that documentation, not guessed. The previous version of
-// this file declared spine items as plain {href, idref} data and
-// used Book#archive#getText(href) directly, which does not
-// canonicalize the href first and silently returns undefined for
-// paths that need it.
+// Corrected against a real, confirmed runtime error ("x.load is not
+// a function") plus a matching working example found on
+// github.com/futurepress/epub.js (issue #887): `spine.items` holds
+// lightweight descriptor objects, not real Section instances --
+// `spine.each(callback)` is what yields actual Section objects, and
+// their `load()` is called with no arguments (it resolves content
+// through the book's own archive on its own). The previous version
+// of this file declared `spine.items` as Section-like (with a
+// working `.load`) and required a `request` argument -- neither
+// matched the real object shape or method signature.
 declare module "epubjs" {
 
   export interface EpubSection {
     href: string;
     idref?: string;
-    // Loads and parses this section's content. `request` is the
-    // function epub.js uses to fetch/resolve a path within the book
-    // (pass the Book's own `load`, bound to it, per epub.js's
-    // documented headless-loading pattern) and resolves to the
-    // parsed Document.
-    load(request: (url: string) => Promise<unknown>): Promise<Document>;
+    // Loads and parses this section's content. Called with no
+    // arguments -- the Section already knows how to resolve its own
+    // content from the book's archive.
+    load(): Promise<Document>;
     // Releases the loaded Document; call once its text has been
     // extracted.
     unload(): void;
   }
 
   export interface EpubSpine {
-    items: EpubSection[];
+    // NOTE: deliberately NOT exposing `.items` here -- it exists on
+    // the real object, but holds lightweight descriptors without a
+    // working `.load()`. `.each()` is the correct way to get real
+    // Section instances.
+    each(callback: (section: EpubSection) => void): void;
   }
 
   export interface EpubNavigationItem {
@@ -53,9 +56,6 @@ declare module "epubjs" {
     ready: Promise<void>;
     loaded: EpubLoaded;
     spine: EpubSpine;
-    // Resolves and fetches a path within the book archive/package —
-    // pass bound as the `request` argument to Section#load.
-    load(path: string): Promise<unknown>;
     destroy(): void;
   }
 
