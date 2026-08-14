@@ -56,7 +56,38 @@ export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile): 
     language: resolved.edition.language,
     year: catalogBook.publicationYear ?? undefined,
     cover: catalogBook.cover ?? undefined,
-    url: resolved.file.url,
+    url: resolveFileUrl(resolved.file.url),
     format: resolved.file.format
   };
+}
+
+// PHASE 8.1: Gutenberg's own file host does not send CORS headers, so
+// a browser fetch() straight to gutenberg.org is blocked. Files from
+// hosts in this list are rewritten to go through the omnia-book-proxy
+// Edge Function instead, which fetches them server-side (no CORS
+// there) and streams the same bytes back. Everything else — the
+// local antichrist.txt, or any future non-Gutenberg source — is left
+// completely untouched; only a URL whose hostname matches this list
+// is ever rewritten.
+const BOOK_PROXY_ENDPOINT = "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-proxy";
+const PROXIED_HOSTNAMES = new Set(["www.gutenberg.org", "gutenberg.org"]);
+
+function resolveFileUrl(url: string): string {
+
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url, typeof window !== "undefined" ? window.location.href : undefined);
+  } catch {
+    // Not a parseable absolute/relative URL in this context -- leave
+    // it exactly as-is rather than guessing.
+    return url;
+  }
+
+  if (!PROXIED_HOSTNAMES.has(parsed.hostname)) {
+    return url;
+  }
+
+  return `${BOOK_PROXY_ENDPOINT}?url=${encodeURIComponent(parsed.toString())}`;
+
 }
