@@ -16,6 +16,43 @@ export interface BookFile {
   url: string;
 }
 
+// A rights determination scoped to a jurisdiction — never treat a
+// source's own "public domain" claim as globally true. Project
+// Gutenberg, for example, states its status explicitly as "public
+// domain in the USA", not worldwide. jurisdiction is an ISO 3166-1
+// country code, or null when the claim genuinely isn't
+// jurisdiction-scoped (e.g. this project's own seed data, entered
+// without a specific territory in mind — that is a gap to fill in
+// later, not a claim of global validity). An Edition can carry more
+// than one assertion (e.g. confirmed public-domain in the US, still
+// unknown in the EU) without any type change later.
+export interface RightsAssertion {
+  status: RightsStatus;
+  jurisdiction: string | null;
+}
+
+// A specific published version of a Work: a language, a translation
+// (or the original), and the file(s) available for it. One Work can
+// have several Editions (original + translations, or the same
+// language from two different sources) — see catalog/ingestion for
+// how external editions get attached to an existing Work.
+export interface Edition {
+  id: string;
+  language: string;
+  isOriginal: boolean;
+  translatorName: string | null;
+  rights: RightsAssertion[];
+  // "seed" for this project's own hand-entered data, or a source id
+  // such as "gutenberg" for an ingested edition.
+  sourceId: string;
+  // Source-specific identifiers, cached after a confirmed match so a
+  // later re-import of the same external record is recognized
+  // instantly instead of re-running identity matching. Empty for
+  // seed data.
+  externalIds: Record<string, string>;
+  files: BookFile[];
+}
+
 // A literary work's author. Deliberately its own entity (not a bare
 // string on Book) so the same author can be referenced consistently
 // across every work, and found under any of their name's spellings.
@@ -52,6 +89,11 @@ export interface Collection {
   image: string | null;
 }
 
+// A canonical Work in AN.KI's catalog — "War and Peace" as one
+// concept, regardless of how many languages, translations, or files
+// exist for it. Rights are no longer a single flat field here: they
+// live per-Edition (see RightsAssertion), because a translation's
+// rights status is not automatically the same as the original's.
 export interface Book {
   id: string;
   title: string;
@@ -78,13 +120,13 @@ export interface Book {
   description: string;
   cover: string | null;
 
-  // Zero or more actual files, one per available format. Empty for
-  // seed entries that do not have real hosted content yet (see
-  // books.ts) — an empty array means "not available to read yet",
-  // not an error.
-  files: BookFile[];
-
-  rightsStatus: RightsStatus;
+  // Zero or more Editions. An edition with an empty `files` array
+  // means "known to exist, not available to read yet" — not an
+  // error. A Work with zero editions altogether shouldn't normally
+  // happen once migrated, but is handled the same way by the
+  // resolver: nothing to read.
+  editions: Edition[];
 
   collectionIds: string[];
 }
+

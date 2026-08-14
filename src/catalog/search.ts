@@ -24,7 +24,13 @@ const SCORE_PREFIX = 70;
 const SCORE_PARTIAL = 40;
 const SCORE_METADATA = 10;
 
-function normalize(text: string): string {
+// Exported for reuse by catalog/ingestion/match.ts — text
+// normalization is a shared, generic concern. The matching/ranking
+// logic itself below is NOT reused by ingestion — identity matching
+// (is this external record the same Work?) has different confidence
+// requirements than search ranking (how good a match is this for a
+// human's query?), and lives in its own module by design.
+export function normalize(text: string): string {
   return text
     .toLowerCase()
     .replaceAll("ё", "е")

@@ -10,7 +10,7 @@ import {
   themes
 } from "../../catalog";
 import type { Book as ReaderBook } from "../reader/engine/types";
-import { pickPreferredFile, toReaderBook } from "../../catalog/toReaderBook";
+import { pickPreferredEditionAndFile, toReaderBook } from "../../catalog/toReaderBook";
 
 interface BookDetailViewProps {
   bookId: string;
@@ -79,7 +79,7 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorSearch,
   const genreLabels = labelsFor(book.genreIds, genres);
   const themeLabels = labelsFor(book.themeIds, themes);
 
-  const file = pickPreferredFile(book.files);
+  const resolved = pickPreferredEditionAndFile(book);
 
   return (
     <section className="book-detail">
@@ -111,8 +111,8 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorSearch,
       </header>
 
       <div className="book-detail-read">
-        {file ? (
-          <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, file))}>
+        {resolved ? (
+          <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
             Читать
           </button>
         ) : (

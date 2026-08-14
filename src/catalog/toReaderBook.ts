@@ -1,21 +1,46 @@
-import type { Book as CatalogBook, BookFile, BookFormat } from "./types";
+import type { Book as CatalogBook, BookFile, BookFormat, Edition } from "./types";
 import type { Book as ReaderBook } from "../features/reader/engine/types";
 
-// Preference order when a book happens to have more than one file —
-// not a real scenario in the current seed data (each book has at
-// most one), but keeps this function correct if that changes later.
-const FORMAT_PRIORITY: BookFormat[] = ["epub", "fb2", "plaintext", "pdf"];
+// Formats the reader engine can actually open right now (Phase 3
+// shipped EPUB and plaintext; FB2 and PDF loaders were never built).
+// The resolver must never pick a format the reader can't open just
+// because a file exists for it -- that file stays in the data for
+// later, it's simply not selected yet.
+const READER_SUPPORTED_FORMATS: BookFormat[] = ["epub", "plaintext"];
 
-export function pickPreferredFile(files: BookFile[]): BookFile | null {
+function isPublicDomain(edition: Edition): boolean {
+  return edition.rights.some(assertion => assertion.status === "public-domain");
+}
 
-  if (!files.length) return null;
+export interface ResolvedFile {
+  edition: Edition;
+  file: BookFile;
+}
 
-  for (const format of FORMAT_PRIORITY) {
-    const match = files.find(file => file.format === format);
-    if (match) return match;
+// Deterministic resolver: requested language (falls back to any
+// public-domain edition if none matches) -> public-domain editions
+// only -> format priority (EPUB before plaintext, matching what the
+// reader actually supports) -> first match wins. No randomness, no
+// "pick whatever's first" fallback that ignores rights or format
+// support.
+export function pickPreferredEditionAndFile(work: CatalogBook, preferredLanguage?: string): ResolvedFile | null {
+
+  const publicDomainEditions = work.editions.filter(isPublicDomain);
+
+  const languageMatches = preferredLanguage
+    ? publicDomainEditions.filter(edition => edition.language === preferredLanguage)
+    : [];
+
+  const editionsToSearch = languageMatches.length ? languageMatches : publicDomainEditions;
+
+  for (const format of READER_SUPPORTED_FORMATS) {
+    for (const edition of editionsToSearch) {
+      const file = edition.files.find(candidate => candidate.format === format);
+      if (file) return { edition, file };
+    }
   }
 
-  return files[0];
+  return null;
 
 }
 
@@ -23,15 +48,15 @@ export function pickPreferredFile(files: BookFile[]): BookFile | null {
 // stays exactly as it is — this is the one place that bridges the
 // richer catalog model to it, so the reader itself never needs to know
 // the catalog exists.
-export function toReaderBook(catalogBook: CatalogBook, file: BookFile): ReaderBook {
+export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile): ReaderBook {
   return {
     id: catalogBook.id,
     title: catalogBook.title,
     author: catalogBook.authorName,
-    language: catalogBook.originalLanguage,
+    language: resolved.edition.language,
     year: catalogBook.publicationYear ?? undefined,
     cover: catalogBook.cover ?? undefined,
-    url: file.url,
-    format: file.format
+    url: resolved.file.url,
+    format: resolved.file.format
   };
 }
