@@ -72,7 +72,18 @@ export const epubLoader: FormatLoader = {
 
     }
 
-    epub.destroy();
+    // Deliberately NOT calling epub.destroy() here: this Book
+    // instance never had a Rendition/View attached (we only ever use
+    // book.archive/book.spine/book.loaded.navigation, by design, to
+    // reuse our own pagination instead of epub.js's renderer). In
+    // that state, epub.js's destroy() unconditionally tries to tear
+    // down rendition-related internals that were never initialized,
+    // which throws "Cannot read properties of undefined (reading
+    // 'replaceCss')" -- replaceCss is a real epub.js method that only
+    // exists on the View/Contents objects a Rendition creates.
+    // `epub` is a local variable scoped to this function; once
+    // load() returns, nothing references it and it is garbage
+    // collected normally without an explicit destroy call.
 
     return {
       hasRealChapters: true,
