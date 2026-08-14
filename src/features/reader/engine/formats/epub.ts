@@ -3,14 +3,15 @@ import type { Book } from "../types";
 import type { FormatLoader, LoadedDocument, LoadedChapter } from "./types";
 import { normalizeBook, paginateText, formatPage } from "../pagination";
 
-// Pulls readable text out of a spine section's raw (X)HTML: prefers
+// Pulls readable text out of a spine section's already-parsed
+// Document (returned by Section#load — see load() below): prefers
 // block-level text elements so paragraph breaks survive into
 // normalizeBook/paginateText, same as the plain-text pipeline expects.
-function extractReadableText(html: string): string {
+function extractReadableText(doc: Document): string {
 
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const blocks = Array.from(doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, li"));
-  const source = blocks.length ? blocks : [doc.body];
+  const root = doc.body ?? doc.documentElement;
+  const blocks = Array.from(root.querySelectorAll("p, h1, h2, h3, h4, h5, li"));
+  const source = blocks.length ? blocks : [root];
 
   return source
     .map(element => (element.textContent || "").trim())
@@ -53,11 +54,33 @@ export const epubLoader: FormatLoader = {
 
     for (const item of epub.spine.items) {
 
-      const rawHtml = await epub.archive.getText(item.href);
-      const text = normalizeBook(extractReadableText(rawHtml));
+      // Section#load resolves the item's href against the archive
+      // correctly and returns an already-parsed Document. This
+      // replaces a previous direct epub.archive.getText(item.href)
+      // call, which silently returned undefined for hrefs that
+      // needed canonicalizing first (a real epub.js behaviour, not a
+      // guess) -- that undefined ended up literally rendered as the
+      // page text "undefined". Section#load is epub.js's own
+      // documented way to get section content without a Rendition.
+      let doc: Document;
 
-      // Skip empty sections (cover pages, separators) rather than
-      // inserting a blank, unreadable "chapter" into the book.
+      try {
+        doc = await item.load(epub.load.bind(epub));
+      } catch {
+        // A section that fails to load (a genuinely broken or
+        // non-XHTML manifest entry) is skipped, not turned into a
+        // fabricated page -- same principle as the empty-text skip
+        // below.
+        continue;
+      }
+
+      const text = normalizeBook(extractReadableText(doc));
+
+      item.unload();
+
+      // Skip empty sections (cover pages, separators, service XHTML
+      // with no block-level text) rather than inserting a blank,
+      // unreadable "chapter" into the book.
       if (!text.length) continue;
 
       const rawPages = paginateText(text);
@@ -74,7 +97,7 @@ export const epubLoader: FormatLoader = {
 
     // Deliberately NOT calling epub.destroy() here: this Book
     // instance never had a Rendition/View attached (we only ever use
-    // book.archive/book.spine/book.loaded.navigation, by design, to
+    // book.spine/book.loaded.navigation/section.load, by design, to
     // reuse our own pagination instead of epub.js's renderer). In
     // that state, epub.js's destroy() unconditionally tries to tear
     // down rendition-related internals that were never initialized,
