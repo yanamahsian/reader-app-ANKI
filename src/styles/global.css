@@ -945,6 +945,32 @@ body.theme-dark {
   font-size: 13px;
 }
 
+.book-card-unavailable {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.book-unavailable-note {
+  margin-top: 2px;
+
+  color: var(--home-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.author-match {
+  padding: 14px 0;
+
+  border-bottom: 1px solid var(--home-border);
+}
+
+.author-match h3 {
+  margin: 4px 0 0;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 26px;
+}
+
 .book-meta {
   margin-bottom: 11px;
 

@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import type { Book } from "../reader/engine/types";
-import { searchBooks } from "../../api/library";
+import type { Book as ReaderBook } from "../reader/engine/types";
+import type { Author, Book as CatalogBook } from "../../catalog/types";
+import { searchCatalog, type SearchResult } from "../../catalog/search";
+import { pickPreferredFile, toReaderBook } from "../../catalog/toReaderBook";
 
 interface SearchPanelProps {
   isOpen: boolean;
   prefillQuery: string | null;
   onClose: () => void;
-  onOpenBook: (book: Book) => void;
+  onOpenBook: (book: ReaderBook) => void;
 }
 
-type Status = "idle" | "loading" | "error" | "empty" | "success";
+type Status = "idle" | "empty" | "success";
 
 const LANGUAGES: Array<{ value: string; label: string }> = [
   { value: "", label: "Все языки" },
@@ -21,7 +23,8 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
   { value: "es", label: "Español" },
   { value: "pt", label: "Português" },
   { value: "zh", label: "中文" },
-  { value: "la", label: "Latina" }
+  { value: "la", label: "Latina" },
+  { value: "grc", label: "Ἑλληνική" }
 ];
 
 function coverFallback(title: string): string {
@@ -29,19 +32,30 @@ function coverFallback(title: string): string {
   return initial;
 }
 
-function BookCard({ book, onOpen }: { book: Book; onOpen: (book: Book) => void }) {
+function BookCard({ book, onOpen }: { book: CatalogBook; onOpen: (book: ReaderBook) => void }) {
 
   const [coverFailed, setCoverFailed] = useState(false);
   const showCover = Boolean(book.cover) && !coverFailed;
 
+  const file = pickPreferredFile(book.files);
+  const available = file !== null;
+
+  function handleClick(): void {
+    if (!file) return;
+    onOpen(toReaderBook(book, file));
+  }
+
   return (
-    <article className="book-card" onClick={() => onOpen(book)}>
+    <article
+      className={"book-card" + (available ? "" : " book-card-unavailable")}
+      onClick={available ? handleClick : undefined}
+    >
 
       <div className="book-cover">
         {showCover ? (
           <img
             loading="lazy"
-            src={book.cover}
+            src={book.cover ?? undefined}
             alt=""
             onError={() => setCoverFailed(true)}
           />
@@ -52,11 +66,14 @@ function BookCard({ book, onOpen }: { book: Book; onOpen: (book: Book) => void }
 
       <div className="book-content">
         <h3 className="book-title">{book.title}</h3>
-        <div className="book-author">{book.author || ""}</div>
+        <div className="book-author">{book.authorName}</div>
         <div className="book-meta">
-          <span>{book.language || ""}</span>
-          <span>{book.year ?? ""}</span>
+          <span>{book.originalLanguage}</span>
+          <span>{book.publicationYear ?? ""}</span>
         </div>
+        {!available && (
+          <div className="book-unavailable-note">Книга пока недоступна для чтения</div>
+        )}
       </div>
 
     </article>
@@ -64,40 +81,40 @@ function BookCard({ book, onOpen }: { book: Book; onOpen: (book: Book) => void }
 
 }
 
+function AuthorMatch({ author }: { author: Author }) {
+  return (
+    <div className="author-match">
+      <span className="eyebrow">Автор</span>
+      <h3>{author.name}</h3>
+    </div>
+  );
+}
+
+const EMPTY_RESULT: SearchResult = { query: "", matchedAuthors: [], books: [] };
+
 export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: SearchPanelProps) {
 
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState("");
   const [status, setStatus] = useState<Status>("idle");
-  const [results, setResults] = useState<Book[]>([]);
+  const [result, setResult] = useState<SearchResult>(EMPTY_RESULT);
   const inputRef = useRef<HTMLInputElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
-  async function runSearch(searchQuery: string): Promise<void> {
+  function runSearch(searchQuery: string, searchLanguage: string): void {
 
     const trimmed = searchQuery.trim();
 
     if (!trimmed.length) {
       setStatus("idle");
-      setResults([]);
+      setResult(EMPTY_RESULT);
       return;
     }
 
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const next = searchCatalog(trimmed, searchLanguage);
+    const hasAnyResults = next.matchedAuthors.length > 0 || next.books.length > 0;
 
-    setStatus("loading");
-
-    try {
-      const books = await searchBooks({ query: trimmed, language, signal: controller.signal });
-      setResults(books);
-      setStatus(books.length ? "success" : "empty");
-    } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        setStatus("error");
-      }
-    }
+    setResult(next);
+    setStatus(hasAnyResults ? "success" : "empty");
 
   }
 
@@ -107,13 +124,20 @@ export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: Searc
 
     if (prefillQuery !== null) {
       setQuery(prefillQuery);
-      void runSearch(prefillQuery);
+      runSearch(prefillQuery, language);
     }
 
     inputRef.current?.focus();
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, prefillQuery]);
+
+  function handleLanguageChange(nextLanguage: string): void {
+    setLanguage(nextLanguage);
+    if (query.trim().length) {
+      runSearch(query, nextLanguage);
+    }
+  }
 
   return (
     <>
@@ -146,12 +170,12 @@ export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: Searc
             ref={inputRef}
             className="search-input"
             type="search"
-            placeholder="Например: Данте или Божественная комедия"
+            placeholder="Например: Толстой или Война и мир"
             autoComplete="off"
             value={query}
-            onChange={event => setQuery(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === "Enter") void runSearch(query);
+            onChange={event => {
+              setQuery(event.target.value);
+              runSearch(event.target.value, language);
             }}
           />
 
@@ -159,32 +183,29 @@ export function SearchPanel({ isOpen, prefillQuery, onClose, onOpenBook }: Searc
           <select
             id="languageSelect"
             className="language-select"
-            aria-label="Язык книги и перевода"
+            aria-label="Язык произведения"
             value={language}
-            onChange={event => setLanguage(event.target.value)}
+            onChange={event => handleLanguageChange(event.target.value)}
           >
             {LANGUAGES.map(item => (
               <option key={item.value} value={item.value}>{item.label}</option>
             ))}
           </select>
 
-          <button
-            className="primary-button"
-            type="button"
-            disabled={status === "loading"}
-            onClick={() => void runSearch(query)}
-          >
-            {status === "loading" ? "Поиск..." : "Найти"}
-          </button>
-
         </div>
 
         <div className="results" aria-live="polite">
-          {status === "error" && <div className="search-error">Ошибка поиска.</div>}
+
           {status === "empty" && <div className="empty-state">Ничего не найдено.</div>}
-          {status === "success" && results.map(book => (
+
+          {status === "success" && result.matchedAuthors.map(author => (
+            <AuthorMatch key={author.id} author={author} />
+          ))}
+
+          {status === "success" && result.books.map(({ book }) => (
             <BookCard key={book.id} book={book} onOpen={onOpenBook} />
           ))}
+
         </div>
 
       </aside>
