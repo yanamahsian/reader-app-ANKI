@@ -6,9 +6,10 @@ import { SearchPanel } from "./SearchPanel";
 
 interface HomeViewProps {
   onOpenBook: (book: Book) => void;
+  onOpenCollections: () => void;
 }
 
-export function HomeView({ onOpenBook }: HomeViewProps) {
+export function HomeView({ onOpenBook, onOpenCollections }: HomeViewProps) {
 
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
@@ -32,6 +33,7 @@ export function HomeView({ onOpenBook }: HomeViewProps) {
         isOpen={isSidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onOpenSearch={() => openSearch()}
+        onOpenCollections={onOpenCollections}
       />
 
       <div className="home-main">

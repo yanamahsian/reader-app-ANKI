@@ -624,6 +624,209 @@ body.theme-dark {
 .collection-card:hover {
   background-color: rgba(202, 160, 88, 0.035);
 }
+
+
+/* =========================================================
+   COLLECTIONS VIEW (full-screen — Phase 6)
+   Deliberately separate class names from .collection-card /
+   .collection-grid above (the home-page teaser strip), even though
+   the visual language is the same bordered, no-radius, no-shadow
+   editorial grid — reusing those exact classes here would risk
+   changing the teaser section's look as a side effect.
+   ========================================================= */
+
+.collections-view {
+  padding: 104px 7.5% 140px;
+
+  background: var(--home-bg);
+}
+
+.collections-header {
+  max-width: 640px;
+
+  margin-bottom: 56px;
+}
+
+.collections-header h1 {
+  margin: 6px 0 18px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: clamp(46px, 5vw, 72px);
+  line-height: 0.95;
+}
+
+.collections-subtitle {
+  margin: 0;
+
+  color: var(--home-muted);
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 19px;
+  line-height: 1.5;
+}
+
+.collections-grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(auto-fill, minmax(280px, 1fr));
+
+  border-top: 1px solid var(--home-border);
+  border-left: 1px solid var(--home-border);
+}
+
+.collection-tile {
+  display: flex;
+  flex-direction: column;
+
+  border-right: 1px solid var(--home-border);
+  border-bottom: 1px solid var(--home-border);
+
+  cursor: pointer;
+}
+
+.collection-tile:hover {
+  background-color: rgba(202, 160, 88, 0.035);
+}
+
+.collection-tile-image {
+  position: relative;
+
+  aspect-ratio: 4 / 3;
+
+  overflow: hidden;
+  background: var(--home-surface-soft);
+}
+
+.collection-tile-image img {
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover;
+  display: block;
+}
+
+.collection-tile-fallback {
+  width: 100%;
+  height: 100%;
+
+  background:
+    radial-gradient(
+      circle at 30% 24%,
+      rgba(202, 160, 88, 0.1),
+      transparent 60%
+    ),
+    var(--home-surface-soft);
+}
+
+.collection-tile-body {
+  padding: 22px 25px 26px;
+}
+
+.collection-tile-body h3 {
+  margin: 0 0 10px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.collection-tile-body p {
+  margin: 0 0 14px;
+
+  color: var(--home-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.collection-tile-count {
+  color: rgba(202, 160, 88, 0.8);
+
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.collection-detail {
+  padding: 64px 7.5% 140px;
+
+  background: var(--home-bg);
+}
+
+.collection-detail-hero {
+  position: relative;
+
+  margin: 28px 0 56px;
+  min-height: 320px;
+
+  display: flex;
+  align-items: flex-end;
+
+  border: 1px solid var(--home-border);
+  overflow: hidden;
+}
+
+.collection-detail-hero img {
+  position: absolute;
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover;
+}
+
+.collection-detail-fallback {
+  position: absolute;
+  inset: 0;
+
+  background:
+    radial-gradient(
+      circle at 22% 20%,
+      rgba(202, 160, 88, 0.12),
+      transparent 55%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(74, 21, 29, 0.5),
+      rgba(19, 12, 9, 0.4)
+    );
+}
+
+.collection-detail-heading {
+  position: relative;
+
+  max-width: 620px;
+
+  padding: 28px 32px;
+
+  background: linear-gradient(0deg, rgba(10, 6, 5, 0.86), transparent);
+}
+
+.collection-detail-heading h1 {
+  margin: 4px 0 12px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: clamp(38px, 4.4vw, 58px);
+  line-height: 1;
+}
+
+.collection-detail-heading p {
+  margin: 0;
+
+  color: rgba(246, 237, 224, 0.82);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.collection-detail-books {
+  max-width: 720px;
+}
+
 /* =========================================================
    AUTHORS
    ========================================================= */

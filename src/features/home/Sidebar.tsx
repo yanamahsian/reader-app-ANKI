@@ -2,9 +2,10 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenSearch: () => void;
+  onOpenCollections: () => void;
 }
 
-export function Sidebar({ isOpen, onClose, onOpenSearch }: SidebarProps) {
+export function Sidebar({ isOpen, onClose, onOpenSearch, onOpenCollections }: SidebarProps) {
 
   return (
     <>
@@ -31,7 +32,9 @@ export function Sidebar({ isOpen, onClose, onOpenSearch }: SidebarProps) {
 
         <nav className="site-nav">
           <a className="nav-link active" href="#hero">Главная</a>
-          <a className="nav-link" href="#collections">Подборки</a>
+          <button className="nav-link nav-button" type="button" onClick={onOpenCollections}>
+            Подборки
+          </button>
           <a className="nav-link" href="#authors">Авторы</a>
           <a className="nav-link" href="#academies">Академии</a>
           <button className="nav-link nav-button" type="button" onClick={onOpenSearch}>

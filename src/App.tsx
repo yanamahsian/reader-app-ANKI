@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { HomeView } from "./features/home/HomeView";
 import { ReaderView } from "./features/reader/ReaderView";
+import { CollectionsView } from "./features/collections/CollectionsView";
 import type { Book } from "./features/reader/engine/types";
 
-type View = "home" | "reader";
+type View = "home" | "reader" | "collections";
 
 // ============================================================
 // PHASE 3 TEST HOOK — TEMPORARY, not part of the product UI.
@@ -48,10 +49,22 @@ export function App() {
     setView("home");
   }
 
+  function handleOpenCollections(): void {
+    setView("collections");
+  }
+
+  function handleExitCollections(): void {
+    setView("home");
+  }
+
   if (view === "reader" && currentBook) {
     return <ReaderView book={currentBook} onExit={handleExitReader} />;
   }
 
-  return <HomeView onOpenBook={handleOpenBook} />;
+  if (view === "collections") {
+    return <CollectionsView onOpenBook={handleOpenBook} onBack={handleExitCollections} />;
+  }
+
+  return <HomeView onOpenBook={handleOpenBook} onOpenCollections={handleOpenCollections} />;
 
 }

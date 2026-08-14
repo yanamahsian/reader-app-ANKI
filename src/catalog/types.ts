@@ -44,6 +44,12 @@ export interface Collection {
   id: string;
   title: string;
   description: string;
+  // Full path relative to /public (e.g. "collections/philosophy.jpg"),
+  // not just a bare filename — the component that renders it only
+  // prepends BASE_URL, it never derives or guesses a path from the
+  // collection's id. null means no image yet; UI must fall back
+  // gracefully, never to a broken-image icon.
+  image: string | null;
 }
 
 export interface Book {
