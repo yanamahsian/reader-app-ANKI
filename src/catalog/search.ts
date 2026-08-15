@@ -1,6 +1,5 @@
 import type { Author, Book } from "./types";
-import { authors } from "./authors";
-import { books } from "./books";
+import { getBooks, getAuthors } from "./catalogStore";
 import { genres, epochs, movements, themes } from "./taxonomy";
 
 export interface RankedBook {
@@ -170,13 +169,13 @@ export function searchCatalog(query: string, language: string = ""): SearchResul
     return { query, matchedAuthors: [], books: [] };
   }
 
-  const authorById = new Map(authors.map(author => [author.id, author]));
+  const authorById = new Map(getAuthors().map(author => [author.id, author]));
 
-  const matchedAuthors = authors.filter(author => authorMatchScore(author, normalizedQuery) >= SCORE_PREFIX);
+  const matchedAuthors = getAuthors().filter(author => authorMatchScore(author, normalizedQuery) >= SCORE_PREFIX);
 
   const ranked: RankedBook[] = [];
 
-  for (const book of books) {
+  for (const book of getBooks()) {
 
     if (!matchesLanguage(book, language)) continue;
 

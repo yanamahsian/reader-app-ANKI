@@ -3,6 +3,7 @@ import { HomeView } from "./features/home/HomeView";
 import { ReaderView } from "./features/reader/ReaderView";
 import { CollectionsView } from "./features/collections/CollectionsView";
 import { BookDetailView } from "./features/book-detail/BookDetailView";
+import { loadRemoteCatalog } from "./catalog";
 import type { Book } from "./features/reader/engine/types";
 
 type View = "home" | "reader" | "collections" | "book-detail";
@@ -49,6 +50,16 @@ export function App() {
   // exact collection" instead of resetting to their default state.
   const [restoreSearch, setRestoreSearch] = useState<{ query: string; language: string } | null>(null);
   const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(null);
+
+  // Phase 10: fetch the Supabase-backed catalog once at startup. The
+  // app already renders correctly against the static seed catalog
+  // (catalogStore.ts) before this resolves — this call silently
+  // upgrades the in-memory data if it succeeds, and does nothing
+  // (logs a warning) if Supabase is unreachable. No loading state is
+  // needed here for that reason.
+  useEffect(() => {
+    void loadRemoteCatalog();
+  }, []);
 
   // PHASE 3 TEST HOOK — see block above. Remove this effect together
   // with TEST_EPUB_BOOK when no longer needed.

@@ -1,13 +1,20 @@
 export type { Book, Author, Collection, TaxonomyTerm, BookFile, BookFormat, RightsStatus } from "./types";
 
-export { authors } from "./authors";
-export { books } from "./books";
 export { collections } from "./collections";
 export { epochs, centuries, countries, movements, genres, themes } from "./taxonomy";
 
+// Phase 10: books/authors are no longer read directly from the
+// static books.ts/authors.ts files here — they come from
+// catalogStore.ts, which starts with that same static data and is
+// replaced with the Supabase-backed catalog once loadRemoteCatalog()
+// (called once at app startup, see App.tsx) succeeds. Every lookup
+// below stays exactly as it was; only where its data comes from
+// changed.
+export { getBooks, getAuthors, isRemoteCatalogLoaded } from "./catalogStore";
+export { loadRemoteCatalog } from "./remoteCatalog";
+
 import type { Author, Book, Collection } from "./types";
-import { authors } from "./authors";
-import { books } from "./books";
+import { getBooks, getAuthors } from "./catalogStore";
 import { collections } from "./collections";
 
 // Direct id-based lookups only — not a search algorithm. Ranking,
@@ -15,11 +22,11 @@ import { collections } from "./collections";
 // phase, which will be built on top of this data, not inside it.
 
 export function getBookById(id: string): Book | undefined {
-  return books.find(book => book.id === id);
+  return getBooks().find(book => book.id === id);
 }
 
 export function getAuthorById(id: string): Author | undefined {
-  return authors.find(author => author.id === id);
+  return getAuthors().find(author => author.id === id);
 }
 
 export function getCollectionById(id: string): Collection | undefined {
@@ -27,9 +34,9 @@ export function getCollectionById(id: string): Collection | undefined {
 }
 
 export function getBooksByAuthor(authorId: string): Book[] {
-  return books.filter(book => book.authorId === authorId);
+  return getBooks().filter(book => book.authorId === authorId);
 }
 
 export function getBooksByCollection(collectionId: string): Book[] {
-  return books.filter(book => book.collectionIds.includes(collectionId));
+  return getBooks().filter(book => book.collectionIds.includes(collectionId));
 }
