@@ -1385,17 +1385,17 @@ button.text-link {
 
 .tap-zone-left {
   left: 0;
-  width: 26%;
+  width: 35%;
 }
 
 .tap-zone-center {
-  left: 26%;
-  width: 48%;
+  left: 35%;
+  width: 30%;
 }
 
 .tap-zone-right {
   right: 0;
-  width: 26%;
+  width: 35%;
 }
 
 
