@@ -412,10 +412,12 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   }
 
   function nextPage(): void {
+    console.log("DIAG nextPage(): currentPage =", currentPage, "pages.length =", pages.length);
     if (currentPage < pages.length - 1) renderPage(currentPage + 1);
   }
 
   function previousPage(): void {
+    console.log("DIAG previousPage(): currentPage =", currentPage, "pages.length =", pages.length);
     if (currentPage > 0) renderPage(currentPage - 1);
   }
 
@@ -531,6 +533,7 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     const loader = detectLoader(book);
     loadedDocument = await loader.load(book);
     pages = flattenDocument(loadedDocument);
+    console.log("DIAG open(): loadedDocument.chapters.length =", loadedDocument.chapters.length, "| flattened pages.length =", pages.length);
 
     const savedPosition = progressStore.getPosition(book.id);
     currentPage = savedPosition !== null ? Math.min(savedPosition, pages.length - 1) : 0;
