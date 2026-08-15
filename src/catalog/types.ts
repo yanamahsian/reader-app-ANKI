@@ -9,7 +9,11 @@
 
 export type RightsStatus = "public-domain" | "restricted" | "unknown";
 
-export type BookFormat = "plaintext" | "epub" | "fb2" | "pdf";
+// "anki-json" (Phase 9) is AN.KI's own normalized reader content —
+// not a raw source format like the other three, but the format the
+// resolver now prefers whenever it's available (see
+// toReaderBook.ts's READER_SUPPORTED_FORMATS).
+export type BookFormat = "plaintext" | "epub" | "fb2" | "pdf" | "anki-json";
 
 export interface BookFile {
   format: BookFormat;

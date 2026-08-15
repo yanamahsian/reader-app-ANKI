@@ -908,6 +908,36 @@ export const books: Book[] = [
             "url": "https://www.gutenberg.org/ebooks/1342.epub.noimages"
           }
         ]
+      },
+      // PHASE 9.3 TRANSITION BRIDGE: this id is NOT a new/duplicate
+      // edition -- it is the exact same editions.id row that
+      // supabase-functions/omnia-ingest already created in Postgres
+      // (the source of truth for this edition). Remove this entry
+      // once the frontend catalog itself migrates to reading
+      // editions from Postgres (a later phase) instead of this
+      // static books.ts file; do not duplicate it under a different
+      // id in the meantime.
+      {
+        "id": "pride-and-prejudice-gutenberg-1342",
+        "language": "en",
+        "isOriginal": true,
+        "translatorName": null,
+        "rights": [
+          {
+            "status": "public-domain",
+            "jurisdiction": "US"
+          }
+        ],
+        "sourceId": "gutenberg",
+        "externalIds": {
+          "gutenberg": "1342"
+        },
+        "files": [
+          {
+            "format": "anki-json",
+            "url": "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-content?editionId=pride-and-prejudice-gutenberg-1342"
+          }
+        ]
       }
     ]
   },

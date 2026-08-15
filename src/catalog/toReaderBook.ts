@@ -1,12 +1,14 @@
 import type { Book as CatalogBook, BookFile, BookFormat, Edition } from "./types";
 import type { Book as ReaderBook } from "../features/reader/engine/types";
 
-// Formats the reader engine can actually open right now (Phase 3
-// shipped EPUB and plaintext; FB2 and PDF loaders were never built).
-// The resolver must never pick a format the reader can't open just
-// because a file exists for it -- that file stays in the data for
-// later, it's simply not selected yet.
-const READER_SUPPORTED_FORMATS: BookFormat[] = ["epub", "plaintext"];
+// Formats the reader engine can actually open right now. "anki-json"
+// (Phase 9) is AN.KI's own normalized content — ranked first, ahead
+// of epub/plaintext, because it's our own trusted, already
+// reader-tested representation, not a third-party file the browser
+// has to parse itself. epub/plaintext remain as fallbacks for
+// editions that haven't gone through AN.KI ingestion yet. FB2/PDF
+// loaders were never built.
+const READER_SUPPORTED_FORMATS: BookFormat[] = ["anki-json", "epub", "plaintext"];
 
 function isPublicDomain(edition: Edition): boolean {
   return edition.rights.some(assertion => assertion.status === "public-domain");
