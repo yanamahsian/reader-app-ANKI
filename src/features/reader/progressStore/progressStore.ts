@@ -1,4 +1,4 @@
-import type { Fragment } from "../engine/types";
+import type { Fragment, Bookmark } from "../engine/types";
 
 // Contract used by the reader engine to persist reading position and
 // saved fragments. Phase 2 ships only a localStorage implementation
@@ -13,4 +13,9 @@ export interface ProgressStore {
   getFragments(): Fragment[];
   saveFragment(fragment: Fragment): void;
   deleteFragment(id: string): void;
+
+  // Reader Complete: bookmarks, same storage philosophy as fragments.
+  getBookmarks(bookId: string): Bookmark[];
+  saveBookmark(bookmark: Bookmark): void;
+  deleteBookmark(id: string): void;
 }

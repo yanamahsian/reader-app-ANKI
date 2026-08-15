@@ -1,30 +1,31 @@
 import type { ProgressStore } from "./progressStore";
-import type { Fragment } from "../engine/types";
+import type { Fragment, Bookmark } from "../engine/types";
 
 const PREFIX = "anki_";
 
 const KEYS = {
-  POSITION: PREFIX + "position",
-  FRAGMENTS: PREFIX + "fragments"
+  // Reader Complete: position is now genuinely per-book
+  // (PREFIX + "position_" + bookId) — previously this was a single
+  // global key shared by every book, which meant opening a second
+  // book silently overwrote the first one's saved place. bookId is
+  // no longer ignored.
+  POSITION_PREFIX: PREFIX + "position_",
+  FRAGMENTS: PREFIX + "fragments",
+  BOOKMARKS: PREFIX + "bookmarks"
 } as const;
 
-// Position is currently keyed only by the last-opened book (matches the
-// original script.js behaviour, which tracked a single STORAGE.POSITION
-// key regardless of book). bookId is accepted in the interface already
-// so a future per-book implementation is a drop-in replacement, not an
-// interface change.
 export function createLocalStorageStore(): ProgressStore {
 
-  function getPosition(_bookId: string): number | null {
-    const raw = localStorage.getItem(KEYS.POSITION);
+  function getPosition(bookId: string): number | null {
+    const raw = localStorage.getItem(KEYS.POSITION_PREFIX + bookId);
     if (raw === null) return null;
 
     const value = Number(raw);
     return Number.isNaN(value) ? null : value;
   }
 
-  function savePosition(_bookId: string, page: number): void {
-    localStorage.setItem(KEYS.POSITION, String(page));
+  function savePosition(bookId: string, page: number): void {
+    localStorage.setItem(KEYS.POSITION_PREFIX + bookId, String(page));
   }
 
   function getFragments(): Fragment[] {
@@ -47,6 +48,36 @@ export function createLocalStorageStore(): ProgressStore {
     localStorage.setItem(KEYS.FRAGMENTS, JSON.stringify(fragments));
   }
 
-  return { getPosition, savePosition, getFragments, saveFragment, deleteFragment };
+  // Same storage shape as fragments: one array holding every book's
+  // bookmarks, filtered by bookId on read — not a key per book.
+  function getAllBookmarks(): Bookmark[] {
+    try {
+      const raw = localStorage.getItem(KEYS.BOOKMARKS);
+      return raw ? (JSON.parse(raw) as Bookmark[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getBookmarks(bookId: string): Bookmark[] {
+    return getAllBookmarks().filter(bookmark => bookmark.bookId === bookId);
+  }
+
+  function saveBookmark(bookmark: Bookmark): void {
+    const bookmarks = getAllBookmarks();
+    bookmarks.unshift(bookmark);
+    localStorage.setItem(KEYS.BOOKMARKS, JSON.stringify(bookmarks));
+  }
+
+  function deleteBookmark(id: string): void {
+    const bookmarks = getAllBookmarks().filter(item => item.id !== id);
+    localStorage.setItem(KEYS.BOOKMARKS, JSON.stringify(bookmarks));
+  }
+
+  return {
+    getPosition, savePosition,
+    getFragments, saveFragment, deleteFragment,
+    getBookmarks, saveBookmark, deleteBookmark
+  };
 
 }

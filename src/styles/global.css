@@ -2063,3 +2063,222 @@ button.text-link {
   color: var(--home-muted);
   font-size: 15px;
 }
+
+
+/* =========================================================
+   READER COMPLETE
+   Ghost buttons in the reader chrome had no rule at all before this
+   (rendered as native browser buttons) — fixed here alongside the
+   new controls, since leaving them unstyled next to a newly-styled
+   slider/arrows would look inconsistent.
+   ========================================================= */
+
+.ghost-btn {
+  appearance: none;
+  -webkit-appearance: none;
+
+  border: 1px solid var(--reader-border);
+  border-radius: 3px;
+
+  padding: 6px 11px;
+
+  background: transparent;
+  color: var(--reader-text);
+
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+
+  cursor: pointer;
+
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.ghost-btn:hover {
+  border-color: var(--reader-gold);
+  color: var(--reader-gold);
+}
+
+.ghost-btn[aria-pressed="true"] {
+  border-color: var(--reader-gold);
+  color: var(--reader-gold);
+}
+
+/* ---- bottom bar: visible prev/next arrows + progress slider ---- */
+
+.reader-bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  z-index: 110;
+
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  padding: 10px 22px calc(14px + env(safe-area-inset-bottom, 0px));
+
+  background: linear-gradient(0deg, var(--reader-sheet) 0%, transparent 100%);
+
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.reader-bottom-bar.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.reader-nav-arrow {
+  appearance: none;
+  -webkit-appearance: none;
+
+  flex: 0 0 auto;
+
+  width: 34px;
+  height: 34px;
+
+  border: 1px solid var(--reader-border);
+  border-radius: 50%;
+
+  background: transparent;
+  color: var(--reader-text);
+
+  font-size: 17px;
+  line-height: 1;
+
+  cursor: pointer;
+
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.reader-nav-arrow:hover {
+  border-color: var(--reader-gold);
+  color: var(--reader-gold);
+}
+
+.reader-progress-slider {
+  flex: 1 1 auto;
+
+  appearance: none;
+  -webkit-appearance: none;
+
+  height: 2px;
+
+  background: var(--reader-border);
+
+  cursor: pointer;
+}
+
+.reader-progress-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+
+  width: 12px;
+  height: 12px;
+
+  border-radius: 50%;
+  background: var(--reader-gold);
+}
+
+.reader-progress-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+
+  border: none;
+  border-radius: 50%;
+  background: var(--reader-gold);
+}
+
+.reader-progress-slider::-moz-range-track {
+  height: 2px;
+  background: var(--reader-border);
+}
+
+/* ---- TOC / bookmarks panel (same visual family as the action sheet) ---- */
+
+.toc-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  z-index: 999998;
+
+  max-height: 70vh;
+
+  display: flex;
+  flex-direction: column;
+
+  padding: 10px 22px calc(20px + env(safe-area-inset-bottom, 0px));
+
+  background: var(--reader-sheet);
+  border-top: 1px solid var(--reader-border);
+  border-radius: 14px 14px 0 0;
+
+  overflow: hidden;
+}
+
+.toc-list {
+  overflow-y: auto;
+}
+
+.toc-item {
+  display: block;
+  width: 100%;
+
+  padding: 12px 4px;
+
+  border: none;
+  border-bottom: 1px solid var(--reader-border);
+
+  background: transparent;
+  color: var(--reader-text);
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 17px;
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.toc-item:hover {
+  color: var(--reader-gold);
+}
+
+.toc-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toc-item-row .toc-item {
+  flex: 1 1 auto;
+}
+
+.toc-item-delete {
+  flex: 0 0 auto;
+
+  border: none;
+  background: transparent;
+  color: var(--reader-meta);
+
+  font-size: 18px;
+  line-height: 1;
+
+  cursor: pointer;
+}
+
+.toc-item-delete:hover {
+  color: var(--reader-gold);
+}
+
+.toc-empty {
+  padding: 16px 4px;
+
+  color: var(--reader-meta);
+  font-size: 14px;
+}

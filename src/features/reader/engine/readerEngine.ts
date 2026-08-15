@@ -1,6 +1,5 @@
-import type { Book, Fragment } from "./types";
+import type { Book, Fragment, Bookmark } from "./types";
 import type { ProgressStore } from "../progressStore/progressStore";
-import { detectChapterTitle } from "./pagination";
 import { createSelectionController, type SelectionController } from "./selection";
 import { translateText, explainText } from "../../../api/ai";
 import { detectLoader } from "./formats/detect";
@@ -31,6 +30,9 @@ export interface ReaderEngine {
 // zones, swipe, keyboard, progressStore position all stay exactly as
 // they were before formats/ existed) — chapter awareness is layered
 // on top per page rather than changing how paging itself works.
+// Reader Complete: this same array/index is also what TOC, the
+// progress slider, and bookmarks all navigate by — one global page
+// index, one function (renderPage) that ever changes it.
 interface FlatPage {
   html: string;
   rawText: string;
@@ -69,6 +71,7 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   let loadedDocument: LoadedDocument | null = null;
   let pages: FlatPage[] = [];
   let currentPage = 0;
+  let bookmarks: Bookmark[] = [];
   let fontSize = Number(localStorage.getItem(FONT_KEY)) || DEFAULT_FONT_SIZE;
   let theme: Theme = (localStorage.getItem(THEME_KEY) as Theme) || "dark";
 
@@ -114,14 +117,35 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   themeBtn.setAttribute("aria-label", "Сменить тему чтения");
   themeBtn.textContent = "Тема";
 
-  overlayActions.append(fontMinusBtn, fontPlusBtn, themeBtn);
+  // Reader Complete: table of contents — only shown for books with
+  // real chapter structure (set in open(), see below). Hidden by
+  // default so a plaintext book never shows a pointless empty TOC.
+  const tocBtn = document.createElement("button");
+  tocBtn.className = "ghost-btn";
+  tocBtn.type = "button";
+  tocBtn.setAttribute("aria-label", "Оглавление");
+  tocBtn.textContent = "Оглавление";
+  tocBtn.style.display = "none";
+
+  const bookmarkToggleBtn = document.createElement("button");
+  bookmarkToggleBtn.className = "ghost-btn";
+  bookmarkToggleBtn.type = "button";
+  bookmarkToggleBtn.setAttribute("aria-label", "Добавить или убрать закладку на этой странице");
+
+  const bookmarksListBtn = document.createElement("button");
+  bookmarksListBtn.className = "ghost-btn";
+  bookmarksListBtn.type = "button";
+  bookmarksListBtn.setAttribute("aria-label", "Список закладок");
+  bookmarksListBtn.textContent = "Закладки";
+
+  overlayActions.append(fontMinusBtn, fontPlusBtn, themeBtn, tocBtn, bookmarkToggleBtn, bookmarksListBtn);
   overlayTop.append(backToLibraryBtn, overlayActions);
   overlay.appendChild(overlayTop);
 
   const chapterLine = document.createElement("div");
   chapterLine.className = "chapter-line";
   chapterLine.setAttribute("aria-live", "polite");
-  chapterLine.textContent = "Глава";
+  chapterLine.textContent = "";
 
   const readerShell = document.createElement("div");
   readerShell.className = "reader-shell";
@@ -149,7 +173,40 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   rightTapZone.className = "tap-zone tap-zone-right";
   rightTapZone.setAttribute("aria-label", "Следующая страница");
 
-  container.append(overlay, chapterLine, readerShell, remainingLine, leftTapZone, centerTapZone, rightTapZone);
+  // Reader Complete: bottom bar — visible prev/next arrows + progress
+  // slider. Shown/hidden together with the top overlay (same
+  // overlayVisible toggle, see toggleOverlay below) so tapping the
+  // center of the page shows or hides all chrome at once, not two
+  // independent mechanisms.
+  const bottomBar = document.createElement("div");
+  bottomBar.className = "reader-bottom-bar visible";
+
+  const prevArrowBtn = document.createElement("button");
+  prevArrowBtn.className = "reader-nav-arrow reader-nav-arrow-prev";
+  prevArrowBtn.type = "button";
+  prevArrowBtn.setAttribute("aria-label", "Предыдущая страница");
+  prevArrowBtn.textContent = "‹";
+
+  const progressSlider = document.createElement("input");
+  progressSlider.type = "range";
+  progressSlider.className = "reader-progress-slider";
+  progressSlider.min = "0";
+  progressSlider.max = "0";
+  progressSlider.value = "0";
+  progressSlider.setAttribute("aria-label", "Позиция в книге");
+
+  const nextArrowBtn = document.createElement("button");
+  nextArrowBtn.className = "reader-nav-arrow reader-nav-arrow-next";
+  nextArrowBtn.type = "button";
+  nextArrowBtn.setAttribute("aria-label", "Следующая страница");
+  nextArrowBtn.textContent = "›";
+
+  bottomBar.append(prevArrowBtn, progressSlider, nextArrowBtn);
+
+  container.append(
+    overlay, chapterLine, readerShell, remainingLine,
+    leftTapZone, centerTapZone, rightTapZone, bottomBar
+  );
 
   /* ------------------------------------------------------------------
      Action sheet + backdrop (global overlay, same as original markup)
@@ -208,7 +265,73 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   actionResult.textContent = "Выбери действие.";
 
   actionSheet.append(sheetHandle, sheetHead, selectedTextBox, sheetActions, actionResult);
-  document.body.append(sheetBackdrop, actionSheet);
+
+  /* ------------------------------------------------------------------
+     Reader Complete: table of contents panel (only used when
+     hasRealChapters is true — see open()/tocBtn above)
+     ------------------------------------------------------------------ */
+
+  const tocBackdrop = document.createElement("div");
+  tocBackdrop.className = "sheet-backdrop hidden";
+
+  const tocPanel = document.createElement("section");
+  tocPanel.className = "toc-panel hidden";
+  tocPanel.setAttribute("role", "dialog");
+  tocPanel.setAttribute("aria-modal", "true");
+
+  const tocHead = document.createElement("div");
+  tocHead.className = "sheet-head";
+
+  const tocTitle = document.createElement("div");
+  tocTitle.className = "sheet-title";
+  tocTitle.textContent = "Содержание";
+
+  const closeTocBtn = document.createElement("button");
+  closeTocBtn.className = "ghost-btn";
+  closeTocBtn.type = "button";
+  closeTocBtn.setAttribute("aria-label", "Закрыть оглавление");
+  closeTocBtn.textContent = "Закрыть";
+
+  tocHead.append(tocTitle, closeTocBtn);
+
+  const tocList = document.createElement("div");
+  tocList.className = "toc-list";
+
+  tocPanel.append(tocHead, tocList);
+
+  /* ------------------------------------------------------------------
+     Reader Complete: bookmarks panel
+     ------------------------------------------------------------------ */
+
+  const bookmarksBackdrop = document.createElement("div");
+  bookmarksBackdrop.className = "sheet-backdrop hidden";
+
+  const bookmarksPanel = document.createElement("section");
+  bookmarksPanel.className = "toc-panel hidden";
+  bookmarksPanel.setAttribute("role", "dialog");
+  bookmarksPanel.setAttribute("aria-modal", "true");
+
+  const bookmarksHead = document.createElement("div");
+  bookmarksHead.className = "sheet-head";
+
+  const bookmarksTitle = document.createElement("div");
+  bookmarksTitle.className = "sheet-title";
+  bookmarksTitle.textContent = "Закладки";
+
+  const closeBookmarksBtn = document.createElement("button");
+  closeBookmarksBtn.className = "ghost-btn";
+  closeBookmarksBtn.type = "button";
+  closeBookmarksBtn.setAttribute("aria-label", "Закрыть список закладок");
+  closeBookmarksBtn.textContent = "Закрыть";
+
+  bookmarksHead.append(bookmarksTitle, closeBookmarksBtn);
+
+  const bookmarksList = document.createElement("div");
+  bookmarksList.className = "toc-list";
+
+  bookmarksPanel.append(bookmarksHead, bookmarksList);
+
+  document.body.append(sheetBackdrop, actionSheet, tocBackdrop, tocPanel, bookmarksBackdrop, bookmarksPanel);
 
   function openActionSheet(title: string, resultHtml: string): void {
     sheetTitle.textContent = title;
@@ -356,6 +479,163 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   }
 
   /* ------------------------------------------------------------------
+     Reader Complete: table of contents
+     ------------------------------------------------------------------ */
+
+  function getChapterStarts(): Array<{ pageIndex: number; title: string }> {
+
+    const starts: Array<{ pageIndex: number; title: string }> = [];
+
+    pages.forEach((page, index) => {
+      if (page.pageIndexInChapter === 0) {
+        starts.push({
+          pageIndex: index,
+          title: page.chapterTitle || `Глава ${page.chapterIndex + 1}`
+        });
+      }
+    });
+
+    return starts;
+
+  }
+
+  function openToc(): void {
+
+    tocList.innerHTML = "";
+
+    for (const chapter of getChapterStarts()) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "toc-item";
+      item.textContent = chapter.title;
+      item.addEventListener("click", () => {
+        closeToc();
+        renderPage(chapter.pageIndex);
+      });
+      tocList.appendChild(item);
+    }
+
+    tocBackdrop.classList.remove("hidden");
+    tocPanel.classList.remove("hidden");
+
+  }
+
+  function closeToc(): void {
+    tocPanel.classList.add("hidden");
+    tocBackdrop.classList.add("hidden");
+  }
+
+  tocBtn.addEventListener("click", openToc);
+  closeTocBtn.addEventListener("click", closeToc);
+  tocBackdrop.addEventListener("click", closeToc);
+
+  /* ------------------------------------------------------------------
+     Reader Complete: bookmarks
+     ------------------------------------------------------------------ */
+
+  function isCurrentPageBookmarked(): boolean {
+    return bookmarks.some(bookmark => bookmark.pageIndex === currentPage);
+  }
+
+  function updateBookmarkButton(): void {
+    const active = isCurrentPageBookmarked();
+    bookmarkToggleBtn.textContent = active ? "★ Закладка" : "☆ Закладка";
+    bookmarkToggleBtn.setAttribute("aria-pressed", String(active));
+  }
+
+  function renderBookmarksList(): void {
+
+    bookmarksList.innerHTML = "";
+
+    if (!bookmarks.length) {
+      const empty = document.createElement("p");
+      empty.className = "toc-empty";
+      empty.textContent = "Пока нет закладок.";
+      bookmarksList.appendChild(empty);
+      return;
+    }
+
+    const sorted = [...bookmarks].sort((a, b) => a.pageIndex - b.pageIndex);
+
+    for (const bookmark of sorted) {
+
+      const row = document.createElement("div");
+      row.className = "toc-item-row";
+
+      const jumpBtn = document.createElement("button");
+      jumpBtn.type = "button";
+      jumpBtn.className = "toc-item";
+      jumpBtn.textContent = bookmark.chapterTitle
+        ? `${bookmark.chapterTitle} · стр. ${bookmark.pageIndex + 1}`
+        : `Страница ${bookmark.pageIndex + 1}`;
+      jumpBtn.addEventListener("click", () => {
+        closeBookmarks();
+        renderPage(bookmark.pageIndex);
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "toc-item-delete";
+      deleteBtn.setAttribute("aria-label", "Удалить закладку");
+      deleteBtn.textContent = "×";
+      deleteBtn.addEventListener("click", () => {
+        progressStore.deleteBookmark(bookmark.id);
+        bookmarks = bookmarks.filter(item => item.id !== bookmark.id);
+        renderBookmarksList();
+        updateBookmarkButton();
+      });
+
+      row.append(jumpBtn, deleteBtn);
+      bookmarksList.appendChild(row);
+
+    }
+
+  }
+
+  function openBookmarks(): void {
+    renderBookmarksList();
+    bookmarksBackdrop.classList.remove("hidden");
+    bookmarksPanel.classList.remove("hidden");
+  }
+
+  function closeBookmarks(): void {
+    bookmarksPanel.classList.add("hidden");
+    bookmarksBackdrop.classList.add("hidden");
+  }
+
+  function toggleBookmark(): void {
+
+    if (!currentBook) return;
+
+    const existing = bookmarks.find(bookmark => bookmark.pageIndex === currentPage);
+
+    if (existing) {
+      progressStore.deleteBookmark(existing.id);
+      bookmarks = bookmarks.filter(bookmark => bookmark.id !== existing.id);
+      notify("Закладка удалена");
+    } else {
+      const bookmark: Bookmark = {
+        id: crypto.randomUUID(),
+        bookId: currentBook.id,
+        pageIndex: currentPage,
+        chapterTitle: pages[currentPage]?.chapterTitle ?? null,
+        createdAt: Date.now()
+      };
+      progressStore.saveBookmark(bookmark);
+      bookmarks = [bookmark, ...bookmarks];
+      notify("Закладка добавлена");
+    }
+
+    updateBookmarkButton();
+
+  }
+
+  bookmarkToggleBtn.addEventListener("click", toggleBookmark);
+  bookmarksListBtn.addEventListener("click", openBookmarks);
+  closeBookmarksBtn.addEventListener("click", closeBookmarks);
+  bookmarksBackdrop.addEventListener("click", closeBookmarks);
+
+  /* ------------------------------------------------------------------
      Rendering / pagination
      ------------------------------------------------------------------ */
 
@@ -378,32 +658,32 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     const page = pages[currentPage];
     viewer.innerHTML = page.html;
 
+    const percent = Math.round(((currentPage + 1) / pages.length) * 100);
+
     if (loadedDocument?.hasRealChapters) {
 
-      // Real chapter structure (EPUB): the indicator promised back in
-      // phase 2 — actual pages left in the actual current chapter,
-      // not a percentage of the whole book.
-      chapterLine.textContent = page.chapterTitle || "Чтение";
+      // Line 1: real chapter title · global page / total · overall %.
+      const title = page.chapterTitle || `Глава ${page.chapterIndex + 1}`;
+      chapterLine.textContent = `${title} · ${currentPage + 1} / ${pages.length} · ${percent}%`;
 
+      // Line 2: pages left in the current chapter only.
       const remaining = page.pagesInChapter - page.pageIndexInChapter - 1;
       remainingLine.textContent = remaining > 0
-        ? `До конца главы — ${remaining} стр.`
+        ? `До конца главы: ${remaining} стр.`
         : "Последняя страница главы";
 
     } else {
 
-      // TEMPORARY, plain text only: no reliable chapter boundaries
-      // exist for raw .txt, so overall book progress is shown instead
-      // of a chapter-relative count, and the chapter line falls back
-      // to the heading heuristic — unchanged from phase 2. Do not
-      // fake a chapter-relative count here; EPUB above already has
-      // the real version of this indicator.
-      chapterLine.textContent = detectChapterTitle(page.rawText) || "Чтение";
-
-      const percent = Math.round(((currentPage + 1) / pages.length) * 100);
-      remainingLine.textContent = `${percent}% книги`;
+      // No real chapter structure: never show a fabricated chapter
+      // name or a meaningless "pages left in chapter" — only overall
+      // book progress, on line 1; line 2 stays empty.
+      chapterLine.textContent = `${currentPage + 1} / ${pages.length} · ${percent}%`;
+      remainingLine.textContent = "";
 
     }
+
+    progressSlider.value = String(currentPage);
+    updateBookmarkButton();
 
     if (currentBook) {
       progressStore.savePosition(currentBook.id, currentPage);
@@ -422,9 +702,20 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   function repaginate(): void {
     if (!loadedDocument) return;
     pages = flattenDocument(loadedDocument);
+    progressSlider.max = String(Math.max(0, pages.length - 1));
     renderPage(currentPage);
   }
 
+  /* ------------------------------------------------------------------
+     Reader Complete: progress slider + visible arrows
+     ------------------------------------------------------------------ */
+
+  progressSlider.addEventListener("input", () => {
+    renderPage(Number(progressSlider.value));
+  });
+
+  prevArrowBtn.addEventListener("click", previousPage);
+  nextArrowBtn.addEventListener("click", nextPage);
 
   /* ------------------------------------------------------------------
      Overlay toggle
@@ -435,6 +726,7 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   function toggleOverlay(): void {
     overlayVisible = !overlayVisible;
     overlay.classList.toggle("visible", overlayVisible);
+    bottomBar.classList.toggle("visible", overlayVisible);
   }
 
   /* ------------------------------------------------------------------
@@ -487,6 +779,8 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
   backToLibraryBtn.addEventListener("click", () => {
     closeActionSheet();
+    closeToc();
+    closeBookmarks();
     onExit();
   });
 
@@ -532,6 +826,13 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     loadedDocument = await loader.load(book);
     pages = flattenDocument(loadedDocument);
 
+    tocBtn.style.display = loadedDocument.hasRealChapters ? "" : "none";
+
+    progressSlider.min = "0";
+    progressSlider.max = String(Math.max(0, pages.length - 1));
+
+    bookmarks = progressStore.getBookmarks(book.id);
+
     const savedPosition = progressStore.getPosition(book.id);
     currentPage = savedPosition !== null ? Math.min(savedPosition, pages.length - 1) : 0;
 
@@ -550,6 +851,10 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
     sheetBackdrop.remove();
     actionSheet.remove();
+    tocBackdrop.remove();
+    tocPanel.remove();
+    bookmarksBackdrop.remove();
+    bookmarksPanel.remove();
 
     container.innerHTML = "";
 

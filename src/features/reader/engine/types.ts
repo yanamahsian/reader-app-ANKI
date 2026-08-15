@@ -29,6 +29,20 @@ export interface Fragment {
   createdAt: number;
 }
 
+// A saved position in a book — Reader Complete. Deliberately simpler
+// than Fragment (no text, no author): a bookmark just marks a place
+// to jump back to. chapterTitle is denormalized at save time (same
+// pattern as Book.author on catalog types) purely for display in the
+// bookmarks list — it is never used to locate the page again, only
+// pageIndex is.
+export interface Bookmark {
+  id: string;
+  bookId: string;
+  pageIndex: number;
+  chapterTitle: string | null;
+  createdAt: number;
+}
+
 export interface ReadingPosition {
   page: number;
 }
