@@ -2,6 +2,16 @@ import type { Book } from "../types";
 import type { FormatLoader, LoadedDocument, LoadedChapter } from "./types";
 import { normalizeBook, paginateText, formatPage } from "../pagination";
 
+// Same requirement, same reasoning as src/catalog/remoteCatalog.ts:
+// Supabase's gateway requires a valid `apikey` header on every Edge
+// Function call (here: omnia-book-content, which book.url points to)
+// regardless of the "Verify JWT with legacy secret" setting. This is
+// the public-safe "publishable key" -- never service_role. Sent ONLY
+// on `apikey`, never as `Authorization: Bearer` -- per Supabase's
+// current docs, publishable/secret keys are not JWTs and the
+// platform rejects them if sent as a bearer token.
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy";
+
 // AN.KI's own normalized reader content (Phase 9) — produced entirely
 // server-side by ingestion (see supabase-functions/omnia-ingest and
 // omnia-book-content), never parsed in the browser. This loader does
@@ -71,7 +81,11 @@ export const ankiJsonLoader: FormatLoader = {
 
   async load(book: Book): Promise<LoadedDocument> {
 
-    const response = await fetch(book.url);
+    const response = await fetch(book.url, {
+      headers: {
+        "apikey": SUPABASE_PUBLISHABLE_KEY
+      }
+    });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch AN.KI normalized content: ${response.status}`);
