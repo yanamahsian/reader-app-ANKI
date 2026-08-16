@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AN.KI — Review</title>
+<style>
+  :root {
+    --bg: #17120f;
+    --text: #efece6;
+    --muted: #b8ac9c;
+    --border: #3a322a;
+    --gold: #caa058;
+    --error-bg: #3a1a1a;
+    --error-border: #7a3a3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 20px 16px 60px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  #auth-box {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  #auth-box input[type=password] {
+    background: #0f0c0a;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    width: 100%;
+    max-width: 260px;
+    font-size: 16px; /* не даёт iOS Safari зумить при фокусе */
+  }
+  #auth-box button { margin-top: 8px; }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-meta { color: var(--muted); font-size: 13px; margin: 4px 0 10px; }
+  .card-reasons { font-size: 13px; color: #d7c9b4; margin-bottom: 10px; }
+  .card-conflict {
+    font-size: 13px;
+    background: #2a221a;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+  }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    background: #2a221a;
+    color: var(--text);
+    border: 1px solid #5a4c3a;
+    border-radius: 4px;
+    padding: 8px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  input[type=text] {
+    background: #0f0c0a;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 16px;
+    width: 100%;
+    max-width: 220px;
+  }
+  .duplicate-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+
+  .empty { color: var(--muted); }
+  .error-banner {
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+  .card-error { color: #ff9b9b; font-size: 13px; margin-top: 8px; }
+
+  @media (max-width: 480px) {
+    button, input[type=text] { width: 100%; max-width: none; }
+    .actions { flex-direction: column; align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+
+<h1>AN.KI — очередь на проверку</h1>
+<p class="subtitle">Спорные книги из match_review_queue</p>
+
+<div id="auth-box">
+  <div>Пароль администратора:</div>
+  <input type="password" id="password-input" placeholder="Пароль">
+  <div><button id="login-btn" type="button">Войти и загрузить очередь</button></div>
+</div>
+
+<div id="error-banner-container"></div>
+<div id="queue-container"></div>
+
+<script>
+(function () {
+
+  // Подставьте реальный URL вашей функции, если он отличается.
+  var FUNCTION_URL = "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-review";
+
+  var passwordInput = document.getElementById("password-input");
+  var loginBtn = document.getElementById("login-btn");
+  var errorContainer = document.getElementById("error-banner-container");
+  var queueContainer = document.getElementById("queue-container");
+
+  function getPassword() {
+    return sessionStorage.getItem("omnia_review_password") || "";
+  }
+
+  function setPassword(value) {
+    sessionStorage.setItem("omnia_review_password", value);
+  }
+
+  function showError(message) {
+    errorContainer.innerHTML = "";
+    var div = document.createElement("div");
+    div.className = "error-banner";
+    div.textContent = "Ошибка: " + message;
+    errorContainer.appendChild(div);
+  }
+
+  function clearError() {
+    errorContainer.innerHTML = "";
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement("div");
+    div.textContent = text == null ? "" : String(text);
+    return div.innerHTML;
+  }
+
+  async function apiRequest(method, body) {
+    var response = await fetch(FUNCTION_URL, {
+      method: method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Omnia-Password": getPassword()
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    var data = await response.json();
+    if (response.status === 401) {
+      throw new Error("Неверный пароль");
+    }
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || ("HTTP " + response.status));
+    }
+    return data;
+  }
+
+  function renderCard(item) {
+
+    var card = document.createElement("div");
+    card.className = "card";
+    card.dataset.reviewId = item.reviewId;
+
+    var title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = item.title || "(не удалось получить метаданные)";
+    card.appendChild(title);
+
+    var meta = document.createElement("div");
+    meta.className = "card-meta";
+    meta.textContent = (item.author || "") + " · " + (item.sourceId || "") + " #" + (item.externalId || "");
+    card.appendChild(meta);
+
+    var reasons = document.createElement("div");
+    reasons.className = "card-reasons";
+    reasons.textContent = "Причина: " + ((item.reasons && item.reasons.length) ? item.reasons.join("; ") : "нет данных");
+    card.appendChild(reasons);
+
+    if (item.candidateWorkId) {
+      var conflict = document.createElement("div");
+      conflict.className = "card-conflict";
+      conflict.innerHTML = "Возможно совпадает с уже существующим: <strong>" + escapeHtml(item.candidateWorkTitle || "") +
+        "</strong> — " + escapeHtml(item.candidateWorkAuthor || "") + " (<code>" + escapeHtml(item.candidateWorkId) + "</code>)";
+      card.appendChild(conflict);
+    }
+
+    var actions = document.createElement("div");
+    actions.className = "actions";
+
+    var newBtn = document.createElement("button");
+    newBtn.type = "button";
+    newBtn.textContent = "Новое произведение";
+    actions.appendChild(newBtn);
+
+    var duplicateRow = document.createElement("div");
+    duplicateRow.className = "duplicate-row";
+    var duplicateInput = document.createElement("input");
+    duplicateInput.type = "text";
+    duplicateInput.placeholder = "id существующего Work";
+    duplicateInput.value = item.candidateWorkId || "";
+    var duplicateBtn = document.createElement("button");
+    duplicateBtn.type = "button";
+    duplicateBtn.textContent = "Это дубль";
+    duplicateRow.appendChild(duplicateInput);
+    duplicateRow.appendChild(duplicateBtn);
+    actions.appendChild(duplicateRow);
+
+    var skipBtn = document.createElement("button");
+    skipBtn.type = "button";
+    skipBtn.textContent = "Пропустить";
+    actions.appendChild(skipBtn);
+
+    card.appendChild(actions);
+
+    var cardError = document.createElement("div");
+    cardError.className = "card-error";
+    cardError.style.display = "none";
+    card.appendChild(cardError);
+
+    function setBusy(busy) {
+      newBtn.disabled = busy;
+      duplicateBtn.disabled = busy;
+      skipBtn.disabled = busy;
+      duplicateInput.disabled = busy;
+    }
+
+    function handleError(err) {
+      cardError.textContent = err.message || String(err);
+      cardError.style.display = "block";
+      setBusy(false);
+    }
+
+    async function submitAction(action, extra) {
+      cardError.style.display = "none";
+      setBusy(true);
+      try {
+        var payload = { reviewId: item.reviewId, action: action };
+        if (extra) Object.assign(payload, extra);
+        await apiRequest("POST", payload);
+        // Успех — убираем карточку без перезагрузки страницы.
+        card.remove();
+        if (!queueContainer.querySelector(".card")) {
+          renderEmpty();
+        }
+      } catch (err) {
+        handleError(err);
+      }
+    }
+
+    newBtn.addEventListener("click", function () { submitAction("new"); });
+    skipBtn.addEventListener("click", function () { submitAction("skip"); });
+    duplicateBtn.addEventListener("click", function () {
+      var workId = duplicateInput.value.trim();
+      if (!workId) {
+        cardError.textContent = "Укажите id существующего Work";
+        cardError.style.display = "block";
+        return;
+      }
+      submitAction("duplicate", { duplicateWorkId: workId });
+    });
+
+    return card;
+
+  }
+
+  function renderEmpty() {
+    queueContainer.innerHTML = '<p class="empty">Очередь пуста — нечего проверять.</p>';
+  }
+
+  async function loadQueue() {
+    clearError();
+    queueContainer.innerHTML = "<p class=\"empty\">Загрузка…</p>";
+    try {
+      var data = await apiRequest("GET");
+      queueContainer.innerHTML = "";
+      if (!data.pending || data.pending.length === 0) {
+        renderEmpty();
+        return;
+      }
+      data.pending.forEach(function (item) {
+        queueContainer.appendChild(renderCard(item));
+      });
+    } catch (err) {
+      queueContainer.innerHTML = "";
+      showError(err.message || String(err));
+    }
+  }
+
+  loginBtn.addEventListener("click", function () {
+    var value = passwordInput.value;
+    if (!value) return;
+    setPassword(value);
+    loadQueue();
+  });
+
+  passwordInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") loginBtn.click();
+  });
+
+  // Если пароль уже вводили в этой вкладке (sessionStorage) — сразу
+  // пробуем загрузить очередь, не заставляя вводить его снова.
+  if (getPassword()) {
+    passwordInput.value = getPassword();
+    loadQueue();
+  }
+
+})();
+</script>
+
+</body>
+</html>
