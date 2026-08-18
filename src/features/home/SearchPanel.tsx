@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { Author, Book as CatalogBook } from "../../catalog/types";
+import type { Author } from "../../catalog/types";
 import { searchCatalog, type SearchResult } from "../../catalog/search";
+import { BookCard } from "../shared/BookCard";
 
 interface SearchPanelProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface SearchPanelProps {
   prefillLanguage: string;
   onClose: () => void;
   onOpenBookDetail: (bookId: string, query: string, language: string) => void;
+  onOpenAuthorDetail: (authorId: string, query: string, language: string) => void;
 }
 
 type Status = "idle" | "empty" | "success";
@@ -26,62 +28,18 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
   { value: "grc", label: "Ἑλληνική" }
 ];
 
-function coverFallback(title: string): string {
-  const initial = (title || "?").trim().charAt(0).toUpperCase() || "?";
-  return initial;
-}
-
-// Book Detail decides everything about availability/reading now — a
-// search result card is always clickable and always goes there first,
-// per Phase 7 ("книга сначала должна открываться как объект
-// каталога"). No file-availability check happens here anymore.
-function BookCard({ book, onOpen }: { book: CatalogBook; onOpen: (bookId: string) => void }) {
-
-  const [coverFailed, setCoverFailed] = useState(false);
-  const showCover = Boolean(book.cover) && !coverFailed;
-
+function AuthorMatch({ author, onOpen }: { author: Author; onOpen: (authorId: string) => void }) {
   return (
-    <article className="book-card" onClick={() => onOpen(book.id)}>
-
-      <div className="book-cover">
-        {showCover ? (
-          <img
-            loading="lazy"
-            src={book.cover ?? undefined}
-            alt=""
-            onError={() => setCoverFailed(true)}
-          />
-        ) : (
-          <div className="book-cover-fallback">{coverFallback(book.title)}</div>
-        )}
-      </div>
-
-      <div className="book-content">
-        <h3 className="book-title">{book.title}</h3>
-        <div className="book-author">{book.authorName}</div>
-        <div className="book-meta">
-          <span>{book.originalLanguage}</span>
-          <span>{book.publicationYear ?? ""}</span>
-        </div>
-      </div>
-
-    </article>
-  );
-
-}
-
-function AuthorMatch({ author }: { author: Author }) {
-  return (
-    <div className="author-match">
+    <button type="button" className="author-match section-link" onClick={() => onOpen(author.id)}>
       <span className="eyebrow">Автор</span>
       <h3>{author.name}</h3>
-    </div>
+    </button>
   );
 }
 
 const EMPTY_RESULT: SearchResult = { query: "", matchedAuthors: [], books: [] };
 
-export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, onOpenBookDetail }: SearchPanelProps) {
+export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, onOpenBookDetail, onOpenAuthorDetail }: SearchPanelProps) {
 
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState("");
@@ -90,74 +48,56 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
   const inputRef = useRef<HTMLInputElement>(null);
 
   function runSearch(searchQuery: string, searchLanguage: string): void {
-
     const trimmed = searchQuery.trim();
-
     if (!trimmed.length) {
       setStatus("idle");
       setResult(EMPTY_RESULT);
       return;
     }
-
     const next = searchCatalog(trimmed, searchLanguage);
     const hasAnyResults = next.matchedAuthors.length > 0 || next.books.length > 0;
-
     setResult(next);
     setStatus(hasAnyResults ? "success" : "empty");
-
   }
 
   useEffect(() => {
-
     if (!isOpen) return;
-
     if (prefillQuery !== null) {
       setQuery(prefillQuery);
       setLanguage(prefillLanguage);
       runSearch(prefillQuery, prefillLanguage);
     }
-
     inputRef.current?.focus();
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, prefillQuery]);
 
   function handleLanguageChange(nextLanguage: string): void {
     setLanguage(nextLanguage);
-    if (query.trim().length) {
-      runSearch(query, nextLanguage);
-    }
+    if (query.trim().length) runSearch(query, nextLanguage);
   }
 
   function handleOpenBook(bookId: string): void {
     onOpenBookDetail(bookId, query, language);
   }
 
+  function handleOpenAuthor(authorId: string): void {
+    onOpenAuthorDetail(authorId, query, language);
+  }
+
   return (
     <>
-      <div
-        className={"search-backdrop" + (isOpen ? "" : " hidden")}
-        onClick={onClose}
-      />
+      <div className={"search-backdrop" + (isOpen ? "" : " hidden")} onClick={onClose} />
 
-      <aside
-        className={"search-panel" + (isOpen ? " open" : "")}
-        aria-label="Поиск книг"
-        aria-hidden={!isOpen}
-      >
-
+      <aside className={"search-panel" + (isOpen ? " open" : "")} aria-label="Поиск книг" aria-hidden={!isOpen}>
         <div className="search-panel-head">
           <div>
             <p className="eyebrow">Библиотека</p>
             <h2>Найти книгу</h2>
           </div>
-          <button className="close-button" type="button" aria-label="Закрыть поиск" onClick={onClose}>
-            ×
-          </button>
+          <button className="close-button" type="button" aria-label="Закрыть поиск" onClick={onClose}>×</button>
         </div>
 
         <div className="search-form">
-
           <label htmlFor="searchInput">Автор или название</label>
           <input
             id="searchInput"
@@ -185,23 +125,19 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
               <option key={item.value} value={item.value}>{item.label}</option>
             ))}
           </select>
-
         </div>
 
         <div className="results" aria-live="polite">
-
           {status === "empty" && <div className="empty-state">Ничего не найдено.</div>}
 
           {status === "success" && result.matchedAuthors.map(author => (
-            <AuthorMatch key={author.id} author={author} />
+            <AuthorMatch key={author.id} author={author} onOpen={handleOpenAuthor} />
           ))}
 
           {status === "success" && result.books.map(({ book }) => (
             <BookCard key={book.id} book={book} onOpen={handleOpenBook} />
           ))}
-
         </div>
-
       </aside>
     </>
   );

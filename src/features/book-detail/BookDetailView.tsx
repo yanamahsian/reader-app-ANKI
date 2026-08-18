@@ -16,7 +16,7 @@ interface BookDetailViewProps {
   bookId: string;
   onBack: () => void;
   onOpenBook: (book: ReaderBook) => void;
-  onOpenAuthorSearch: (authorName: string) => void;
+  onOpenAuthorDetail: (authorId: string) => void;
   onOpenCollection: (collectionId: string) => void;
 }
 
@@ -46,10 +46,6 @@ function MetaRow({ label, value }: MetaRowProps) {
   );
 }
 
-// Not found is shown plainly rather than crashing — bookId always
-// comes from this app's own navigation (a search result or a
-// collection's own book list), but the catalog itself is data, and a
-// missing lookup should never be a runtime error.
 function NotFound({ onBack }: { onBack: () => void }) {
   return (
     <section className="book-detail">
@@ -59,7 +55,7 @@ function NotFound({ onBack }: { onBack: () => void }) {
   );
 }
 
-export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorSearch, onOpenCollection }: BookDetailViewProps) {
+export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail, onOpenCollection }: BookDetailViewProps) {
 
   const book = getBookById(bookId);
 
@@ -102,7 +98,7 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorSearch,
           <button
             className="book-detail-author-link"
             type="button"
-            onClick={() => onOpenAuthorSearch(author.name)}
+            onClick={() => onOpenAuthorDetail(author.id)}
           >
             {author.name}
           </button>

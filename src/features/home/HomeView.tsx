@@ -2,18 +2,65 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Hero } from "./Hero";
 import { SearchPanel } from "./SearchPanel";
+import { getAuthors } from "../../catalog";
+import type { Author } from "../../catalog/types";
 
 interface HomeViewProps {
   onOpenBookDetail: (bookId: string, query: string, language: string) => void;
   onOpenCollections: () => void;
-  // When set, the search panel opens immediately on mount with this
-  // exact query and language re-run — how "← Назад" from Book Detail
-  // gets back to the same results, and how clicking an author's name
-  // on Book Detail lands on their works.
   restoreSearch: { query: string; language: string } | null;
+  onOpenAuthorDetail: (authorId: string) => void;
+  onOpenAuthorDetailFromSearch: (authorId: string, query: string, language: string) => void;
 }
 
-export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }: HomeViewProps) {
+function authorYearsLabel(author: Author): string | null {
+  if (!author.birthYear && !author.deathYear) return null;
+  return `${author.birthYear ?? ""}–${author.deathYear ?? ""}`;
+}
+
+const CURATED_HOME_AUTHOR_NAMES = [
+  "William Shakespeare",
+  "Dante Alighieri",
+  "Leo Tolstoy",
+  "Friedrich Nietzsche",
+  "Virginia Woolf"
+];
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function getCuratedHomeAuthors(): Author[] {
+
+  const allAuthors = getAuthors();
+  const curated: Author[] = [];
+
+  for (const curatedName of CURATED_HOME_AUTHOR_NAMES) {
+
+    const target = normalizeName(curatedName);
+
+    const match = allAuthors.find(author =>
+      normalizeName(author.name) === target ||
+      author.alternativeNames.some(alt => normalizeName(alt) === target)
+    );
+
+    if (match) {
+      curated.push(match);
+    }
+
+  }
+
+  return curated;
+
+}
+
+export function HomeView({
+  onOpenBookDetail,
+  onOpenCollections,
+  restoreSearch,
+  onOpenAuthorDetail,
+  onOpenAuthorDetailFromSearch
+}: HomeViewProps) {
 
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
@@ -38,6 +85,8 @@ export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }:
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const curatedAuthors = getCuratedHomeAuthors();
 
   return (
     <section id="homeView" className="home-view">
@@ -76,7 +125,6 @@ export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }:
 
         <Hero onOpenSearch={() => openSearch()} />
 
-        {/* COLLECTIONS */}
         <section id="collections" className="editorial-section">
 
           <div className="section-heading">
@@ -131,7 +179,6 @@ export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }:
 
         </section>
 
-        {/* AUTHORS */}
         <section id="authors" className="editorial-section authors-section">
 
           <div className="section-heading">
@@ -143,36 +190,17 @@ export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }:
 
           <div className="author-list">
 
-            <button type="button" onClick={() => openSearch("William Shakespeare")}>
-              <span>William Shakespeare</span>
-              <span>1564–1616</span>
-            </button>
-
-            <button type="button" onClick={() => openSearch("Dante Alighieri")}>
-              <span>Dante Alighieri</span>
-              <span>1265–1321</span>
-            </button>
-
-            <button type="button" onClick={() => openSearch("Leo Tolstoy")}>
-              <span>Leo Tolstoy</span>
-              <span>1828–1910</span>
-            </button>
-
-            <button type="button" onClick={() => openSearch("Friedrich Nietzsche")}>
-              <span>Friedrich Nietzsche</span>
-              <span>1844–1900</span>
-            </button>
-
-            <button type="button" onClick={() => openSearch("Virginia Woolf")}>
-              <span>Virginia Woolf</span>
-              <span>1882–1941</span>
-            </button>
+            {curatedAuthors.map(author => (
+              <button key={author.id} type="button" onClick={() => onOpenAuthorDetail(author.id)}>
+                <span>{author.name}</span>
+                <span>{authorYearsLabel(author) ?? ""}</span>
+              </button>
+            ))}
 
           </div>
 
         </section>
 
-        {/* ACADEMIES */}
         <section id="academies" className="editorial-section academy-section">
 
           <div className="academy-panel">
@@ -215,6 +243,7 @@ export function HomeView({ onOpenBookDetail, onOpenCollections, restoreSearch }:
         prefillLanguage={searchPrefillLanguage}
         onClose={closeSearch}
         onOpenBookDetail={onOpenBookDetail}
+        onOpenAuthorDetail={onOpenAuthorDetailFromSearch}
       />
 
     </section>
