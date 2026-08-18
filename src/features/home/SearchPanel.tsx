@@ -30,7 +30,7 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
 
 function AuthorMatch({ author, onOpen }: { author: Author; onOpen: (authorId: string) => void }) {
   return (
-    <button type="button" className="author-match" onClick={() => onOpen(author.id)}>
+    <button type="button" className="author-match section-link" onClick={() => onOpen(author.id)}>
       <span className="eyebrow">Автор</span>
       <h3>{author.name}</h3>
     </button>
@@ -48,43 +48,32 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
   const inputRef = useRef<HTMLInputElement>(null);
 
   function runSearch(searchQuery: string, searchLanguage: string): void {
-
     const trimmed = searchQuery.trim();
-
     if (!trimmed.length) {
       setStatus("idle");
       setResult(EMPTY_RESULT);
       return;
     }
-
     const next = searchCatalog(trimmed, searchLanguage);
     const hasAnyResults = next.matchedAuthors.length > 0 || next.books.length > 0;
-
     setResult(next);
     setStatus(hasAnyResults ? "success" : "empty");
-
   }
 
   useEffect(() => {
-
     if (!isOpen) return;
-
     if (prefillQuery !== null) {
       setQuery(prefillQuery);
       setLanguage(prefillLanguage);
       runSearch(prefillQuery, prefillLanguage);
     }
-
     inputRef.current?.focus();
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, prefillQuery]);
 
   function handleLanguageChange(nextLanguage: string): void {
     setLanguage(nextLanguage);
-    if (query.trim().length) {
-      runSearch(query, nextLanguage);
-    }
+    if (query.trim().length) runSearch(query, nextLanguage);
   }
 
   function handleOpenBook(bookId: string): void {
@@ -97,29 +86,18 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
 
   return (
     <>
-      <div
-        className={"search-backdrop" + (isOpen ? "" : " hidden")}
-        onClick={onClose}
-      />
+      <div className={"search-backdrop" + (isOpen ? "" : " hidden")} onClick={onClose} />
 
-      <aside
-        className={"search-panel" + (isOpen ? " open" : "")}
-        aria-label="Поиск книг"
-        aria-hidden={!isOpen}
-      >
-
+      <aside className={"search-panel" + (isOpen ? " open" : "")} aria-label="Поиск книг" aria-hidden={!isOpen}>
         <div className="search-panel-head">
           <div>
             <p className="eyebrow">Библиотека</p>
             <h2>Найти книгу</h2>
           </div>
-          <button className="close-button" type="button" aria-label="Закрыть поиск" onClick={onClose}>
-            ×
-          </button>
+          <button className="close-button" type="button" aria-label="Закрыть поиск" onClick={onClose}>×</button>
         </div>
 
         <div className="search-form">
-
           <label htmlFor="searchInput">Автор или название</label>
           <input
             id="searchInput"
@@ -147,11 +125,9 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
               <option key={item.value} value={item.value}>{item.label}</option>
             ))}
           </select>
-
         </div>
 
         <div className="results" aria-live="polite">
-
           {status === "empty" && <div className="empty-state">Ничего не найдено.</div>}
 
           {status === "success" && result.matchedAuthors.map(author => (
@@ -161,9 +137,7 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
           {status === "success" && result.books.map(({ book }) => (
             <BookCard key={book.id} book={book} onOpen={handleOpenBook} />
           ))}
-
         </div>
-
       </aside>
     </>
   );
