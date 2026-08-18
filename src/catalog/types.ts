@@ -30,9 +30,21 @@ export interface BookFile {
 // later, not a claim of global validity). An Edition can carry more
 // than one assertion (e.g. confirmed public-domain in the US, still
 // unknown in the EU) without any type change later.
+//
+// Stage 19 addition: `assessedBy` distinguishes a claim a source
+// itself makes ("source", e.g. Gutenberg's/Standard Ebooks' own
+// "public domain in the USA" statement, copied as-is) from a
+// determination this catalog computed independently
+// ("catalog-assessment", e.g. rights/assessGermanRights.ts deriving a
+// DE assertion from a real author/translator death year rather than
+// trusting a source's US-scoped claim to mean anything about
+// Germany). Optional and omitted on every assertion recorded before
+// this field existed -- an absent value means "source claim, as
+// before", not "unknown" or "unverified".
 export interface RightsAssertion {
   status: RightsStatus;
   jurisdiction: string | null;
+  assessedBy?: "source" | "catalog-assessment";
 }
 
 // A specific published version of a Work: a language, a translation
