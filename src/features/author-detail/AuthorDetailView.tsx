@@ -15,7 +15,7 @@ function yearsLabel(author: Author): string | null {
 
 function NotFound({ onBack }: { onBack: () => void }) {
   return (
-    <section className="author-detail">
+    <section className="book-detail">
       <button className="text-link" type="button" onClick={onBack}>← Назад</button>
       <p className="book-detail-not-found">Автор не найден в каталоге.</p>
     </section>
@@ -34,32 +34,26 @@ export function AuthorDetailView({ authorId, onBack, onOpenBookDetail }: AuthorD
   const years = yearsLabel(author);
 
   return (
-    <section className="author-detail">
+    <section className="book-detail">
 
       <button className="text-link" type="button" onClick={onBack}>
         ← Назад
       </button>
 
-      <header className="author-detail-header">
-
+      <header className="book-detail-header">
         <p className="eyebrow">Автор</p>
-
-        <h1 className="author-detail-title">{author.name}</h1>
-
-        {years && (
-          <p className="author-detail-years">{years}</p>
-        )}
-
+        <h1 className="book-detail-title">{author.name}</h1>
+        {years && <p className="book-detail-original-title">{years}</p>}
       </header>
 
       {books.length > 0 ? (
-        <div className="author-detail-books">
+        <div>
           {books.map(book => (
             <BookCard key={book.id} book={book} onOpen={onOpenBookDetail} />
           ))}
         </div>
       ) : (
-        <p className="author-detail-empty">В каталоге пока нет доступных книг этого автора.</p>
+        <p className="book-detail-not-found">В каталоге пока нет доступных книг этого автора.</p>
       )}
 
     </section>
