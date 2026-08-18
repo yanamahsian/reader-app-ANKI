@@ -19,6 +19,17 @@ export interface ExternalBookRecord {
 
   language: string;
 
+  // Optional: the named translator of this specific edition, when the
+  // source records one (most Project Gutenberg records do, for a
+  // non-original-language edition). null/undefined means either the
+  // source didn't report one or this edition is in the work's
+  // original language. Added for the Gutenberg library-expansion pass
+  // (see sources/gutenbergManifest.ts) so a translated Edition's
+  // `translatorName` (already part of the catalog's own Edition type)
+  // can be populated with real, source-reported data instead of
+  // always being left null.
+  translatorName?: string | null;
+
   formats: Array<{ format: BookFormat; url: string }>;
 
   rights: RightsAssertion[];

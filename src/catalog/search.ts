@@ -1,6 +1,7 @@
 import type { Author, Book } from "./types";
 import { getBooks, getAuthors } from "./catalogStore";
 import { genres, epochs, movements, themes } from "./taxonomy";
+import { normalize } from "./normalize";
 
 export interface RankedBook {
   book: Book;
@@ -23,19 +24,17 @@ const SCORE_PREFIX = 70;
 const SCORE_PARTIAL = 40;
 const SCORE_METADATA = 10;
 
-// Exported for reuse by catalog/ingestion/match.ts — text
-// normalization is a shared, generic concern. The matching/ranking
-// logic itself below is NOT reused by ingestion — identity matching
-// (is this external record the same Work?) has different confidence
-// requirements than search ranking (how good a match is this for a
-// human's query?), and lives in its own module by design.
-export function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .replaceAll("ё", "е")
-    .trim()
-    .replace(/\s+/g, " ");
-}
+// `normalize` itself now lives in ./normalize.ts (a dependency-free
+// module) and is re-exported here so every existing consumer of
+// search.ts's public surface keeps working unchanged. It moved out of
+// this file specifically to break a real circular require between
+// this module and catalogStore.ts — see normalize.ts's doc comment
+// for the full explanation. The matching/ranking logic below is NOT
+// reused by ingestion — identity matching (is this external record
+// the same Work?) has different confidence requirements than search
+// ranking (how good a match is this for a human's query?), and lives
+// in its own module (ingestion/match.ts) by design.
+export { normalize };
 
 // Highest tier reached by `query` against any of `candidates`, using
 // the three scores supplied for exact / prefix / partial matches on

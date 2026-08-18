@@ -1,6 +1,6 @@
 import type { Author, Book } from "../types";
 import type { ExternalBookRecord } from "./types";
-import { normalize } from "../search";
+import { normalize } from "../normalize";
 
 export type MatchConfidence = "high" | "ambiguous" | "none";
 
