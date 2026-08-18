@@ -3,39 +3,28 @@ import { HomeView } from "./features/home/HomeView";
 import { ReaderView } from "./features/reader/ReaderView";
 import { CollectionsView } from "./features/collections/CollectionsView";
 import { BookDetailView } from "./features/book-detail/BookDetailView";
+import { AuthorDetailView } from "./features/author-detail/AuthorDetailView";
 import { loadRemoteCatalog } from "./catalog";
 import type { Book } from "./features/reader/engine/types";
 
-type View = "home" | "reader" | "collections" | "book-detail";
+type View = "home" | "reader" | "collections" | "book-detail" | "author";
 
-// Where a Book Detail visit came from, so "← Назад" can return to the
-// exact same place instead of always dropping back to a blank home
-// screen. Search is re-run from (query, language) rather than storing
-// its result list, because searchCatalog() is a pure function of
-// those two inputs — re-running it always reproduces the same
-// ranked results, so there is nothing else that needs to be carried.
+export type AuthorDetailOrigin =
+  | { type: "book-detail"; bookId: string; bookDetailOrigin: BookDetailOrigin | null }
+  | { type: "search"; query: string; language: string }
+  | { type: "home" };
+
 export type BookDetailOrigin =
   | { type: "search"; query: string; language: string }
-  | { type: "collection"; collectionId: string };
+  | { type: "collection"; collectionId: string }
+  | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin };
 
-// ============================================================
-// PHASE 3 TEST HOOK — TEMPORARY, not part of the product UI.
-// Lets a specific EPUB be opened directly via a URL query param,
-// without touching omnia-library, Supabase, or the real catalog.
-// To remove once EPUB support is verified: delete this whole
-// block (TEST_EPUB_BOOK + the useEffect below that reads
-// "openTestEpub") and the `useEffect` import if nothing else in
-// this file still needs it.
-// Usage: append ?openTestEpub=1 to the site URL, with a real
-// EPUB file placed at public/books/test.epub.
-// ============================================================
 const TEST_EPUB_BOOK: Book = {
   id: "phase3-test-epub",
   title: "Phase 3 test EPUB",
   url: `${import.meta.env.BASE_URL}books/test.epub`,
   format: "epub"
 };
-// ============================================================
 
 export function App() {
 
@@ -45,24 +34,21 @@ export function App() {
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [bookDetailOrigin, setBookDetailOrigin] = useState<BookDetailOrigin | null>(null);
 
-  // Carried back into HomeView/CollectionsView on their next mount so
-  // they can jump straight to "these exact search results" or "this
-  // exact collection" instead of resetting to their default state.
+  const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
+  const [authorDetailOrigin, setAuthorDetailOrigin] = useState<AuthorDetailOrigin | null>(null);
+
   const [restoreSearch, setRestoreSearch] = useState<{ query: string; language: string } | null>(null);
   const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(null);
 
-  // Phase 10: fetch the Supabase-backed catalog once at startup. The
-  // app already renders correctly against the static seed catalog
-  // (catalogStore.ts) before this resolves — this call silently
-  // upgrades the in-memory data if it succeeds, and does nothing
-  // (logs a warning) if Supabase is unreachable. No loading state is
-  // needed here for that reason.
+  const [, setCatalogVersion] = useState(0);
+
   useEffect(() => {
-    void loadRemoteCatalog();
+    loadRemoteCatalog()
+      .then(() => setCatalogVersion(version => version + 1))
+      .catch(() => {
+      });
   }, []);
 
-  // PHASE 3 TEST HOOK — see block above. Remove this effect together
-  // with TEST_EPUB_BOOK when no longer needed.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("openTestEpub") === "1") {
@@ -77,12 +63,14 @@ export function App() {
   }
 
   function handleExitReader(): void {
-    setView("home");
+    if (selectedBookId) {
+      setView("book-detail");
+    } else {
+      setView("home");
+    }
   }
 
   function handleOpenCollections(): void {
-    // A fresh entry from the sidebar always shows the collections
-    // grid, not a stale detail view left over from an earlier visit.
     setCollectionsInitialId(null);
     setView("collections");
   }
@@ -111,16 +99,56 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "author") {
+      setSelectedAuthorId(bookDetailOrigin.authorId);
+      setAuthorDetailOrigin(bookDetailOrigin.returnOrigin);
+      setView("author");
+      return;
+    }
+
     setView("home");
 
   }
 
-  // Clicking an author's name on Book Detail reuses the existing
-  // search flow verbatim (same ranking, same SearchPanel) rather than
-  // any new lookup mechanism — it is exactly "go run this search".
-  function handleOpenAuthorSearch(authorName: string): void {
-    setRestoreSearch({ query: authorName, language: "" });
+  function handleOpenAuthorDetail(authorId: string): void {
+    if (selectedBookId) {
+      setAuthorDetailOrigin({ type: "book-detail", bookId: selectedBookId, bookDetailOrigin });
+    } else {
+      setAuthorDetailOrigin({ type: "home" });
+    }
+    setSelectedAuthorId(authorId);
+    setView("author");
+  }
+
+  function handleOpenAuthorDetailFromHome(authorId: string): void {
+    setSelectedAuthorId(authorId);
+    setAuthorDetailOrigin({ type: "home" });
+    setView("author");
+  }
+
+  function handleOpenAuthorDetailFromSearch(authorId: string, query: string, language: string): void {
+    setSelectedAuthorId(authorId);
+    setAuthorDetailOrigin({ type: "search", query, language });
+    setView("author");
+  }
+
+  function handleBackFromAuthorDetail(): void {
+
+    if (authorDetailOrigin?.type === "book-detail") {
+      setSelectedBookId(authorDetailOrigin.bookId);
+      setBookDetailOrigin(authorDetailOrigin.bookDetailOrigin);
+      setView("book-detail");
+      return;
+    }
+
+    if (authorDetailOrigin?.type === "search") {
+      setRestoreSearch({ query: authorDetailOrigin.query, language: authorDetailOrigin.language });
+      setView("home");
+      return;
+    }
+
     setView("home");
+
   }
 
   function handleOpenCollectionFromDetail(collectionId: string): void {
@@ -138,8 +166,24 @@ export function App() {
         bookId={selectedBookId}
         onBack={handleBackFromBookDetail}
         onOpenBook={handleOpenBook}
-        onOpenAuthorSearch={handleOpenAuthorSearch}
+        onOpenAuthorDetail={handleOpenAuthorDetail}
         onOpenCollection={handleOpenCollectionFromDetail}
+      />
+    );
+  }
+
+  if (view === "author" && selectedAuthorId) {
+    return (
+      <AuthorDetailView
+        authorId={selectedAuthorId}
+        onBack={handleBackFromAuthorDetail}
+        onOpenBookDetail={bookId =>
+          handleOpenBookDetail(bookId, {
+            type: "author",
+            authorId: selectedAuthorId,
+            returnOrigin: authorDetailOrigin ?? { type: "home" }
+          })
+        }
       />
     );
   }
@@ -163,6 +207,8 @@ export function App() {
         handleOpenBookDetail(bookId, { type: "search", query, language })
       }
       onOpenCollections={handleOpenCollections}
+      onOpenAuthorDetail={handleOpenAuthorDetailFromHome}
+      onOpenAuthorDetailFromSearch={handleOpenAuthorDetailFromSearch}
     />
   );
 
