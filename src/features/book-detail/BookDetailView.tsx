@@ -10,7 +10,8 @@ import {
   themes
 } from "../../catalog";
 import type { Book as ReaderBook } from "../reader/engine/types";
-import { pickPreferredEditionAndFile, toReaderBook } from "../../catalog/toReaderBook";
+import { pickPreferredEditionAndFile, toReaderBook, hasAnyPhysicalEdition } from "../../catalog/toReaderBook";
+import { useReaderJurisdiction } from "./readerJurisdiction";
 
 interface BookDetailViewProps {
   bookId: string;
@@ -55,9 +56,67 @@ function NotFound({ onBack }: { onBack: () => void }) {
   );
 }
 
+// Only country codes this catalog can currently say anything
+// meaningful about are listed below the select itself, not baked into
+// this list -- adding a code here does NOT mean that jurisdiction has
+// verified rights data (right now, only "US" does, via Project
+// Gutenberg's own "public domain in the USA" assertions). This is a
+// small, honest picker, not a claim of broad international coverage.
+const JURISDICTION_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: "US", label: "США" },
+  { code: "DE", label: "Германия" },
+  { code: "FR", label: "Франция" },
+  { code: "GB", label: "Великобритания" },
+  { code: "RU", label: "Россия" }
+];
+
+interface JurisdictionPromptProps {
+  readerJurisdiction: string | null;
+  onChange: (jurisdiction: string) => void;
+}
+
+// Shown instead of a flat "unavailable" message when a Work genuinely
+// has a physical file, but resolving it depends on a jurisdiction this
+// app doesn't know yet (or knows, and it doesn't clear the book's
+// rights). This is deliberately not an onboarding flow or a full
+// account/location system -- one inline choice, persisted locally,
+// nothing more.
+function JurisdictionPrompt({ readerJurisdiction, onChange }: JurisdictionPromptProps) {
+  return (
+    <div className="book-detail-jurisdiction-prompt">
+      <p className="book-detail-unavailable">
+        {readerJurisdiction
+          ? "У этой книги есть текст, но, по имеющимся у нас данным о правах, он не подтверждён как доступный для выбранной юрисдикции."
+          : "У этой книги есть текст, но его законная доступность зависит от вашей страны, а она ещё не указана."}
+      </p>
+      <label className="book-detail-jurisdiction-label">
+        Ваша юрисдикция (для проверки доступности):{" "}
+        <select
+          value={readerJurisdiction ?? ""}
+          onChange={event => { if (event.target.value) onChange(event.target.value); }}
+        >
+          <option value="" disabled>Выбрать…</option>
+          {JURISDICTION_OPTIONS.map(option => (
+            <option key={option.code} value={option.code}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+      <p className="book-detail-jurisdiction-note">
+        Сейчас в каталоге подтверждены права только для США (Project Gutenberg указывает статус как «public domain in the USA»). Для остальных стран доступность этого текста пока не подтверждена.
+      </p>
+    </div>
+  );
+}
+
 export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail, onOpenCollection }: BookDetailViewProps) {
 
   const book = getBookById(bookId);
+
+  // Called unconditionally, before the early return below, per the
+  // Rules of Hooks -- bookId can change from valid to not-found (or
+  // back) across re-renders of the same component instance, and a
+  // hook can never become conditional based on that.
+  const [readerJurisdiction, setReaderJurisdiction] = useReaderJurisdiction();
 
   if (!book) {
     return <NotFound onBack={onBack} />;
@@ -75,7 +134,7 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
   const genreLabels = labelsFor(book.genreIds, genres);
   const themeLabels = labelsFor(book.themeIds, themes);
 
-  const resolved = pickPreferredEditionAndFile(book);
+  const resolved = pickPreferredEditionAndFile(book, undefined, readerJurisdiction ?? undefined);
 
   return (
     <section className="book-detail">
@@ -111,6 +170,8 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
           <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
             Читать
           </button>
+        ) : hasAnyPhysicalEdition(book) ? (
+          <JurisdictionPrompt readerJurisdiction={readerJurisdiction} onChange={setReaderJurisdiction} />
         ) : (
           <p className="book-detail-unavailable">Книга пока недоступна для чтения</p>
         )}
