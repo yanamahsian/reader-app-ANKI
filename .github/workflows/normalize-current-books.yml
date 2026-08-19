@@ -10,6 +10,15 @@ on:
       - 'src/catalog/normalizedAssets.ts'
       - 'src/catalog/ingestion/buildEdition.ts'
       - '.github/workflows/normalize-current-books.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/ingest/**'
+      - 'scripts/auditNormalizedCatalog.ts'
+      - 'src/catalog/normalizedAssets.ts'
+      - 'src/catalog/ingestion/buildEdition.ts'
+      - '.github/workflows/normalize-current-books.yml'
   workflow_dispatch:
 
 permissions:
@@ -76,6 +85,7 @@ jobs:
         run: npm run build
 
       - name: Commit generated normalized assets
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         run: |
           set -euo pipefail
