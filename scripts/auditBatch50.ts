@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { BATCH50_CANDIDATES } from "./ingest/batch50Config";
+import { BATCH50_EFFECTIVE_CANDIDATES } from "./ingest/batch50EffectiveConfig";
 import { BATCH50_GUTENBERG_IDS } from "../src/catalog/batch50SourceIds";
 import { BATCH50_BOOKS, BATCH50_AUTHORS } from "../src/catalog/batch50";
 import { authors as seedAuthors } from "../src/catalog/authors";
@@ -10,7 +10,7 @@ import { normalizeBook, paginateText } from "../src/features/reader/engine/pagin
 let failures = 0;
 const assessed = assessGermanRights(BATCH50_BOOKS, [...seedAuthors, ...BATCH50_AUTHORS]);
 
-for (const candidate of BATCH50_CANDIDATES) {
+for (const candidate of BATCH50_EFFECTIVE_CANDIDATES) {
   const id = BATCH50_GUTENBERG_IDS[candidate.workId];
   const path = `public/books-normalized/${candidate.workId}.json`;
   if (!id) { console.error(`${candidate.workId}: missing generated Gutenberg id`); failures++; continue; }
@@ -31,4 +31,4 @@ for (const candidate of BATCH50_CANDIDATES) {
 }
 
 if (failures) { console.error(`BATCH50 AUDIT FAIL failures=${failures}`); process.exit(1); }
-console.log(`BATCH50 AUDIT PASS books=${BATCH50_CANDIDATES.length}`);
+console.log(`BATCH50 AUDIT PASS books=${BATCH50_EFFECTIVE_CANDIDATES.length}`);
