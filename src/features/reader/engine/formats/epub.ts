@@ -60,20 +60,40 @@ export const epubLoader: FormatLoader = {
     const sections: EpubSection[] = [];
     epub.spine.each(section => sections.push(section));
 
+    // Root cause of the "Reader opens with full chrome, zero text"
+    // live bug (verified against the real, installed epub.js source --
+    // see epubjs.d.ts's module-level comment for the full trace, not
+    // repeated here): Section#load(_request) falls back to
+    // `this.request` (never set by Spine#unpack) and then to a
+    // network-only default `Request` module when called with no
+    // arguments. For THIS project's book -- fetched as an ArrayBuffer
+    // and opened archived (`new ePub(arrayBuffer)`) -- every spine
+    // section's url is an in-archive path, not a real network URL, so
+    // the default Request module 404s/CORS-fails on every section,
+    // every time. `epub.load.bind(epub)` is the book's own
+    // archive-aware loader (Book#load -> this.archive.request(...)
+    // when `this.archived` is true); passing it as Section#load's
+    // `_request` argument makes every section resolve through the
+    // already-opened zip instead of a doomed network fetch.
+    const bookLoad = epub.load.bind(epub);
+
     const chapters: LoadedChapter[] = [];
+    let loadFailures = 0;
+    let emptyAfterLoad = 0;
 
     for (const item of sections) {
 
       let doc: Document;
 
       try {
-        doc = await item.load();
+        doc = await item.load(bookLoad);
       } catch (error) {
         // A section that fails to load (a genuinely broken or
         // non-XHTML manifest entry) is skipped, not turned into a
         // fabricated page -- same principle as the empty-text skip
         // below. Logged, not swallowed silently.
         console.error(`epubLoader: failed to load spine section "${item.href}"`, error);
+        loadFailures++;
         continue;
       }
 
@@ -84,7 +104,10 @@ export const epubLoader: FormatLoader = {
       // Skip empty sections (cover pages, separators, service XHTML
       // with no block-level text) rather than inserting a blank,
       // unreadable "chapter" into the book.
-      if (!text.length) continue;
+      if (!text.length) {
+        emptyAfterLoad++;
+        continue;
+      }
 
       const rawPages = paginateText(text);
 
@@ -96,6 +119,22 @@ export const epubLoader: FormatLoader = {
         }))
       });
 
+    }
+
+    // Invariant (this project's own, not epub.js's): a "successfully"
+    // parsed EPUB with zero readable chapters is not a real success --
+    // it is exactly the silent-empty-Reader bug this fix addresses. If
+    // every section failed to load or came back empty, that's a real,
+    // diagnosable failure and must reject loudly instead of handing
+    // readerEngine.open() a LoadedDocument it would happily render as
+    // a blank book (see readerEngine.ts's own matching, format-agnostic
+    // pages.length check for the same principle at the page level).
+    if (chapters.length === 0) {
+      throw new Error(
+        `epubLoader: parsed "${book.title}" but produced zero readable chapters ` +
+        `(${sections.length} spine sections discovered, ${loadFailures} failed to load, ` +
+        `${emptyAfterLoad} loaded with no extractable text) -- refusing to open an empty book.`
+      );
     }
 
     // Deliberately NOT calling epub.destroy() here: this Book
