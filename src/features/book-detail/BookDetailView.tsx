@@ -102,7 +102,7 @@ function JurisdictionPrompt({ readerJurisdiction, onChange }: JurisdictionPrompt
         </select>
       </label>
       <p className="book-detail-jurisdiction-note">
-        Сейчас в каталоге подтверждены права только для США (Project Gutenberg указывает статус как «public domain in the USA»). Для остальных стран доступность этого текста пока не подтверждена.
+        Доступность проверяется отдельно для каждой страны по данным о правах конкретного издания. Для части книг в каталоге уже подтверждена доступность в США и Германии; для других стран или отдельных изданий данных может пока не быть.
       </p>
     </div>
   );
