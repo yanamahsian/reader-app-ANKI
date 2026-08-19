@@ -1,9 +1,8 @@
 import type { Author } from "./types";
+import { BATCH_50_AUTHORS } from "./batch50Catalog";
 
-// Seed authors for the Phase 4 catalog (~15). alternativeNames covers
-// common transliteration/spelling variants — this is exactly the data
-// the future Search phase will need to rank on, per the architecture
-// requirement, even though no search algorithm is implemented here.
+// Core seed authors plus the curated first expansion batch. New authors stay
+// data-only: the Reader never changes when another author or Work is added.
 export const authors: Author[] = [
 
   {
@@ -110,6 +109,7 @@ export const authors: Author[] = [
     alternativeNames: ["Franz Kafka", "Кафка"],
     birthYear: 1883,
     deathYear: 1924
-  }
+  },
 
+  ...BATCH_50_AUTHORS
 ];
