@@ -1,0 +1,64 @@
+name: Ingestion smoke test
+
+on:
+  push:
+    branches:
+      - ingestion-test
+    paths:
+      - 'scripts/ingest/**'
+      - '.github/workflows/ingest-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ingest-to-the-lighthouse:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ingest To the Lighthouse
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p public/books-normalized
+          npx --yes tsx scripts/ingest/ingestBook.ts \
+            --sourceId=standard-ebooks \
+            --externalId=virginia-woolf/to-the-lighthouse \
+            --out=public/books-normalized/to-the-lighthouse.json \
+            2>&1 | tee ingest.log
+
+      - name: Print generated asset stats
+        if: success()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'public/books-normalized/to-the-lighthouse.json';
+          const raw = fs.readFileSync(p, 'utf8');
+          const doc = JSON.parse(raw);
+          const chars = doc.chapters.reduce((sum, chapter) => sum + chapter.text.trim().length, 0);
+          console.log(`asset=${p}`);
+          console.log(`chapters=${doc.chapters.length}`);
+          console.log(`totalTextChars=${chars}`);
+          console.log(`fileBytes=${Buffer.byteLength(raw, 'utf8')}`);
+          NODE
+
+      - name: Upload ingestion result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: to-the-lighthouse-ingestion
+          path: |
+            public/books-normalized/to-the-lighthouse.json
+            ingest.log
+          if-no-files-found: warn
+          retention-days: 7
