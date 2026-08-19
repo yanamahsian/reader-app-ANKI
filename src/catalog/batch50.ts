@@ -1,4 +1,4 @@
-import type { Author, Book } from "./types";
+import type { Author, Book, Edition } from "./types";
 import { getNormalizedAssetUrl } from "./normalizedAssets";
 import { BATCH50_GUTENBERG_IDS } from "./batch50SourceIds";
 
@@ -19,19 +19,20 @@ export const BATCH50_AUTHORS: Author[] = [
   { id: "dh-lawrence", name: "Дэвид Герберт Лоуренс", alternativeNames: ["D. H. Lawrence", "David Herbert Lawrence"], birthYear: 1885, deathYear: 1930 }
 ];
 
-function edition(workId: string) {
+function edition(workId: string): Edition {
   const url = getNormalizedAssetUrl(workId);
   if (!url) throw new Error(`Missing normalized asset registration for ${workId}`);
   const externalId = BATCH50_GUTENBERG_IDS[workId];
+  const externalIds: Record<string, string> = externalId ? { gutenberg: externalId } : {};
   return {
     id: `${workId}-gutenberg-${externalId ?? "normalized"}`,
     language: "en",
     isOriginal: true,
     translatorName: null,
-    rights: [{ status: "public-domain" as const, jurisdiction: "US", assessedBy: "source" as const }],
+    rights: [{ status: "public-domain", jurisdiction: "US", assessedBy: "source" }],
     sourceId: "gutenberg",
-    externalIds: externalId ? { gutenberg: externalId } : {},
-    files: [{ format: "anki-json" as const, url }]
+    externalIds,
+    files: [{ format: "anki-json", url }]
   };
 }
 
@@ -76,7 +77,7 @@ export const BATCH50_BOOKS: Book[] = [
   { id: "house-of-mirth", title: "The House of Mirth", originalTitle: "The House of Mirth", alternativeTitles: [], authorId: "wharton", authorName: "Эдит Уортон", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1905, countryId: "usa", centuryId: "20", epochId: "modernism", movementId: "realism", genreIds: ["novel"], themeIds: ["society", "identity"], description: "", cover: null, editions: [edition("house-of-mirth")], collectionIds: [] },
   { id: "ethan-frome", title: "Ethan Frome", originalTitle: "Ethan Frome", alternativeTitles: [], authorId: "wharton", authorName: "Эдит Уортон", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1911, countryId: "usa", centuryId: "20", epochId: "modernism", movementId: "realism", genreIds: ["novella"], themeIds: ["love", "society"], description: "", cover: null, editions: [edition("ethan-frome")], collectionIds: [] },
   { id: "turn-of-the-screw", title: "The Turn of the Screw", originalTitle: "The Turn of the Screw", alternativeTitles: [], authorId: "henry-james", authorName: "Генри Джеймс", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1898, countryId: "usa", centuryId: "19", epochId: "19th-century", movementId: "realism", genreIds: ["novella"], themeIds: ["identity", "alienation"], description: "", cover: null, editions: [edition("turn-of-the-screw")], collectionIds: [] },
-  { id: "portrait-of-a-lady", title: "The Portrait of a Lady", originalTitle: "The Portrait of a Lady", alternativeTitles: [], authorId: "henry-james", authorName: "Генри Джеймс", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1881, countryId: "usa", centuryId: "19", epochId: "19th-century", movementId: "realism", genreIds: ["novel"], themeIds: ["identity", "society"], description: "", cover: null, editions: [edition("portrait-of-a-lady")], collectionIds: [] },
+  { id: "washington-square", title: "Washington Square", originalTitle: "Washington Square", alternativeTitles: [], authorId: "henry-james", authorName: "Генри Джеймс", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1880, countryId: "usa", centuryId: "19", epochId: "19th-century", movementId: "realism", genreIds: ["novel"], themeIds: ["family", "society", "identity"], description: "", cover: null, editions: [edition("washington-square")], collectionIds: [] },
   { id: "daisy-miller", title: "Daisy Miller", originalTitle: "Daisy Miller", alternativeTitles: [], authorId: "henry-james", authorName: "Генри Джеймс", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1878, countryId: "usa", centuryId: "19", epochId: "19th-century", movementId: "realism", genreIds: ["novella"], themeIds: ["society", "identity"], description: "", cover: null, editions: [edition("daisy-miller")], collectionIds: [] },
   { id: "dubliners", title: "Dubliners", originalTitle: "Dubliners", alternativeTitles: [], authorId: "joyce", authorName: "Джеймс Джойс", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1914, countryId: "ireland", centuryId: "20", epochId: "modernism", movementId: "modernism", genreIds: ["short-story"], themeIds: ["society", "alienation"], description: "", cover: null, editions: [edition("dubliners")], collectionIds: [] },
   { id: "portrait-of-the-artist", title: "A Portrait of the Artist as a Young Man", originalTitle: "A Portrait of the Artist as a Young Man", alternativeTitles: [], authorId: "joyce", authorName: "Джеймс Джойс", originalLanguage: "en", availableLanguages: ["en"], publicationYear: 1916, countryId: "ireland", centuryId: "20", epochId: "modernism", movementId: "modernism", genreIds: ["novel"], themeIds: ["coming-of-age", "identity"], description: "", cover: null, editions: [edition("portrait-of-the-artist")], collectionIds: [] },
