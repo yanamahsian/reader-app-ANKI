@@ -33,9 +33,11 @@ const NORMALIZED_WORK_IDS = new Set<string>([
 export function getNormalizedAssetUrl(workId: string): string | null {
   if (!NORMALIZED_WORK_IDS.has(workId)) return null;
 
-  const base = import.meta.env.BASE_URL.endsWith("/")
-    ? import.meta.env.BASE_URL
-    : `${import.meta.env.BASE_URL}/`;
+  // Vite provides BASE_URL in the browser/build. The Node-based catalog audit
+  // imports this same module without Vite, so keep a deterministic Pages-path
+  // fallback there instead of making the audit depend on browser globals.
+  const configuredBase = import.meta.env?.BASE_URL ?? "/reader-app-ANKI/";
+  const base = configuredBase.endsWith("/") ? configuredBase : `${configuredBase}/`;
 
   return `${base}books-normalized/${workId}.json`;
 }
