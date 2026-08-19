@@ -57,7 +57,7 @@ const NORMALIZED_WORK_IDS = new Set<string>([
   "house-of-mirth",
   "ethan-frome",
   "turn-of-the-screw",
-  "portrait-of-a-lady",
+  "washington-square",
   "daisy-miller",
   "dubliners",
   "portrait-of-the-artist",
