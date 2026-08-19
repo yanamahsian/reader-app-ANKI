@@ -823,8 +823,29 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     currentBook = book;
 
     const loader = detectLoader(book);
-    loadedDocument = await loader.load(book);
-    pages = flattenDocument(loadedDocument);
+    const parsedDocument = await loader.load(book);
+    const flatPages = flattenDocument(parsedDocument);
+
+    // Format-agnostic backstop, deliberately at the PAGE level (not
+    // chapter level): epubLoader now rejects its own zero-chapter case
+    // with a specific, diagnosable message (see epub.ts), but a loader
+    // can still hand back a non-empty chapters array whose pages all
+    // came out empty -- plaintextLoader does exactly this today for a
+    // genuinely empty response body (paginateText("") returns []).
+    // Whatever the loader or the reason, this engine must never treat
+    // a LoadedDocument with zero pages as a successfully opened book:
+    // that is precisely the "chrome renders, text never does" bug.
+    // Checked against the flattened result BEFORE any engine state
+    // (loadedDocument/pages) is mutated, so a rejected open() leaves
+    // the engine exactly as it was before the call, not half-opened.
+    if (flatPages.length === 0) {
+      throw new Error(
+        `readerEngine: loaded document for "${book.title}" (format: ${book.format}) produced zero pages -- refusing to open an empty book.`
+      );
+    }
+
+    loadedDocument = parsedDocument;
+    pages = flatPages;
 
     tocBtn.style.display = loadedDocument.hasRealChapters ? "" : "none";
 
