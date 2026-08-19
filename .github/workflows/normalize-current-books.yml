@@ -1,0 +1,90 @@
+name: Normalize current catalog books
+
+on:
+  push:
+    branches:
+      - normalized-books-migration
+    paths:
+      - 'scripts/ingest/**'
+      - 'scripts/auditNormalizedCatalog.ts'
+      - 'src/catalog/normalizedAssets.ts'
+      - 'src/catalog/ingestion/buildEdition.ts'
+      - '.github/workflows/normalize-current-books.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  normalize-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout migration branch
+        uses: actions/checkout@v4
+        with:
+          ref: normalized-books-migration
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Ingest current DE-ready catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf public/books-normalized
+          mkdir -p public/books-normalized
+
+          ingest() {
+            source_id="$1"
+            external_id="$2"
+            work_id="$3"
+            echo "=== ${work_id} (${source_id}:${external_id}) ==="
+            npx --yes tsx scripts/ingest/ingestBook.ts \
+              --sourceId="${source_id}" \
+              --externalId="${external_id}" \
+              --out="public/books-normalized/${work_id}.json"
+          }
+
+          ingest gutenberg 2600 war-and-peace
+          ingest gutenberg 1399 anna-karenina
+          ingest gutenberg 2554 crime-and-punishment
+          ingest gutenberg 28054 brothers-karamazov
+          ingest gutenberg 2229 faust
+          ingest gutenberg 1524 hamlet
+          ingest gutenberg 1513 romeo-and-juliet
+          ingest gutenberg 1008 divine-comedy
+          ingest gutenberg 7204 beyond-good-and-evil
+          ingest gutenberg 7205 thus-spoke-zarathustra
+          ingest gutenberg 71865 mrs-dalloway
+          ingest gutenberg 174 picture-of-dorian-gray
+          ingest gutenberg 76 huckleberry-finn
+          ingest gutenberg 2199 iliad
+          ingest gutenberg 1727 odyssey
+          ingest gutenberg 22367 the-metamorphosis
+          ingest standard-ebooks virginia-woolf/to-the-lighthouse to-the-lighthouse
+
+      - name: Audit normalized catalog resolution
+        run: npx --yes tsx scripts/auditNormalizedCatalog.ts
+
+      - name: Build application
+        run: npm run build
+
+      - name: Commit generated normalized assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/books-normalized
+          if git diff --cached --quiet; then
+            echo "Normalized assets are unchanged."
+            exit 0
+          fi
+          git commit -m "Add normalized Omnia book assets"
+          git push origin HEAD:normalized-books-migration
