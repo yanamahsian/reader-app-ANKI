@@ -1,3 +1,4 @@
+# Test-only workflow on the ingestion-test branch. Does not deploy the site.
 name: Ingestion smoke test
 
 on:
