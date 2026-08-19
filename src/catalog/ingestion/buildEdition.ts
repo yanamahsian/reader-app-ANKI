@@ -1,34 +1,34 @@
 import type { Edition } from "../types";
+import { getNormalizedAssetUrl } from "../normalizedAssets";
 import type { ExternalBookRecord } from "./types";
 
-// The one piece the Phase 8 adapter/matcher pair (sources/gutenberg.ts
-// + ingestion/match.ts) stopped short of providing: turning a
-// confirmed ExternalBookRecord into an actual catalog Edition that
-// pickPreferredEditionAndFile() (toReaderBook.ts) can find and
-// resolve. Deliberately generic over `sourceId` — nothing here is
-// Gutenberg-specific, so the same function serves any future source
-// adapter that produces an ExternalBookRecord.
+// Turns a confirmed ExternalBookRecord into an actual catalog Edition.
+// Source provenance stays intact (`sourceId`, `externalIds`, and the original
+// provider files), but a Work that has completed offline ingestion also gets
+// its Omnia-owned `anki-json` file prepended to the Edition's files. The
+// resolver already ranks `anki-json` first, so production reading becomes
+// provider-agnostic without losing the original source information needed for
+// auditing or re-ingestion.
 //
-// `editionId` must be unique across the whole catalog. The convention
-// used throughout this pass (see sources/gutenbergManifest.ts and its
-// callers) is `${workId}-${record.sourceId}-${record.externalId}` —
-// e.g. "war-and-peace-gutenberg-2600" — so it's traceable back to
-// both the Work it belongs to and the exact external record it came
-// from, and can never collide with another Work's edition id.
-//
-// `isOriginal` is deliberately a required parameter, not inferred
-// from `record.language`: inferring it (e.g. "true if record.language
-// matches some passed-in originalLanguage") is one string compare
-// away from silently mislabeling a translation as original on a
-// locale mismatch (e.g. a language code variant). The caller already
-// knows this for certain — it's the whole reason the record was
-// matched to this Work in the first place — so it's passed through
-// explicitly instead.
+// `editionId` follows `${workId}-${record.sourceId}-${record.externalId}`
+// (slashes in some provider external ids are normalized by the caller). We use
+// that stable delimiter only to recover the canonical Work id and look up the
+// normalized asset; there are no per-book branches here.
 export function buildEditionFromExternalRecord(
   record: ExternalBookRecord,
   editionId: string,
   isOriginal: boolean
 ): Edition {
+
+  const sourceDelimiter = `-${record.sourceId}-`;
+  const sourceOffset = editionId.indexOf(sourceDelimiter);
+  const workId = sourceOffset >= 0 ? editionId.slice(0, sourceOffset) : null;
+  const normalizedUrl = workId ? getNormalizedAssetUrl(workId) : null;
+
+  const files: Edition["files"] = normalizedUrl
+    ? [{ format: "anki-json", url: normalizedUrl }, ...record.formats]
+    : [...record.formats];
+
   return {
     id: editionId,
     language: record.language,
@@ -37,6 +37,6 @@ export function buildEditionFromExternalRecord(
     rights: record.rights,
     sourceId: record.sourceId,
     externalIds: { [record.sourceId]: record.externalId },
-    files: record.formats
+    files
   };
 }
