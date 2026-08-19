@@ -32,20 +32,40 @@ export const READER_SUPPORTED_FORMATS: BookFormat[] = ["anki-json", "epub", "pla
 // genuinely means "unknown" -- it is NOT treated as "US" or as any
 // other specific place.
 //
-// The rule this enforces:
-//  - assertion.jurisdiction === null means the assertion is
-//    unconditional (not scoped to any territory) -- usable regardless
-//    of whether the caller knows the visitor's jurisdiction. This is
-//    the existing, unchanged model from round 1 -- untouched here.
-//  - assertion.jurisdiction === "<code>" (e.g. "US") is a SCOPED
-//    claim, exactly what Project Gutenberg's "Public domain in the
-//    USA" means, together with its own explicit warning that visitors
-//    outside the US must check their own country's law. A scoped
-//    assertion is usable ONLY when the caller explicitly states
-//    jurisdiction === that same code. An unknown jurisdiction
-//    (undefined) NEVER makes a scoped assertion usable -- it is
-//    treated as "cannot confirm this is legal here", not as "assume
-//    the US".
+// The rule this enforces (Stage 19 round 4 correction):
+//  - assertion.jurisdiction === null means this assertion's
+//    territorial scope was never actually determined -- per
+//    types.ts's own doc comment on RightsAssertion, "a gap to fill in
+//    later, not a claim of global validity". Earlier rounds (through
+//    Stage 19's first pass) treated null as "usable regardless of
+//    jurisdiction" -- that was wrong, and contradicted types.ts's own
+//    documented model: an unresolved gap is not evidence a work is
+//    legal to serve in any SPECIFIC country, known or unknown. A null
+//    assertion by itself is therefore NEVER sufficient here anymore.
+//    (hasAnyPhysicalEdition below is intentionally different -- it
+//    still treats a null/any-scope public-domain assertion as proof a
+//    physical file exists, which is a separate, weaker claim than "is
+//    legally resolvable for jurisdiction X".)
+//  - assertion.jurisdiction === "<code>" (e.g. "US" or "DE") is a
+//    SCOPED claim -- either a source's own claim (Project Gutenberg's
+//    "Public domain in the USA", assessedBy: "source") or this
+//    catalog's own independent determination (assessGermanRights.ts,
+//    assessedBy: "catalog-assessment"). A scoped assertion is usable
+//    ONLY when the caller explicitly states jurisdiction === that
+//    same code. An unknown jurisdiction (undefined) NEVER makes any
+//    assertion usable, scoped or unscoped -- it is treated as "cannot
+//    confirm this is legal here", never as "assume the US" or "assume
+//    anywhere".
+//
+// A legacy null-only Edition (e.g. the-antichrist-seed, whose only
+// recorded assertion has never been given a real territorial scope)
+// consequently no longer resolves for ANY jurisdiction on its own --
+// not US, not DE, not unknown -- until a real, separately-computed
+// scoped assertion exists for it. assessGermanRights.ts computes and
+// attaches one when the underlying author/translator data supports it
+// (e.g. Nietzsche, who died in 1900 -- long enough ago that The
+// Antichrist is genuinely public domain in Germany), rather than
+// silently relying on this resolver treating null as a free pass.
 //
 // Determining a real visitor's actual jurisdiction (IP geolocation, a
 // user-set country preference, an explicit "I confirm I am
@@ -65,7 +85,12 @@ export const DEV_ONLY_TEST_JURISDICTION = "US";
 
 function isAvailableInJurisdiction(assertion: RightsAssertion, jurisdiction: string | undefined): boolean {
   if (assertion.status !== "public-domain") return false;
-  if (assertion.jurisdiction === null) return true;
+  // A legacy/unscoped assertion (jurisdiction: null) is never, by
+  // itself, evidence of availability in a specific country -- it must
+  // never be treated as "available everywhere" or "available for an
+  // unknown visitor". Only an assertion actually scoped to the exact
+  // requested jurisdiction counts.
+  if (assertion.jurisdiction === null) return false;
   return jurisdiction !== undefined && assertion.jurisdiction === jurisdiction;
 }
 
@@ -104,23 +129,70 @@ export interface ResolvedFile {
   file: BookFile;
 }
 
+// Stage 19 round 4 addition: within a single format tier, more than
+// one usable edition can genuinely exist (e.g. Hamlet has both a
+// Gutenberg epub and a Standard Ebooks epub) -- SOURCE_QUALITY_RANK is
+// a deliberately small, explicit tie-break for that case only. It
+// never overrides format priority (an edition ranked "better" here
+// still loses to any edition offering a higher-priority FORMAT --
+// anki-json still always beats epub regardless of source) and it never
+// overrides rights/language filtering, which both still run first.
+//
+// Gutenberg ranks ABOVE Standard Ebooks here. This is a deliberate,
+// TEMPORARY choice: every Gutenberg file URL already goes through the
+// existing, browser-verified omnia-book-proxy Edge Function path (see
+// PROXIED_HOSTNAMES below), while Standard Ebooks URLs currently fetch
+// directly, unproxied -- and that direct path has not yet been
+// confirmed to actually work end-to-end in a real browser. Until a
+// real browser check confirms the Standard Ebooks fetch path,
+// Gutenberg is preferred whenever both exist for the same Work, so
+// this app never silently prefers an unverified path over a working
+// one. If a Work has no Gutenberg edition at all (e.g.
+// to-the-lighthouse), Standard Ebooks is still used -- it's only
+// de-prioritized, never excluded. This ordering should be revisited
+// once Standard Ebooks' fetch path has actually been proven in a
+// browser.
+//
+// Unlisted/future sourceIds fall back to a neutral middle rank rather
+// than being penalized by default.
+const SOURCE_QUALITY_RANK: Record<string, number> = {
+  "gutenberg": 0,
+  "seed": 1,
+  "wikisource": 1,
+  "standard-ebooks": 2,
+  "europeana": 3
+};
+const DEFAULT_SOURCE_QUALITY_RANK = 1;
+
+function sourceQualityRank(edition: Edition): number {
+  return SOURCE_QUALITY_RANK[edition.sourceId] ?? DEFAULT_SOURCE_QUALITY_RANK;
+}
+
 // Deterministic resolver: requested language (falls back to any
 // usable-rights edition if none matches) -> editions with rights
 // usable in `jurisdiction` only -> format priority (EPUB before
-// plaintext, matching what the reader actually supports) -> first
-// match wins. No randomness, no "pick whatever's first" fallback that
-// ignores rights, jurisdiction, or format support.
+// plaintext, matching what the reader actually supports) -> within
+// that format, the highest-quality/most-verified source (see
+// SOURCE_QUALITY_RANK) wins. No randomness, no "pick whatever's
+// first" fallback that ignores rights, jurisdiction, or format
+// support.
 //
 // `jurisdiction` has no default value on purpose (see
 // DEV_ONLY_TEST_JURISDICTION's comment above): a caller that does not
-// pass it is asserting "I don't know the visitor's jurisdiction", and
-// gets back only unconditional (jurisdiction: null) editions, never a
-// US-scoped one by default. The current production call site
-// (BookDetailView.tsx) calls this with no third argument -- so, as of
-// this fix, it no longer silently resolves US-scoped Gutenberg
-// editions for an unknown visitor. Wiring an actual visitor
-// jurisdiction (or an explicit, deliberate dev/test override) into
-// that call site is UI work, and is intentionally out of scope here.
+// pass it is asserting "I don't know the visitor's jurisdiction". As
+// of the Fix #1 correction above, an unscoped (jurisdiction: null)
+// assertion is no longer usable for ANY caller, known or unknown
+// jurisdiction -- so a caller that passes no jurisdiction now only
+// gets back editions carrying an assertion scoped to a jurisdiction it
+// can never match (since it has none to compare against), i.e.
+// effectively no usable-rights editions at all, until a jurisdiction is
+// actually named. The current production call site (BookDetailView.tsx)
+// already does this: it reads the visitor's own stored choice via
+// useReaderJurisdiction() (readerJurisdiction.ts) and passes it as this
+// third argument, so a visitor who has picked a jurisdiction gets a
+// real resolution for it; a visitor who hasn't yet chosen one is still
+// correctly treated as unknown, never silently defaulted to "US" or
+// anywhere else.
 export function pickPreferredEditionAndFile(
   work: CatalogBook,
   preferredLanguage?: string,
@@ -136,10 +208,14 @@ export function pickPreferredEditionAndFile(
   const editionsToSearch = languageMatches.length ? languageMatches : usableRightsEditions;
 
   for (const format of READER_SUPPORTED_FORMATS) {
+    const candidates: ResolvedFile[] = [];
     for (const edition of editionsToSearch) {
       const file = edition.files.find(candidate => candidate.format === format);
-      if (file) return { edition, file };
+      if (file) candidates.push({ edition, file });
     }
+    if (candidates.length === 0) continue;
+    candidates.sort((a, b) => sourceQualityRank(a.edition) - sourceQualityRank(b.edition));
+    return candidates[0];
   }
 
   return null;
