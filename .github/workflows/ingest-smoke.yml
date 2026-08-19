@@ -8,6 +8,12 @@ on:
     paths:
       - 'scripts/ingest/**'
       - '.github/workflows/ingest-smoke.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/ingest/**'
+      - '.github/workflows/ingest-smoke.yml'
   workflow_dispatch:
 
 permissions:
