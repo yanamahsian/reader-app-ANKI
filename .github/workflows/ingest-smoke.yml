@@ -32,21 +32,6 @@ jobs:
         with:
           node-version: 20
 
-      - name: Enable Standard Ebooks direct-download mode for smoke test
-        shell: bash
-        run: |
-          python <<'PY'
-          from pathlib import Path
-          p = Path('src/catalog/sources/standardEbooksRecords.ts')
-          s = p.read_text(encoding='utf-8')
-          old = 'https://standardebooks.org/ebooks/virginia-woolf/to-the-lighthouse/downloads/virginia-woolf_to-the-lighthouse.epub'
-          new = old + '?source=download'
-          if old not in s:
-              raise SystemExit('smoke-test source URL not found')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
-          print(new)
-          PY
-
       - name: Ingest To the Lighthouse
         shell: bash
         run: |
