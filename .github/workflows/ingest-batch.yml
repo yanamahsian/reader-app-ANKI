@@ -1,0 +1,103 @@
+name: Normalized books batch ingestion
+
+on:
+  push:
+    branches:
+      - ingestion-test
+    paths:
+      - 'scripts/ingest/**'
+      - '.github/workflows/ingest-batch.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/ingest/**'
+      - '.github/workflows/ingest-batch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ingest-current-de-catalog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ingest current DE-ready source books
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/books-normalized
+
+          ingest() {
+            source_id="$1"
+            external_id="$2"
+            work_id="$3"
+            echo "=== ${work_id} (${source_id}:${external_id}) ==="
+            npx --yes tsx scripts/ingest/ingestBook.ts \
+              --sourceId="${source_id}" \
+              --externalId="${external_id}" \
+              --out="public/books-normalized/${work_id}.json"
+          }
+
+          ingest gutenberg 2600 war-and-peace
+          ingest gutenberg 1399 anna-karenina
+          ingest gutenberg 2554 crime-and-punishment
+          ingest gutenberg 28054 brothers-karamazov
+          ingest gutenberg 2229 faust
+          ingest gutenberg 1524 hamlet
+          ingest gutenberg 1513 romeo-and-juliet
+          ingest gutenberg 1008 divine-comedy
+          ingest gutenberg 7204 beyond-good-and-evil
+          ingest gutenberg 7205 thus-spoke-zarathustra
+          ingest gutenberg 71865 mrs-dalloway
+          ingest gutenberg 174 picture-of-dorian-gray
+          ingest gutenberg 76 huckleberry-finn
+          ingest gutenberg 2199 iliad
+          ingest gutenberg 1727 odyssey
+          ingest gutenberg 22367 the-metamorphosis
+          ingest standard-ebooks virginia-woolf/to-the-lighthouse to-the-lighthouse
+
+      - name: Validate generated normalized assets
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const dir = 'public/books-normalized';
+          const files = fs.readdirSync(dir).filter(name => name.endsWith('.json')).sort();
+          if (files.length !== 17) throw new Error(`expected 17 generated JSON files, got ${files.length}`);
+          let totalChars = 0;
+          let totalBytes = 0;
+          for (const file of files) {
+            const full = path.join(dir, file);
+            const raw = fs.readFileSync(full, 'utf8');
+            const doc = JSON.parse(raw);
+            if (doc.formatVersion !== 1) throw new Error(`${file}: bad formatVersion`);
+            if (!Array.isArray(doc.chapters) || doc.chapters.length === 0) throw new Error(`${file}: no chapters`);
+            const chars = doc.chapters.reduce((sum, chapter) => sum + String(chapter.text || '').trim().length, 0);
+            if (chars === 0) throw new Error(`${file}: empty text`);
+            const bytes = Buffer.byteLength(raw, 'utf8');
+            totalChars += chars;
+            totalBytes += bytes;
+            console.log(`${file}: chapters=${doc.chapters.length} chars=${chars} bytes=${bytes}`);
+          }
+          console.log(`TOTAL files=${files.length} chars=${totalChars} bytes=${totalBytes}`);
+          NODE
+
+      - name: Upload normalized books
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: normalized-books-batch
+          path: public/books-normalized/*.json
+          if-no-files-found: warn
+          retention-days: 7
