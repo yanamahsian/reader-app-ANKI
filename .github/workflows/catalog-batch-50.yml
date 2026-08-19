@@ -13,13 +13,25 @@ on:
       - 'src/catalog/sources/gutenbergBatch50Manifest.generated.ts'
       - 'scripts/catalog/generateBatch50.ts'
       - '.github/workflows/catalog-batch-50.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/catalog/batch50Catalog.ts'
+      - 'src/catalog/authors.ts'
+      - 'src/catalog/normalizedAssets.ts'
+      - 'src/catalog/ingestion/applyGutenbergManifest.ts'
+      - 'src/catalog/sources/gutenbergBatch50Records.generated.ts'
+      - 'src/catalog/sources/gutenbergBatch50Manifest.generated.ts'
+      - 'scripts/catalog/generateBatch50.ts'
+      - '.github/workflows/catalog-batch-50.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: catalog-batch-50
+  group: catalog-batch-50-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -51,6 +63,7 @@ jobs:
         run: npm run build
 
       - name: Commit generated records and book assets
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
