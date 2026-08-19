@@ -1,15 +1,4 @@
 // Omnia-owned normalized reader assets that have completed offline ingestion.
-//
-// This list is data, not reader logic: once a Work is present here, every
-// external Edition attached to that Work can expose the same trusted
-// `anki-json` asset alongside its original provider files. The resolver already
-// ranks `anki-json` ahead of EPUB/plaintext, so the production Reader uses the
-// Omnia-owned copy while the original provider URLs remain available only as
-// provenance/re-ingestion inputs.
-//
-// Adding another successfully-ingested book requires adding only its Work id
-// here and committing the corresponding public/books-normalized/<workId>.json
-// asset. No Reader change is required.
 const NORMALIZED_WORK_IDS = new Set<string>([
   "war-and-peace",
   "anna-karenina",
@@ -27,18 +16,63 @@ const NORMALIZED_WORK_IDS = new Set<string>([
   "iliad",
   "odyssey",
   "the-metamorphosis",
-  "to-the-lighthouse"
+  "to-the-lighthouse",
+  "sense-and-sensibility",
+  "emma",
+  "mansfield-park",
+  "northanger-abbey",
+  "persuasion",
+  "oliver-twist",
+  "great-expectations",
+  "a-tale-of-two-cities",
+  "david-copperfield",
+  "bleak-house",
+  "hard-times",
+  "a-christmas-carol",
+  "nicholas-nickleby",
+  "jane-eyre",
+  "villette",
+  "wuthering-heights",
+  "agnes-grey",
+  "tenant-of-wildfell-hall",
+  "middlemarch",
+  "silas-marner",
+  "adam-bede",
+  "mill-on-the-floss",
+  "tess-of-the-durbervilles",
+  "jude-the-obscure",
+  "far-from-the-madding-crowd",
+  "mayor-of-casterbridge",
+  "return-of-the-native",
+  "heart-of-darkness",
+  "lord-jim",
+  "secret-agent",
+  "nostromo",
+  "treasure-island",
+  "jekyll-and-hyde",
+  "kidnapped",
+  "moby-dick",
+  "typee",
+  "age-of-innocence",
+  "house-of-mirth",
+  "ethan-frome",
+  "turn-of-the-screw",
+  "washington-square",
+  "daisy-miller",
+  "dubliners",
+  "portrait-of-the-artist",
+  "great-gatsby",
+  "this-side-of-paradise",
+  "sons-and-lovers",
+  "women-in-love",
+  "importance-of-being-earnest",
+  "canterville-ghost"
 ]);
 
 export function getNormalizedAssetUrl(workId: string): string | null {
   if (!NORMALIZED_WORK_IDS.has(workId)) return null;
-
-  // Vite provides BASE_URL in the browser/build. The Node-based catalog audit
-  // imports this same module without Vite, so keep a deterministic Pages-path
-  // fallback there instead of making the audit depend on browser globals.
   const configuredBase = import.meta.env?.BASE_URL ?? "/reader-app-ANKI/";
   const base = configuredBase.endsWith("/") ? configuredBase : `${configuredBase}/`;
-
   return `${base}books-normalized/${workId}.json`;
 }
 
