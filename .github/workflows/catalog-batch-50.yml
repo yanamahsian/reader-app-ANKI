@@ -1,0 +1,83 @@
+name: Ingest first 50-book catalog batch
+
+on:
+  push:
+    branches:
+      - catalog-batch-50
+    paths:
+      - 'src/catalog/batch50Catalog.ts'
+      - 'src/catalog/authors.ts'
+      - 'src/catalog/normalizedAssets.ts'
+      - 'src/catalog/ingestion/applyGutenbergManifest.ts'
+      - 'src/catalog/sources/gutenbergBatch50Records.generated.ts'
+      - 'src/catalog/sources/gutenbergBatch50Manifest.generated.ts'
+      - 'scripts/catalog/generateBatch50.ts'
+      - '.github/workflows/catalog-batch-50.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/catalog/batch50Catalog.ts'
+      - 'src/catalog/authors.ts'
+      - 'src/catalog/normalizedAssets.ts'
+      - 'src/catalog/ingestion/applyGutenbergManifest.ts'
+      - 'src/catalog/sources/gutenbergBatch50Records.generated.ts'
+      - 'src/catalog/sources/gutenbergBatch50Manifest.generated.ts'
+      - 'scripts/catalog/generateBatch50.ts'
+      - '.github/workflows/catalog-batch-50.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalog-batch-50-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  ingest-audit-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout batch branch
+        uses: actions/checkout@v4
+        with:
+          ref: catalog-batch-50
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Discover and ingest 50 Gutenberg works
+        run: npx --yes tsx scripts/catalog/generateBatch50.ts
+
+      - name: Audit all normalized catalog books
+        run: npx --yes tsx scripts/auditNormalizedCatalog.ts
+
+      - name: Build application
+        run: npm run build
+
+      - name: Commit generated records and book assets
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/books-normalized \
+            src/catalog/sources/gutenbergBatch50Records.generated.ts \
+            src/catalog/sources/gutenbergBatch50Manifest.generated.ts
+
+          if git diff --cached --quiet; then
+            echo "Generated batch is unchanged."
+            exit 0
+          fi
+
+          git commit -m "Add first 50 normalized Omnia books"
+          git pull --rebase origin catalog-batch-50
+          git push origin HEAD:catalog-batch-50
