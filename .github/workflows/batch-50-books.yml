@@ -1,0 +1,62 @@
+name: Ingest first 50 Omnia books
+
+on:
+  push:
+    branches: [batch-50-books]
+    paths:
+      - 'scripts/ingest/**'
+      - 'scripts/auditBatch50.ts'
+      - 'src/catalog/batch50.ts'
+      - 'src/catalog/batch50SourceIds.ts'
+      - 'src/catalog/normalizedAssets.ts'
+      - 'src/catalog/catalogStore.ts'
+      - '.github/workflows/batch-50-books.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: batch-50-books
+  cancel-in-progress: true
+
+jobs:
+  ingest-audit-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout batch branch
+        uses: actions/checkout@v4
+        with:
+          ref: batch-50-books
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Ingest 50 curated books
+        run: npx --yes tsx scripts/ingest/ingestBatch50.ts
+
+      - name: Audit all 50 books
+        run: npx --yes tsx scripts/auditBatch50.ts
+
+      - name: Build application
+        run: npm run build
+
+      - name: Commit generated assets and source ids
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/books-normalized src/catalog/batch50SourceIds.ts
+          if git diff --cached --quiet; then
+            echo "Generated batch assets are unchanged."
+            exit 0
+          fi
+          git commit -m "Add first 50 normalized Omnia books"
+          git push origin HEAD:batch-50-books
