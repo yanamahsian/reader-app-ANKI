@@ -2,12 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { BATCH50_CANDIDATES } from "./ingest/batch50Config";
 import { BATCH50_GUTENBERG_IDS } from "../src/catalog/batch50SourceIds";
 import { BATCH50_BOOKS, BATCH50_AUTHORS } from "../src/catalog/batch50";
+import { authors as seedAuthors } from "../src/catalog/authors";
 import { assessGermanRights } from "../src/catalog/assessGermanRights";
 import { pickPreferredEditionAndFile } from "../src/catalog/toReaderBook";
 import { normalizeBook, paginateText } from "../src/features/reader/engine/pagination";
 
 let failures = 0;
-const assessed = assessGermanRights(BATCH50_BOOKS, BATCH50_AUTHORS);
+const assessed = assessGermanRights(BATCH50_BOOKS, [...seedAuthors, ...BATCH50_AUTHORS]);
 
 for (const candidate of BATCH50_CANDIDATES) {
   const id = BATCH50_GUTENBERG_IDS[candidate.workId];
