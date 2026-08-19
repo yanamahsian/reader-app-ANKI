@@ -11,13 +11,15 @@ on:
       - 'src/catalog/normalizedAssets.ts'
       - 'src/catalog/catalogStore.ts'
       - '.github/workflows/batch-50-books.yml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: batch-50-books
+  group: batch-50-books-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -48,6 +50,7 @@ jobs:
         run: npm run build
 
       - name: Commit generated assets and source ids
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
