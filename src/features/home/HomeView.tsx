@@ -245,7 +245,6 @@ export function HomeView({
 
         <footer className="site-footer">
           <div>AN.KI Atlas</div>
-          <p>Интеллектуальная читалка без границ.</p>
         </footer>
 
       </div>
