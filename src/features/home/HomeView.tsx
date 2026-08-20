@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Sidebar } from "./Sidebar";
 import { Hero } from "./Hero";
 import { SearchPanel } from "./SearchPanel";
 import { getAuthors } from "../../catalog";
@@ -25,6 +24,51 @@ const CURATED_HOME_AUTHOR_NAMES = [
   "Friedrich Nietzsche",
   "Virginia Woolf"
 ];
+
+const HOME_COLLECTIONS = [
+  {
+    id: "classical-antiquity",
+    eyebrow: "Литература",
+    title: "Античная литература",
+    query: "classical antiquity",
+    image: "collections/collection_1.png"
+  },
+  {
+    id: "african-literature",
+    eyebrow: "Литературные традиции",
+    title: "Африканская литература",
+    query: "african literature",
+    image: "collections/collection_4.png"
+  },
+  {
+    id: "essays",
+    eyebrow: "Форма",
+    title: "Эссе",
+    query: "essay",
+    image: "collections/collection_12.png"
+  },
+  {
+    id: "poetry",
+    eyebrow: "Форма",
+    title: "Поэзия",
+    query: "poetry",
+    image: "collections/collection_9.png"
+  },
+  {
+    id: "philosophy-and-thought",
+    eyebrow: "Философия",
+    title: "Книги, изменившие европейскую мысль",
+    query: "philosophy",
+    image: "collections/collection_10.png"
+  },
+  {
+    id: "great-19th-century-novels",
+    eyebrow: "Литература",
+    title: "Великие романы XIX века",
+    query: "novel",
+    image: "collections/collection_2.png"
+  }
+] as const;
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
@@ -62,13 +106,11 @@ export function HomeView({
   onOpenAuthorDetailFromSearch
 }: HomeViewProps) {
 
-  const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
   const [searchPrefill, setSearchPrefill] = useState<string | null>(null);
   const [searchPrefillLanguage, setSearchPrefillLanguage] = useState("");
 
   function openSearch(query?: string, language?: string): void {
-    setSidebarOpen(false);
     setSearchPrefill(query ?? "");
     setSearchPrefillLanguage(language ?? "");
     setSearchOpen(true);
@@ -91,24 +133,9 @@ export function HomeView({
   return (
     <section id="homeView" className="home-view">
 
-      <Sidebar
-        isOpen={isSidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onOpenSearch={() => openSearch()}
-        onOpenCollections={onOpenCollections}
-      />
-
-      <div className="home-main">
+      <div className="home-main" style={{ marginLeft: 0 }}>
 
         <header className="mobile-header">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Открыть меню"
-            onClick={() => setSidebarOpen(true)}
-          >
-            ☰
-          </button>
           <div className="mobile-brand">
             AN.KI
             <span>ATLAS</span>
@@ -132,48 +159,34 @@ export function HomeView({
               <p className="eyebrow">Кураторский выбор</p>
               <h2>Подборки</h2>
             </div>
-            <button className="section-link" type="button" onClick={() => openSearch("классика")}>
+            <button className="section-link" type="button" onClick={onOpenCollections}>
               Смотреть всё
             </button>
           </div>
 
           <div className="collection-grid">
 
-            <article className="collection-card collection-card-featured">
-              <div className="collection-number">01</div>
-              <div className="collection-card-body">
-                <p>Большая коллекция</p>
-                <h3>Книги, изменившие европейскую мысль</h3>
-                <button type="button" onClick={() => openSearch("philosophy")}>Открыть коллекцию</button>
-              </div>
-            </article>
-
-            <article className="collection-card">
-              <div className="collection-number">02</div>
-              <div className="collection-card-body">
-                <p>История</p>
-                <h3>От античности до Нового времени</h3>
-                <button type="button" onClick={() => openSearch("history")}>Открыть коллекцию</button>
-              </div>
-            </article>
-
-            <article className="collection-card">
-              <div className="collection-number">03</div>
-              <div className="collection-card-body">
-                <p>Литература</p>
-                <h3>Великие романы XIX века</h3>
-                <button type="button" onClick={() => openSearch("novel")}>Открыть коллекцию</button>
-              </div>
-            </article>
-
-            <article className="collection-card">
-              <div className="collection-number">04</div>
-              <div className="collection-card-body">
-                <p>Первоисточники</p>
-                <h3>Тексты, с которых начинались эпохи</h3>
-                <button type="button" onClick={() => openSearch("classics")}>Открыть коллекцию</button>
-              </div>
-            </article>
+            {HOME_COLLECTIONS.map(collection => (
+              <article
+                key={collection.id}
+                className="collection-card"
+                style={{
+                  minHeight: 390,
+                  justifyContent: "flex-end",
+                  backgroundImage: `linear-gradient(180deg, rgba(10, 6, 5, 0.06) 20%, rgba(10, 6, 5, 0.92) 100%), url(${collection.image})`,
+                  backgroundPosition: "center",
+                  backgroundSize: "cover"
+                }}
+              >
+                <div className="collection-card-body">
+                  <p>{collection.eyebrow}</p>
+                  <h3>{collection.title}</h3>
+                  <button type="button" onClick={() => openSearch(collection.query)}>
+                    Открыть коллекцию
+                  </button>
+                </div>
+              </article>
+            ))}
 
           </div>
 
