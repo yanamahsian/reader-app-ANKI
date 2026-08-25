@@ -1,0 +1,135 @@
+name: Finalize AN.KI visual shell
+
+on:
+  push:
+    branches: [visual-shell-finalize-20260825]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact main base
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Reconstruct and verify exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "43a726a37d8234c14bf2fdd0a21ab80543941b5a"
+          git fetch origin visual-shell-finalize-20260825
+          : > /tmp/anki-visual-shell.patch
+          for i in $(seq -w 0 15); do
+            git show "origin/visual-shell-finalize-20260825:.anki-tmp/visual-${i}.patch" >> /tmp/anki-visual-shell.patch
+          done
+          test "$(wc -l < /tmp/anki-visual-shell.patch)" -eq 2756
+          echo "96e1407c8c3dcde09e594499a93150a9fc5ae0a069d166dd117be733d7d14fe5  /tmp/anki-visual-shell.patch" | sha256sum -c -
+
+      - name: Apply patch and verify exact scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/anki-visual-shell.patch
+          git apply /tmp/anki-visual-shell.patch
+          git diff --check
+
+          cat > /tmp/expected-files <<'EOF'
+          src/App.tsx
+          src/app/AccountMenu.tsx
+          src/app/AppShell.tsx
+          src/app/GlobalBackground.tsx
+          src/app/GlobalHeader.tsx
+          src/app/hero.ts
+          src/features/author-detail/AuthorDetailView.tsx
+          src/features/book-detail/BookDetailView.tsx
+          src/features/collections/CollectionDetail.tsx
+          src/features/home/Hero.tsx
+          src/features/home/HomeView.tsx
+          src/features/library/LibraryView.tsx
+          src/features/my-library/MyLibraryView.tsx
+          src/features/notes/NotesView.tsx
+          src/features/profile/ProfileView.tsx
+          src/features/settings/SettingsView.tsx
+          src/features/shared/BookGrid.tsx
+          src/features/shared/CoverFallback.tsx
+          src/features/shared/GuestNotice.tsx
+          src/features/shared/LibraryBookCard.tsx
+          src/features/shared/ShellPage.tsx
+          src/features/subscription/SubscriptionView.tsx
+          src/features/support/SupportView.tsx
+          src/styles/global.css
+          EOF
+          sort -o /tmp/expected-files /tmp/expected-files
+          git status --porcelain=v1 -uall | sed 's/^...//' | sort > /tmp/actual-files
+          diff -u /tmp/expected-files /tmp/actual-files
+
+          # Backend/data layer must remain untouched by this visual pass.
+          test -z "$(git status --porcelain=v1 -uall -- supabase src/api src/catalog src/features/reader)"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-package-lock
+          fi
+
+      - name: Real type-check and build
+        run: npm run build
+
+      - name: Verify build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+
+      - name: Commit exact reviewed patch to ready branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            src/App.tsx \
+            src/app/AccountMenu.tsx \
+            src/app/AppShell.tsx \
+            src/app/GlobalBackground.tsx \
+            src/app/GlobalHeader.tsx \
+            src/app/hero.ts \
+            src/features/author-detail/AuthorDetailView.tsx \
+            src/features/book-detail/BookDetailView.tsx \
+            src/features/collections/CollectionDetail.tsx \
+            src/features/home/Hero.tsx \
+            src/features/home/HomeView.tsx \
+            src/features/library/LibraryView.tsx \
+            src/features/my-library/MyLibraryView.tsx \
+            src/features/notes/NotesView.tsx \
+            src/features/profile/ProfileView.tsx \
+            src/features/settings/SettingsView.tsx \
+            src/features/shared/BookGrid.tsx \
+            src/features/shared/CoverFallback.tsx \
+            src/features/shared/GuestNotice.tsx \
+            src/features/shared/LibraryBookCard.tsx \
+            src/features/shared/ShellPage.tsx \
+            src/features/subscription/SubscriptionView.tsx \
+            src/features/support/SupportView.tsx \
+            src/styles/global.css
+
+          git diff --cached --name-only | sort > /tmp/staged-files
+          diff -u /tmp/expected-files /tmp/staged-files
+          git commit -m "Build AN.KI visual app shell"
+          git push origin HEAD:refs/heads/visual-shell-built-20260825
+          echo "READY_SHA=$(git rev-parse HEAD)"
