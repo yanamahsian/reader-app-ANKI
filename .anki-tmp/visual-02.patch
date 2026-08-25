@@ -1,0 +1,156 @@
++          <button type="button" role="menuitem" onClick={() => go("my-library")}>Моя библиотека</button>
++          <button type="button" role="menuitem" onClick={() => go("notes")}>Заметки</button>
++          <button type="button" role="menuitem" onClick={() => go("profile")}>Профиль</button>
++          <button type="button" role="menuitem" onClick={() => go("subscription")}>Подписка</button>
++          <button type="button" role="menuitem" onClick={() => go("settings")}>Настройки</button>
++          <button type="button" role="menuitem" onClick={() => go("support")}>Помощь и поддержка</button>
++        </div>
++
++      </div>
++    </>
++  );
++
++}
+diff --git a/src/app/AppShell.tsx b/src/app/AppShell.tsx
+new file mode 100644
+index 0000000..979aac5
+--- /dev/null
++++ b/src/app/AppShell.tsx
+@@ -0,0 +1,65 @@
++import type { ReactNode } from "react";
++import { GlobalBackground } from "./GlobalBackground";
++import { GlobalHeader } from "./GlobalHeader";
++import { AccountMenu } from "./AccountMenu";
++import type { AccountShellView } from "./AccountMenu";
++
++interface AppShellProps {
++  children: ReactNode;
++  onNavigateHome: () => void;
++  onNavigateLibrary: () => void;
++  onNavigateCollections: () => void;
++  onOpenSearch: () => void;
++  isAccountMenuOpen: boolean;
++  onToggleAccountMenu: () => void;
++  onCloseAccountMenu: () => void;
++  onAccountNavigate: (view: AccountShellView) => void;
++}
++
++// The persistent app frame for every screen except Reader (App.tsx
++// simply renders <ReaderView/> on its own, with no AppShell at all,
++// when view === "reader" — see that file). GlobalBackground and
++// GlobalHeader are mounted exactly once here, so navigating between
++// Home / Library / Collections / Book Detail / Author Detail / the
++// account shells never remounts the photo or the header; only
++// {children} (the current screen's own content) swaps out underneath.
++export function AppShell({
++  children,
++  onNavigateHome,
++  onNavigateLibrary,
++  onNavigateCollections,
++  onOpenSearch,
++  isAccountMenuOpen,
++  onToggleAccountMenu,
++  onCloseAccountMenu,
++  onAccountNavigate
++}: AppShellProps) {
++
++  return (
++    <div className="app-shell">
++
++      <GlobalBackground />
++
++      <GlobalHeader
++        onNavigateHome={onNavigateHome}
++        onNavigateLibrary={onNavigateLibrary}
++        onNavigateCollections={onNavigateCollections}
++        onOpenSearch={onOpenSearch}
++        isAccountMenuOpen={isAccountMenuOpen}
++        onToggleAccountMenu={onToggleAccountMenu}
++      />
++
++      <AccountMenu
++        isOpen={isAccountMenuOpen}
++        onClose={onCloseAccountMenu}
++        onNavigate={onAccountNavigate}
++      />
++
++      <main className="app-shell-content">
++        {children}
++      </main>
++
++    </div>
++  );
++
++}
+diff --git a/src/app/GlobalBackground.tsx b/src/app/GlobalBackground.tsx
+new file mode 100644
+index 0000000..cded61e
+--- /dev/null
++++ b/src/app/GlobalBackground.tsx
+@@ -0,0 +1,27 @@
++import { getCurrentHeroImagePath } from "./hero";
++
++// Fixed, app-wide background photo + darkening scrim. Rendered exactly
++// once, by AppShell, and never remounted while navigating between
++// Home / Library / Collections / Collection Detail / Book Detail /
++// Author Detail / Profile / My Library / Notes / Subscription /
++// Settings / Support — it only disappears when Reader opens (App.tsx
++// simply doesn't render AppShell at all in that case). Every page's
++// own background is transparent (see the ".*-view"/".*-detail" rules
++// in global.css) specifically so this shows through underneath them;
++// individual pages only add their own translucent surfaces where text
++// needs extra contrast, never a solid backdrop that would hide this.
++export function GlobalBackground() {
++
++  const heroPath = getCurrentHeroImagePath();
++
++  return (
++    <div className="global-bg" aria-hidden="true">
++      <div
++        className="global-bg-image"
++        style={{ backgroundImage: `url("${heroPath}")` }}
++      />
++      <div className="global-bg-shade" />
++    </div>
++  );
++
++}
+diff --git a/src/app/GlobalHeader.tsx b/src/app/GlobalHeader.tsx
+new file mode 100644
+index 0000000..14d112d
+--- /dev/null
++++ b/src/app/GlobalHeader.tsx
+@@ -0,0 +1,72 @@
++interface GlobalHeaderProps {
++  onNavigateHome: () => void;
++  onNavigateLibrary: () => void;
++  onNavigateCollections: () => void;
++  onOpenSearch: () => void;
++  isAccountMenuOpen: boolean;
++  onToggleAccountMenu: () => void;
++}
++
++// One thin, persistent, semi-transparent header shown on every
++// non-Reader screen (AppShell renders it once; it never remounts on
++// navigation). Replaces the old per-page ".mobile-header" that only
++// HomeView rendered — Library/Collections/Book Detail/etc. previously
++// had no header at all once you left Home.
++//
++// Interface-language is shown as a static "RU" badge, not a working
++// switcher: this app has no i18n system (every string is hardcoded
++// Russian), and building one is backend/architecture work outside a
++// visual pass — showing a badge that looks clickable but does nothing
++// would be worse than an honest static label.
++export function GlobalHeader({
++  onNavigateHome,
++  onNavigateLibrary,
++  onNavigateCollections,
++  onOpenSearch,
++  isAccountMenuOpen,
++  onToggleAccountMenu
++}: GlobalHeaderProps) {
++
++  return (
++    <header className="global-header">
++
++      <button className="global-header-brand" type="button" onClick={onNavigateHome}>
