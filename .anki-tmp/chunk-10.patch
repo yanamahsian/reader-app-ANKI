@@ -1,0 +1,100 @@
++
++      <div className="search-form library-search-form">
++        <label htmlFor="libraryQuery">Автор или название</label>
++        <input
++          id="libraryQuery"
++          className="search-input"
++          type="search"
++          placeholder="Например: Толстой или Война и мир"
++          autoComplete="off"
++          value={query}
++          onChange={event => setQuery(event.target.value)}
++        />
++        <label htmlFor="libraryLanguage">Язык</label>
++        <select
++          id="libraryLanguage"
++          className="language-select"
++          aria-label="Язык произведения"
++          value={language}
++          onChange={event => handleLanguageChange(event.target.value)}
++        >
++          {LANGUAGE_OPTIONS.map(item => (
++            <option key={item.value} value={item.value}>{item.label}</option>
++          ))}
++        </select>
++      </div>
++
++      {dataSource === "local" && status !== "loading" && (
++        <p className="library-note">
++          Не удалось связаться с расширенным каталогом — показан каталог AN.KI напрямую.
++        </p>
++      )}
++
++      <div className="results library-results" aria-live="polite">
++
++        {status === "loading" && books.length === 0 && <div className="empty-state">Загрузка…</div>}
++        {status === "empty" && <div className="empty-state">Ничего не найдено.</div>}
++
++        {books.map(book => (
++          <BookCard key={book.id} book={book} onOpen={bookId => onOpenBookDetail(bookId, snapshot())} />
++        ))}
++
++      </div>
++
++      {dataSource === "server" && hasMore && (
++        <div className="library-pager">
++          <button
++            className="text-link"
++            type="button"
++            onClick={loadMore}
++            disabled={loadingMore}
++          >
++            {loadingMore ? "Загрузка…" : "Показать ещё"}
++          </button>
++        </div>
++      )}
++
++    </section>
++  );
++
++}
+diff --git a/src/styles/global.css b/src/styles/global.css
+index 90819fe..ce72c58 100644
+--- a/src/styles/global.css
++++ b/src/styles/global.css
+@@ -270,6 +270,16 @@ body.theme-dark {
+   display: none;
+ }
+ 
++/* Groups the two mobile-header icon buttons (Library, Search) so
++   .mobile-header's own space-between still separates exactly two
++   things -- the brand and this group -- instead of spreading three
++   raw children across the row. */
++.mobile-header-actions {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
+ 
+ /* =========================================================
+    MAIN
+@@ -751,6 +761,40 @@ button.text-link {
+   max-width: 720px;
+ }
+ 
++/* =========================================================
++   LIBRARY VIEW (Phase — connect real Supabase catalog)
++   Reuses .collections-view/.collections-header (page shell),
++   .search-form/.search-input/.language-select (SearchPanel's own
++   field styles, unchanged), and .results/.book-card (SearchPanel's
++   own result-row styles, unchanged) — the only genuinely new rules
++   this view needs are its own inline (non-slide-over) form spacing,
++   the fallback-notice line, and the "Показать ещё" row below.
++   ========================================================= */
++
++.library-search-form {
++  max-width: 520px;
++  margin: 0 0 40px;
++}
++
