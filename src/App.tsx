@@ -70,8 +70,16 @@ export function App() {
     }
   }
 
-  function handleOpenCollections(): void {
-    setCollectionsInitialId(null);
+  // collectionId is optional: called with none from the generic
+  // "Подборки"/"Смотреть всё" entry points (opens the full grid, as
+  // before), or with a specific id from a HomeView teaser card —
+  // jumps straight to that collection, reusing the same
+  // collectionsInitialId mechanism already used when returning here
+  // from Book Detail. Needed so that, once there are dozens of
+  // collections, clicking a named card on the home page doesn't dump
+  // the visitor into the undifferentiated full list.
+  function handleOpenCollections(collectionId?: string): void {
+    setCollectionsInitialId(collectionId ?? null);
     setView("collections");
   }
 
