@@ -1,0 +1,176 @@
++/* =========================================================
++   BOOK DETAIL — two-column layout (cover + info)
++   ========================================================= */
++
++.book-detail-page,
++.author-detail-page {
++  max-width: 980px;
++}
++
++.book-detail-hero {
++  display: grid;
++  grid-template-columns: minmax(200px, 300px) 1fr;
++  gap: 44px;
++
++  margin-bottom: 56px;
++}
++
++.book-detail-info {
++  display: flex;
++  flex-direction: column;
++  justify-content: center;
++}
++
++.book-detail-info .book-detail-header {
++  margin: 0 0 20px;
++}
++
++.book-detail-quick-meta {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px 32px;
++
++  margin: 0 0 26px;
++}
++
++.book-detail-quick-meta .book-detail-meta-row {
++  padding: 0;
++  border: 0;
++
++  flex-direction: column;
++  gap: 4px;
++}
++
++.book-detail-quick-meta dt {
++  flex: none;
++}
++
++.book-detail-body {
++  max-width: 720px;
++}
++
++
++/* =========================================================
++   AUTHOR DETAIL — portrait header
++   ========================================================= */
++
++.author-detail-header {
++  display: flex;
++  align-items: center;
++  gap: 32px;
++
++  margin: 28px 0 56px;
++}
++
++.author-detail-portrait {
++  flex: 0 0 auto;
++
++  width: 140px;
++  height: 140px;
++
++  overflow: hidden;
++  border-radius: 50%;
++  border: 1px solid rgba(202, 160, 88, 0.4);
++
++  background: var(--home-surface-soft);
++}
++
++.author-detail-portrait img {
++  width: 100%;
++  height: 100%;
++
++  object-fit: cover;
++  display: block;
++}
++
++.author-detail-portrait-fallback {
++  width: 100%;
++  height: 100%;
++
++  display: flex;
++  align-items: center;
++  justify-content: center;
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 46px;
++  color: var(--home-gold);
++}
++
++.author-detail-identity .book-detail-title {
++  margin-top: 4px;
++}
++
++.author-detail-works {
++  margin-top: 12px;
++}
++
++
++/* =========================================================
++   APP SHELL — MOBILE
++   ========================================================= */
++
++@media (max-width: 760px) {
++
++  .global-header {
++    height: 58px;
++    padding: 0 20px;
++  }
++
++  .global-header-brand {
++    font-size: 16px;
++  }
++
++  .global-header-nav,
++  .global-header-actions {
++    display: none;
++  }
++
++  .global-header-mobile-nav {
++    display: flex;
++    align-items: center;
++    gap: 10px;
++  }
++
++  .global-header-mobile-nav button {
++    width: 36px;
++    height: 36px;
++
++    display: grid;
++    place-items: center;
++
++    border: 1px solid rgba(202, 160, 88, 0.3);
++    border-radius: 50%;
++
++    background: rgba(16, 10, 8, 0.42);
++    color: var(--home-text);
++
++    font-size: 15px;
++  }
++
++  .account-menu {
++    top: 64px;
++    right: 16px;
++    left: 16px;
++
++    width: auto;
++  }
++
++  .book-detail-hero {
++    grid-template-columns: 1fr;
++  }
++
++  .book-detail-cover {
++    max-width: 260px;
++  }
++
++  .author-detail-header {
++    flex-direction: column;
++    align-items: flex-start;
++    gap: 20px;
++  }
++
++}
++
+ .toc-item-delete {
+   flex: 0 0 auto;
+ 
