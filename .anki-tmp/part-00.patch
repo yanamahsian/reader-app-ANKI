@@ -1,0 +1,350 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index 34041c0..debfa99 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -4,10 +4,12 @@ import { ReaderView } from "./features/reader/ReaderView";
+ import { CollectionsView } from "./features/collections/CollectionsView";
+ import { BookDetailView } from "./features/book-detail/BookDetailView";
+ import { AuthorDetailView } from "./features/author-detail/AuthorDetailView";
++import { LibraryView } from "./features/library/LibraryView";
++import type { LibraryRestoreState } from "./features/library/LibraryView";
+ import { loadRemoteCatalog } from "./catalog";
+ import type { Book } from "./features/reader/engine/types";
+ 
+-type View = "home" | "reader" | "collections" | "book-detail" | "author";
++type View = "home" | "reader" | "collections" | "book-detail" | "author" | "library";
+ 
+ export type AuthorDetailOrigin =
+   | { type: "book-detail"; bookId: string; bookDetailOrigin: BookDetailOrigin | null }
+@@ -17,7 +19,8 @@ export type AuthorDetailOrigin =
+ export type BookDetailOrigin =
+   | { type: "search"; query: string; language: string }
+   | { type: "collection"; collectionId: string }
+-  | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin };
++  | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin }
++  | { type: "library"; state: LibraryRestoreState };
+ 
+ const TEST_EPUB_BOOK: Book = {
+   id: "phase3-test-epub",
+@@ -40,6 +43,8 @@ export function App() {
+   const [restoreSearch, setRestoreSearch] = useState<{ query: string; language: string } | null>(null);
+   const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(null);
+ 
++  const [libraryRestoreState, setLibraryRestoreState] = useState<LibraryRestoreState | null>(null);
++
+   const [, setCatalogVersion] = useState(0);
+ 
+   useEffect(() => {
+@@ -114,8 +119,34 @@ export function App() {
+       return;
+     }
+ 
++    if (bookDetailOrigin?.type === "library") {
++      setLibraryRestoreState(bookDetailOrigin.state);
++      setView("library");
++      return;
++    }
++
++    setView("home");
++
++  }
++
++  // collectionId is optional from HomeView (no id -> generic entry
++  // point); Library has no such teaser entry point, so this is always
++  // a fresh, from-scratch open — libraryRestoreState is reset to null,
++  // matching how handleOpenCollections() with no id resets
++  // collectionsInitialId. Returning here from Book Detail / the reader
++  // goes through handleBackFromBookDetail / handleExitReader instead,
++  // which restore the exact prior state.
++  function handleOpenLibrary(): void {
++    setLibraryRestoreState(null);
++    setView("library");
++  }
++
++  function handleBackFromLibrary(): void {
+     setView("home");
++  }
+ 
++  function handleOpenBookDetailFromLibrary(bookId: string, state: LibraryRestoreState): void {
++    handleOpenBookDetail(bookId, { type: "library", state });
+   }
+ 
+   function handleOpenAuthorDetail(authorId: string): void {
+@@ -208,6 +239,16 @@ export function App() {
+     );
+   }
+ 
++  if (view === "library") {
++    return (
++      <LibraryView
++        restoreState={libraryRestoreState}
++        onBack={handleBackFromLibrary}
++        onOpenBookDetail={handleOpenBookDetailFromLibrary}
++      />
++    );
++  }
++
+   return (
+     <HomeView
+       restoreSearch={restoreSearch}
+@@ -217,6 +258,7 @@ export function App() {
+       onOpenCollections={handleOpenCollections}
+       onOpenAuthorDetail={handleOpenAuthorDetailFromHome}
+       onOpenAuthorDetailFromSearch={handleOpenAuthorDetailFromSearch}
++      onOpenLibrary={handleOpenLibrary}
+     />
+   );
+ 
+diff --git a/src/api/libraryCatalog.ts b/src/api/libraryCatalog.ts
+new file mode 100644
+index 0000000..6247a33
+--- /dev/null
++++ b/src/api/libraryCatalog.ts
+@@ -0,0 +1,77 @@
++import type { Book, Author } from "../catalog/types";
++
++// omnia-library-catalog (see supabase/functions/omnia-library-catalog/
++// index.ts) — AN.KI's OWN internal catalog (public.works/authors/
++// editions/book_files/rights_assertions), paginated and searchable. This
++// is a different function from omnia-catalog (small, fixed, legacy) and
++// from omnia-library (external Gutendex/Wikisource aggregator, see
++// api/library.ts) — neither of those reads these tables.
++const CATALOG_ENDPOINT =
++  "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-library-catalog";
++
++// Same requirement as every other Edge Function call in this app (see
++// catalog/remoteCatalog.ts's own comment): Supabase's gateway requires a
++// valid `apikey` header on every call, sent only on `apikey`, never as
++// `Authorization: Bearer`. Public-safe publishable key, never
++// service_role.
++const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy";
++
++export interface LibraryCatalogParams {
++  query?: string;
++  language?: string;
++  limit?: number;
++  offset?: number;
++  signal?: AbortSignal;
++}
++
++export interface LibraryCatalogPage {
++  books: Book[];
++  authors: Author[];
++  total: number;
++  hasMore: boolean;
++}
++
++function isLibraryCatalogPage(data: unknown): data is LibraryCatalogPage {
++  if (typeof data !== "object" || data === null) return false;
++  const candidate = data as Partial<LibraryCatalogPage>;
++  return (
++    Array.isArray(candidate.books) &&
++    Array.isArray(candidate.authors) &&
++    typeof candidate.total === "number" &&
++    typeof candidate.hasMore === "boolean"
++  );
++}
++
++// Fetches one real, server-paginated page of AN.KI's internal catalog.
++// Every call is a genuine network round trip -- there is no client-side
++// slicing of a larger in-memory response anywhere in this function; the
++// Edge Function itself only returns the rows for this exact
++// offset/limit window (see its own SQL .range() call).
++export async function fetchLibraryCatalogPage(params: LibraryCatalogParams): Promise<LibraryCatalogPage> {
++
++  const url = new URL(CATALOG_ENDPOINT);
++  if (params.query) url.searchParams.set("q", params.query);
++  if (params.language) url.searchParams.set("language", params.language);
++  url.searchParams.set("limit", String(params.limit ?? 24));
++  url.searchParams.set("offset", String(params.offset ?? 0));
++
++  const response = await fetch(url.toString(), {
++    headers: {
++      "apikey": SUPABASE_PUBLISHABLE_KEY
++    },
++    signal: params.signal
++  });
++
++  if (!response.ok) {
++    throw new Error(`omnia-library-catalog request failed: ${response.status}`);
++  }
++
++  const data = await response.json();
++
++  if (!isLibraryCatalogPage(data)) {
++    throw new Error("omnia-library-catalog returned an unexpected shape");
++  }
++
++  return data;
++
++}
+diff --git a/src/catalog/catalogStore.ts b/src/catalog/catalogStore.ts
+index 2f64adf..798877c 100644
+--- a/src/catalog/catalogStore.ts
++++ b/src/catalog/catalogStore.ts
+@@ -1,4 +1,4 @@
+-import type { Book, Author, Edition } from "./types";
++import type { Book, Author, Edition, RightsAssertion, BookFile } from "./types";
+ import { books as seedBooks } from "./books";
+ import { authors as seedAuthors } from "./authors";
+ import { BATCH50_BOOKS, BATCH50_AUTHORS } from "./batch50";
+@@ -41,6 +41,13 @@ export function isRemoteCatalogLoaded(): boolean {
+   return remoteLoaded;
+ }
+ 
++// Original HEAD 1e3faae helpers -- used ONLY by setRemoteCatalog below,
++// unchanged in semantics: a plain last-write-wins merge by id (remote
++// always overwrites an existing seed record wholesale on a matching id).
++// setRemoteCatalog's own behavior must stay byte/semantically identical
++// to before the Library work -- these are kept exactly as they were
++// rather than switched to the curated-safe logic below, which is for
++// mergeLibraryPage only (see that function's own comment).
+ function mergeById<T extends { id: string }>(seed: T[], remote: T[]): T[] {
+   const merged = new Map<string, T>();
+   for (const record of seed) merged.set(record.id, record);
+@@ -77,3 +84,171 @@ export function setRemoteCatalog(books: Book[], authors: Author[]): void {
+   currentBooks = assessGermanRights(merged, currentAuthors).map(syncAvailableLanguages);
+   remoteLoaded = true;
+ }
++
++// --- Everything below is used ONLY by mergeLibraryPage, never by
++// setRemoteCatalog above. ---
++//
++// A curated (seed/batch50) record is never overwritten wholesale by an
++// incoming remote one -- only an actually-empty field on the existing
++// record may be filled in from the incoming side. "Filled" for a
++// string (including the nullable string fields) means non-null and
++// non-blank; isFilledString is the one shared test for that.
++function isFilledString(value: string | null | undefined): value is string {
++  return typeof value === "string" && value.trim().length > 0;
++}
++
++function unionStrings(seed: string[], remote: string[]): string[] {
++  return Array.from(new Set([...seed, ...remote]));
++}
++
++// existing (seed) author is always the base record; only an author id
++// that doesn't exist yet is taken from remote as-is. portraitImage is
++// never taken from remote at all, in either direction -- a curated
++// author's portrait (including a deliberate null, meaning "known, no
++// portrait yet") must never be replaced just because a Library/Search
++// page happened to merge that same author in again.
++function mergeLibraryAuthor(seed: Author, remote: Author): Author {
++  return {
++    id: seed.id,
++    name: isFilledString(seed.name) ? seed.name : remote.name,
++    alternativeNames: unionStrings(seed.alternativeNames, remote.alternativeNames),
++    birthYear: seed.birthYear ?? remote.birthYear,
++    deathYear: seed.deathYear ?? remote.deathYear,
++    portraitImage: seed.portraitImage
++  };
++}
++
++function mergeLibraryAuthorsById(seed: Author[], remote: Author[]): Author[] {
++  const merged = new Map<string, Author>();
++  for (const author of seed) merged.set(author.id, author);
++  for (const author of remote) {
++    const existing = merged.get(author.id);
++    merged.set(author.id, existing ? mergeLibraryAuthor(existing, author) : author);
++  }
++  return Array.from(merged.values());
++}
++
++// Rights/files don't carry their own id -- "union" here means: keep
++// every existing entry, then add any incoming entry that isn't already
++// present (compared field-by-field), rather than either silently
++// dropping one side or accumulating exact duplicates across repeated
++// merges of the same edition (e.g. the same Supabase edition appearing
++// again on a later Library/Search page).
++function mergeLibraryRights(seedRights: RightsAssertion[], remoteRights: RightsAssertion[]): RightsAssertion[] {
++  const merged = [...seedRights];
++  for (const assertion of remoteRights) {
++    const alreadyPresent = merged.some(existing =>
++      existing.status === assertion.status &&
++      existing.jurisdiction === assertion.jurisdiction &&
++      existing.assessedBy === assertion.assessedBy
++    );
++    if (!alreadyPresent) merged.push(assertion);
++  }
++  return merged;
++}
++
++function mergeLibraryFiles(seedFiles: BookFile[], remoteFiles: BookFile[]): BookFile[] {
++  const merged = [...seedFiles];
++  for (const file of remoteFiles) {
++    const alreadyPresent = merged.some(existing => existing.format === file.format && existing.url === file.url);
++    if (!alreadyPresent) merged.push(file);
++  }
++  return merged;
++}
++
++// Same "existing is the base, incoming only fills genuinely empty
++// fields" rule as mergeLibraryBook below, applied per-Edition.
++// rights/files are unioned (mergeLibraryRights/mergeLibraryFiles above),
++// never replaced -- this is specifically what keeps an existing DE
++// catalog-assessment rights entry (added by assessGermanRights, see
++// below) from being lost: it's already in `seed.rights`, so it survives
++// the union unconditionally.
++function mergeLibraryEdition(seed: Edition, remote: Edition): Edition {
++  return {
++    id: seed.id,
++    language: isFilledString(seed.language) ? seed.language : remote.language,
++    isOriginal: seed.isOriginal,
++    translatorName: isFilledString(seed.translatorName) ? seed.translatorName : remote.translatorName,
++    rights: mergeLibraryRights(seed.rights, remote.rights),
++    sourceId: isFilledString(seed.sourceId) ? seed.sourceId : remote.sourceId,
++    externalIds: { ...remote.externalIds, ...seed.externalIds },
++    files: mergeLibraryFiles(seed.files, remote.files)
++  };
++}
++
++function mergeLibraryEditions(seedEditions: Edition[], remoteEditions: Edition[]): Edition[] {
++  const merged = new Map<string, Edition>();
++  for (const edition of seedEditions) merged.set(edition.id, edition);
++  for (const edition of remoteEditions) {
++    const existing = merged.get(edition.id);
++    merged.set(edition.id, existing ? mergeLibraryEdition(existing, edition) : edition);
++  }
++  return Array.from(merged.values());
++}
++
++// existing (seed) book is always the base record; incoming (remote)
++// only fills fields that are genuinely empty on the existing record
++// (isFilledString / publicationYear !== null), and only ever adds to
++// the array fields (unionStrings) -- it can never blank out a curated
++// title, description, cover, taxonomy reference, etc. by merging in an
++// incoming record that simply doesn't have that field populated.
++function mergeLibraryBook(seed: Book, remote: Book): Book {
++  const editions = mergeLibraryEditions(seed.editions, remote.editions);
++  return {
++    id: seed.id,
++    title: isFilledString(seed.title) ? seed.title : remote.title,
++    originalTitle: isFilledString(seed.originalTitle) ? seed.originalTitle : remote.originalTitle,
++    alternativeTitles: unionStrings(seed.alternativeTitles, remote.alternativeTitles),
++    authorId: isFilledString(seed.authorId) ? seed.authorId : remote.authorId,
++    authorName: isFilledString(seed.authorName) ? seed.authorName : remote.authorName,
++    originalLanguage: isFilledString(seed.originalLanguage) ? seed.originalLanguage : remote.originalLanguage,
++    availableLanguages: unionStrings(seed.availableLanguages, remote.availableLanguages),
++    publicationYear: seed.publicationYear !== null ? seed.publicationYear : remote.publicationYear,
++    countryId: isFilledString(seed.countryId) ? seed.countryId : remote.countryId,
++    centuryId: isFilledString(seed.centuryId) ? seed.centuryId : remote.centuryId,
++    epochId: isFilledString(seed.epochId) ? seed.epochId : remote.epochId,
++    movementId: isFilledString(seed.movementId) ? seed.movementId : remote.movementId,
++    genreIds: unionStrings(seed.genreIds, remote.genreIds),
++    themeIds: unionStrings(seed.themeIds, remote.themeIds),
++    description: isFilledString(seed.description) ? seed.description : remote.description,
++    cover: isFilledString(seed.cover) ? seed.cover : remote.cover,
++    editions,
++    collectionIds: unionStrings(seed.collectionIds, remote.collectionIds)
++  };
++}
++
++function mergeLibraryBooksById(seed: Book[], remote: Book[]): Book[] {
++  const merged = new Map<string, Book>();
++  for (const book of seed) merged.set(book.id, book);
++  for (const book of remote) {
++    const existing = merged.get(book.id);
++    merged.set(book.id, existing ? mergeLibraryBook(existing, book) : book);
++  }
++  return Array.from(merged.values());
++}
