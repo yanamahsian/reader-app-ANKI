@@ -1,0 +1,100 @@
++          <div className="mobile-header-actions">
++            <button
++              className="icon-button"
++              type="button"
++              aria-label="Библиотека"
++              onClick={onOpenLibrary}
++            >
++              ⌸
++            </button>
++            <button
++              className="icon-button"
++              type="button"
++              aria-label="Открыть поиск"
++              onClick={() => openSearch()}
++            >
++              ⌕
++            </button>
++          </div>
+         </header>
+ 
+-        <Hero onOpenSearch={() => openSearch()} />
++        <Hero onOpenSearch={() => openSearch()} onOpenLibrary={onOpenLibrary} />
+ 
+         <section id="collections" className="editorial-section">
+ 
+diff --git a/src/features/home/SearchPanel.tsx b/src/features/home/SearchPanel.tsx
+index 0337c50..758994f 100644
+--- a/src/features/home/SearchPanel.tsx
++++ b/src/features/home/SearchPanel.tsx
+@@ -1,6 +1,9 @@
+ import { useEffect, useRef, useState } from "react";
+ import type { Author } from "../../catalog/types";
+ import { searchCatalog, type SearchResult } from "../../catalog/search";
++import { mergeLibraryPage } from "../../catalog";
++import { LANGUAGE_OPTIONS } from "../../catalog/languages";
++import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
+ import { BookCard } from "../shared/BookCard";
+ 
+ interface SearchPanelProps {
+@@ -14,20 +17,6 @@ interface SearchPanelProps {
+ 
+ type Status = "idle" | "empty" | "success";
+ 
+-const LANGUAGES: Array<{ value: string; label: string }> = [
+-  { value: "", label: "Все языки" },
+-  { value: "ru", label: "Русский" },
+-  { value: "en", label: "English" },
+-  { value: "de", label: "Deutsch" },
+-  { value: "fr", label: "Français" },
+-  { value: "it", label: "Italiano" },
+-  { value: "es", label: "Español" },
+-  { value: "pt", label: "Português" },
+-  { value: "zh", label: "中文" },
+-  { value: "la", label: "Latina" },
+-  { value: "grc", label: "Ἑλληνική" }
+-];
+-
+ function AuthorMatch({ author, onOpen }: { author: Author; onOpen: (authorId: string) => void }) {
+   return (
+     <button type="button" className="author-match section-link" onClick={() => onOpen(author.id)}>
+@@ -39,6 +28,14 @@ function AuthorMatch({ author, onOpen }: { author: Author; onOpen: (authorId: st
+ 
+ const EMPTY_RESULT: SearchResult = { query: "", matchedAuthors: [], books: [] };
+ 
++// How many of AN.KI's real internal-catalog matches this panel asks the
++// server for per query, on top of whatever local catalog matches show
++// instantly (see showLocalResult). This panel is a quick "did you mean"
++// overlay, not a paginated browse -- Library (LibraryView.tsx) is where
++// a visitor pages through the full server-side result set.
++const SEARCH_SERVER_LIMIT = 30;
++const SEARCH_DEBOUNCE_MS = 350;
++
+ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, onOpenBookDetail, onOpenAuthorDetail }: SearchPanelProps) {
+ 
+   const [query, setQuery] = useState("");
+@@ -47,17 +44,131 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
+   const [result, setResult] = useState<SearchResult>(EMPTY_RESULT);
+   const inputRef = useRef<HTMLInputElement>(null);
+ 
++  const requestIdRef = useRef(0);
++  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const abortRef = useRef<AbortController | null>(null);
++
++  // catalog/search.ts itself is completely unchanged: it has always
++  // just ranked whatever is currently in catalogStore. What changed
++  // here is what ends up IN that store before this runs -- see
++  // refineFromServer below, which merges real omnia-library-catalog
++  // matches in before calling this again, so the exact same ranking
++  // logic below naturally covers them too.
++  function showLocalResult(trimmed: string, searchLanguage: string): void {
++    const next = searchCatalog(trimmed, searchLanguage);
++    const hasAnyResults = next.matchedAuthors.length > 0 || next.books.length > 0;
++    setResult(next);
++    setStatus(hasAnyResults ? "success" : "empty");
++  }
++
++  // Reaches AN.KI's real internal catalog (the same omnia-library-catalog
++  // Edge Function LibraryView.tsx uses) and merges any matches into the
++  // shared catalog store, then re-runs the existing local ranking over
++  // the now-larger store.
