@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { Hero } from "./Hero";
 import { SearchPanel } from "./SearchPanel";
-import { getAuthors } from "../../catalog";
+import { getAuthors, getBooksByCollection, getCollectionById } from "../../catalog";
 import type { Author } from "../../catalog/types";
+import { CollectionCard } from "../collections/CollectionCard";
 
 interface HomeViewProps {
   onOpenBookDetail: (bookId: string, query: string, language: string) => void;
-  onOpenCollections: () => void;
+  // collectionId is optional — see App.tsx's handleOpenCollections.
+  onOpenCollections: (collectionId?: string) => void;
   restoreSearch: { query: string; language: string } | null;
   onOpenAuthorDetail: (authorId: string) => void;
   onOpenAuthorDetailFromSearch: (authorId: string, query: string, language: string) => void;
@@ -25,50 +27,19 @@ const CURATED_HOME_AUTHOR_NAMES = [
   "Virginia Woolf"
 ];
 
-const HOME_COLLECTIONS = [
-  {
-    id: "classical-antiquity",
-    eyebrow: "Литература",
-    title: "Античная литература",
-    query: "classical antiquity",
-    image: "collections/collection_1.png"
-  },
-  {
-    id: "african-literature",
-    eyebrow: "Литературные традиции",
-    title: "Африканская литература",
-    query: "african literature",
-    image: "collections/collection_4.png"
-  },
-  {
-    id: "essays",
-    eyebrow: "Форма",
-    title: "Эссе",
-    query: "essay",
-    image: "collections/collection_12.png"
-  },
-  {
-    id: "poetry",
-    eyebrow: "Форма",
-    title: "Поэзия",
-    query: "poetry",
-    image: "collections/collection_9.png"
-  },
-  {
-    id: "philosophy-and-thought",
-    eyebrow: "Философия",
-    title: "Книги, изменившие европейскую мысль",
-    query: "philosophy",
-    image: "collections/collection_10.png"
-  },
-  {
-    id: "great-19th-century-novels",
-    eyebrow: "Литература",
-    title: "Великие романы XIX века",
-    query: "novel",
-    image: "collections/collection_2.png"
-  }
-] as const;
+// Exactly the 6 collections the home page teaser shows, in display
+// order — real ids from catalog/collections.ts, the single source of
+// truth for title/description/image. Nothing here duplicates that
+// data: a missing id is skipped rather than crashing the home page,
+// since catalog data can change independently of this curated list.
+const HOME_COLLECTION_IDS = [
+  "antique-literature",
+  "african-literature",
+  "essays",
+  "poetry",
+  "philosophy-and-thought",
+  "great-19th-century-novels"
+];
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
@@ -95,6 +66,48 @@ function getCuratedHomeAuthors(): Author[] {
   }
 
   return curated;
+
+}
+
+function getHomeCollections() {
+  return HOME_COLLECTION_IDS
+    .map(id => getCollectionById(id))
+    .filter((collection): collection is NonNullable<typeof collection> => Boolean(collection));
+}
+
+// Same image-with-graceful-fallback pattern already used by
+// CollectionCard/BookCard/CollectionDetail: an author with no
+// portraitImage yet (every seed author, today) shows a monogram
+// instead of a broken image, and starts showing a real portrait the
+// moment one is set on the Author record — no other change needed.
+// Deliberately still the existing plain list row, just with a small
+// portrait slot added — not a card/carousel redesign.
+function AuthorListItem({ author, onOpen }: { author: Author; onOpen: () => void }) {
+
+  const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(author.portraitImage) && !imageFailed;
+  const monogram = author.name.trim().charAt(0).toUpperCase() || "?";
+
+  return (
+    <button type="button" onClick={onOpen}>
+      <span className="author-identity">
+        <span className="author-portrait">
+          {showImage ? (
+            <img
+              loading="lazy"
+              src={`${import.meta.env.BASE_URL}${author.portraitImage}`}
+              alt=""
+              onError={() => setImageFailed(true)}
+            />
+          ) : (
+            <span className="author-portrait-fallback" aria-hidden="true">{monogram}</span>
+          )}
+        </span>
+        <span className="author-name">{author.name}</span>
+      </span>
+      <span className="author-years">{authorYearsLabel(author) ?? ""}</span>
+    </button>
+  );
 
 }
 
@@ -129,11 +142,12 @@ export function HomeView({
   }, []);
 
   const curatedAuthors = getCuratedHomeAuthors();
+  const homeCollections = getHomeCollections();
 
   return (
     <section id="homeView" className="home-view">
 
-      <div className="home-main" style={{ marginLeft: 0 }}>
+      <div className="home-main">
 
         <header className="mobile-header">
           <div className="mobile-brand">
@@ -159,35 +173,20 @@ export function HomeView({
               <p className="eyebrow">Кураторский выбор</p>
               <h2>Подборки</h2>
             </div>
-            <button className="section-link" type="button" onClick={onOpenCollections}>
+            <button className="section-link" type="button" onClick={() => onOpenCollections()}>
               Смотреть всё
             </button>
           </div>
 
-          <div className="collection-grid">
-
-            {HOME_COLLECTIONS.map(collection => (
-              <article
+          <div className="collections-grid">
+            {homeCollections.map(collection => (
+              <CollectionCard
                 key={collection.id}
-                className="collection-card"
-                style={{
-                  minHeight: 390,
-                  justifyContent: "flex-end",
-                  backgroundImage: `linear-gradient(180deg, rgba(10, 6, 5, 0.06) 20%, rgba(10, 6, 5, 0.92) 100%), url(${collection.image})`,
-                  backgroundPosition: "center",
-                  backgroundSize: "cover"
-                }}
-              >
-                <div className="collection-card-body">
-                  <p>{collection.eyebrow}</p>
-                  <h3>{collection.title}</h3>
-                  <button type="button" onClick={() => openSearch(collection.query)}>
-                    Открыть коллекцию
-                  </button>
-                </div>
-              </article>
+                collection={collection}
+                bookCount={getBooksByCollection(collection.id).length}
+                onOpen={() => onOpenCollections(collection.id)}
+              />
             ))}
-
           </div>
 
         </section>
@@ -204,10 +203,11 @@ export function HomeView({
           <div className="author-list">
 
             {curatedAuthors.map(author => (
-              <button key={author.id} type="button" onClick={() => onOpenAuthorDetail(author.id)}>
-                <span>{author.name}</span>
-                <span>{authorYearsLabel(author) ?? ""}</span>
-              </button>
+              <AuthorListItem
+                key={author.id}
+                author={author}
+                onOpen={() => onOpenAuthorDetail(author.id)}
+              />
             ))}
 
           </div>
