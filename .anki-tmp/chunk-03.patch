@@ -1,0 +1,100 @@
++function mergeLibraryEditions(seedEditions: Edition[], remoteEditions: Edition[]): Edition[] {
++  const merged = new Map<string, Edition>();
++  for (const edition of seedEditions) merged.set(edition.id, edition);
++  for (const edition of remoteEditions) {
++    const existing = merged.get(edition.id);
++    merged.set(edition.id, existing ? mergeLibraryEdition(existing, edition) : edition);
++  }
++  return Array.from(merged.values());
++}
++
++// existing (seed) book is always the base record; incoming (remote)
++// only fills fields that are genuinely empty on the existing record
++// (isFilledString / publicationYear !== null), and only ever adds to
++// the array fields (unionStrings) -- it can never blank out a curated
++// title, description, cover, taxonomy reference, etc. by merging in an
++// incoming record that simply doesn't have that field populated.
++function mergeLibraryBook(seed: Book, remote: Book): Book {
++  const editions = mergeLibraryEditions(seed.editions, remote.editions);
++  return {
++    id: seed.id,
++    title: isFilledString(seed.title) ? seed.title : remote.title,
++    originalTitle: isFilledString(seed.originalTitle) ? seed.originalTitle : remote.originalTitle,
++    alternativeTitles: unionStrings(seed.alternativeTitles, remote.alternativeTitles),
++    authorId: isFilledString(seed.authorId) ? seed.authorId : remote.authorId,
++    authorName: isFilledString(seed.authorName) ? seed.authorName : remote.authorName,
++    originalLanguage: isFilledString(seed.originalLanguage) ? seed.originalLanguage : remote.originalLanguage,
++    availableLanguages: unionStrings(seed.availableLanguages, remote.availableLanguages),
++    publicationYear: seed.publicationYear !== null ? seed.publicationYear : remote.publicationYear,
++    countryId: isFilledString(seed.countryId) ? seed.countryId : remote.countryId,
++    centuryId: isFilledString(seed.centuryId) ? seed.centuryId : remote.centuryId,
++    epochId: isFilledString(seed.epochId) ? seed.epochId : remote.epochId,
++    movementId: isFilledString(seed.movementId) ? seed.movementId : remote.movementId,
++    genreIds: unionStrings(seed.genreIds, remote.genreIds),
++    themeIds: unionStrings(seed.themeIds, remote.themeIds),
++    description: isFilledString(seed.description) ? seed.description : remote.description,
++    cover: isFilledString(seed.cover) ? seed.cover : remote.cover,
++    editions,
++    collectionIds: unionStrings(seed.collectionIds, remote.collectionIds)
++  };
++}
++
++function mergeLibraryBooksById(seed: Book[], remote: Book[]): Book[] {
++  const merged = new Map<string, Book>();
++  for (const book of seed) merged.set(book.id, book);
++  for (const book of remote) {
++    const existing = merged.get(book.id);
++    merged.set(book.id, existing ? mergeLibraryBook(existing, book) : book);
++  }
++  return Array.from(merged.values());
++}
++
++// INCREMENTAL, curated-safe merge -- NOT the same helpers setRemoteCatalog
++// above uses. setRemoteCatalog is called exactly once, at app startup,
++// from a single omnia-catalog response, and its remote-wins-on-conflict
++// semantics are unchanged from before the Library work. This is for
++// Library/Search, which pull in additional pages of AN.KI's real internal
++// catalog (omnia-library-catalog) over time, as the visitor pages through
++// or searches -- each call adds to whatever is already in currentBooks/
++// currentAuthors rather than replacing it, so a book merged in from an
++// earlier page or an earlier search stays reachable (by getBookById, from
++// Book Detail/Author Detail/back-navigation) after a later call runs --
++// and a curated seed/batch50 record's own fields (title, description,
++// cover, portraitImage, etc.) are never blanked out by an incoming
++// Supabase record that simply doesn't have that field populated.
++//
++// This is the ONLY way a real Supabase-catalog book becomes openable via
++// the existing BookDetailView/AuthorDetailView/toReaderBook pipeline: it
++// has to actually be IN this store, under its real id, with its real
++// author/editions/rights -- never a parallel, display-only object with a
++// fabricated authorId or empty editions (see the written report for why
++// an earlier draft of this feature did that, and why it was wrong).
++export function mergeLibraryPage(books: Book[], authors: Author[]): void {
++  currentAuthors = mergeLibraryAuthorsById(currentAuthors, authors);
++  const merged = mergeLibraryBooksById(currentBooks, books);
++  currentBooks = assessGermanRights(merged, currentAuthors).map(syncAvailableLanguages);
++}
+diff --git a/src/catalog/index.ts b/src/catalog/index.ts
+index eb611e0..eeaf2ad 100644
+--- a/src/catalog/index.ts
++++ b/src/catalog/index.ts
+@@ -10,7 +10,7 @@ export { epochs, centuries, countries, movements, genres, themes } from "./taxon
+ // (called once at app startup, see App.tsx) succeeds. Every lookup
+ // below stays exactly as it was; only where its data comes from
+ // changed.
+-export { getBooks, getAuthors, isRemoteCatalogLoaded } from "./catalogStore";
++export { getBooks, getAuthors, isRemoteCatalogLoaded, mergeLibraryPage } from "./catalogStore";
+ export { loadRemoteCatalog } from "./remoteCatalog";
+ 
+ import type { Author, Book, Collection } from "./types";
+diff --git a/src/catalog/languages.ts b/src/catalog/languages.ts
+new file mode 100644
+index 0000000..a53cd1c
+--- /dev/null
++++ b/src/catalog/languages.ts
+@@ -0,0 +1,45 @@
++// Single shared language-options list for every "Язык" selector in the
++// app (Home's SearchPanel and Library's own filter). Previously each
++// component kept its own local, independently-hardcoded LANGUAGES array;
++// they had already drifted apart in wording and both were missing
++// languages that are actually present in the internal catalog once real
