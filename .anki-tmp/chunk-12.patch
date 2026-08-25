@@ -1,0 +1,100 @@
++// the gateway. This function must be deployed the same way (see
++// supabase/config.toml in this repo, or `--no-verify-jwt` at deploy
++// time) -- otherwise the gateway rejects every browser request before it
++// ever reaches the code below. This is a gateway-level setting, separate
++// from (and in addition to) the service-role/RLS access control
++// described above -- one controls who may call the function at all, the
++// other controls what the function itself is allowed to read once called.
++//
++// ELIGIBILITY -- CANONICAL, NOT HAND-ROLLED:
++// A work is eligible for Library/Search exactly when
++// `work_readiness.catalog_ready = true AND works.publication_status <>
++// 'hidden'`. This is enforced by a single Postgres function,
++// public.library_catalog_search (see supabase/sql/library_catalog_search.sql),
++// called below via supabase.rpc(...) with the service-role client -- not
++// duplicated here as a second, hand-rolled approximation of readiness.
++// publication_status is NOT used as the primary gate: on a live snapshot
++// checked during this work, the large majority of catalog-ready works
++// were publication_status='draft', with only a small handful 'published'
++// (ingestion keeps changing these counts -- see the written report for a
++// timestamped snapshot total rather than a number hardcoded here). draft
++// stays in the database and does not block a catalog-ready work from
++// appearing here -- see the SQL file's own header comment for the full
++// reasoning. No mass UPDATE of publication_status was made or is needed.
++//
++// FILTERING HAPPENS BEFORE PAGINATION, IN THE DATABASE:
++// library_catalog_search applies the full catalog_ready + publication_status
++// + search + language filter, THEN paginates with LIMIT/OFFSET, THEN
++// reports `total_count` via a window function computed over the complete
++// filtered set (before the outer LIMIT clips it). This function never
++// fetches a page and discards rows client-side to "make it fit" -- total
++// and hasMore below are read directly from that already-filtered count.
++//
++// Schema note: every column name below was empirically confirmed against
++// the live project by probing PostgREST's own "column does not exist"
++// (400) vs "valid query" (200, RLS-empty []) responses. works.author_id ->
++// authors.id, editions.work_id -> works.id, book_files.edition_id ->
++// editions.id, rights_assertions.edition_id -> editions.id, and
++// rights_assertions.book_file_id -> book_files.id, and
++// work_readiness.work_id -> works.id are all directly confirmed
++// relationships (the last one via a direct live join query, see the SQL
++// file's own header comment) -- not guesses, no hedging needed on any of
++// these.
++const WORKS_COLUMNS = `
++  id, title, original_title, alternative_titles, author_id, original_language,
++  available_languages, publication_year, country_id, century_id, epoch_id,
++  movement_id, genre_ids, theme_ids, description, cover, collection_ids
++`;
++
++const DEFAULT_LIMIT = 24;
++const MAX_LIMIT = 100;
++
++const BOOK_CONTENT_ENDPOINT =
++  "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-content";
++
++// Same reader-supported-format preference as the frontend's own
++// toReaderBook.ts (READER_SUPPORTED_FORMATS) -- anki-json first. Kept as a
++// small local copy rather than a shared import: this function has no
++// access to the frontend's src/ tree at deploy time (Edge Functions are
++// deployed standalone), so the two lists are necessarily separate copies
++// of the same ordering, not one shared module.
++const FORMAT_PRIORITY = ["anki-json", "epub", "plaintext"];
++
++const CORS_HEADERS = {
++  "Access-Control-Allow-Origin": "*",
++  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
++  "Access-Control-Allow-Methods": "GET, OPTIONS"
++};
++
++function jsonResponse(body: unknown, status = 200): Response {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: { ...CORS_HEADERS, "Content-Type": "application/json" }
++  });
++}
++
++// Generic, client-facing failure. The real cause is always logged
++// server-side via console.error before this is returned -- never the raw
++// error/detail itself, which could otherwise leak internal PostgREST/DB
++// error text (table/column names, constraint names) to a public,
++// unauthenticated caller.
++function serverErrorResponse(): Response {
++  return jsonResponse({ error: "omnia-library-catalog request failed" }, 500);
++}
++
++// Deno + npm: specifier via this function's own deno.json import map
++// ("supabase" -> npm:@supabase/supabase-js@2.112.4), per the currently
++// recommended Supabase Edge Functions dependency-management pattern
++// (checked against the live Supabase docs, deno.json + pinned npm:
++// specifier over an unpinned esm.sh URL). 2.112.4 was the latest published
++// @supabase/supabase-js version at the time this was written, confirmed
++// directly against the npm registry -- pin bumps are a deliberate,
++// separate decision, not something this function does automatically.
++// @ts-ignore -- "supabase" resolves via this directory's deno.json import
++// map at deploy time; this repo's own tsconfig excludes supabase/functions
++// from its frontend TS project, so this import is never type-checked by
++// Vite/tsc either way.
++import { createClient } from "supabase";
++
++Deno.serve(async (req: Request) => {
++
