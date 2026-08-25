@@ -1,0 +1,113 @@
+name: Finalize Library patch
+
+on:
+  push:
+    branches: [library-finalize-20260825]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact main base
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Reconstruct and verify exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "1e3faaeac955c303f3bfed891bb8be35fcd1c80c"
+          git fetch origin library-finalize-20260825
+          : > /tmp/library.patch
+          for i in $(seq -w 0 16); do
+            git show "origin/library-finalize-20260825:.anki-tmp/chunk-${i}.patch" >> /tmp/library.patch
+          done
+          test "$(wc -l < /tmp/library.patch)" -eq 1692
+          echo "5bcd5cfbbcc177c586111dde97cb446087c8a88e05b256eb831fc5546e8c620e  /tmp/library.patch" | sha256sum -c -
+
+      - name: Apply patch and verify scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/library.patch
+          git apply /tmp/library.patch
+          git diff --check
+          git diff --exit-code -- src/api/library.ts
+
+          cat > /tmp/expected-files <<'EOF'
+          src/App.tsx
+          src/api/libraryCatalog.ts
+          src/catalog/catalogStore.ts
+          src/catalog/index.ts
+          src/catalog/languages.ts
+          src/features/home/Hero.tsx
+          src/features/home/HomeView.tsx
+          src/features/home/SearchPanel.tsx
+          src/features/library/LibraryView.tsx
+          src/styles/global.css
+          supabase/config.toml
+          supabase/functions/omnia-library-catalog/deno.json
+          supabase/functions/omnia-library-catalog/index.ts
+          supabase/sql/library_catalog_search.sql
+          EOF
+          sort -o /tmp/expected-files /tmp/expected-files
+          git diff --name-only | sort > /tmp/actual-files
+          diff -u /tmp/expected-files /tmp/actual-files
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Real type-check and build
+        run: npm run build
+
+      - name: Verify build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+
+      - name: Commit exact reviewed patch to ready branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            src/App.tsx \
+            src/api/libraryCatalog.ts \
+            src/catalog/catalogStore.ts \
+            src/catalog/index.ts \
+            src/catalog/languages.ts \
+            src/features/home/Hero.tsx \
+            src/features/home/HomeView.tsx \
+            src/features/home/SearchPanel.tsx \
+            src/features/library/LibraryView.tsx \
+            src/styles/global.css \
+            supabase/config.toml \
+            supabase/functions/omnia-library-catalog/deno.json \
+            supabase/functions/omnia-library-catalog/index.ts \
+            supabase/sql/library_catalog_search.sql
+
+          git diff --cached --name-only | sort > /tmp/staged-files
+          diff -u /tmp/expected-files /tmp/staged-files
+          git commit -m "Connect Library to internal catalog"
+          git push origin HEAD:refs/heads/library-built-20260825
+          echo "READY_SHA=$(git rev-parse HEAD)"
