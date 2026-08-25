@@ -1,0 +1,100 @@
++.library-note {
++  max-width: 640px;
++  margin: 0 0 24px;
++
++  color: var(--home-muted);
++
++  font-size: 13px;
++  font-style: italic;
++}
++
++.library-results {
++  max-width: 720px;
++}
++
++.library-pager {
++  max-width: 720px;
++  margin-top: 8px;
++}
++
+ /* =========================================================
+    AUTHORS
+    ========================================================= */
+diff --git a/supabase/config.toml b/supabase/config.toml
+new file mode 100644
+index 0000000..67a6677
+--- /dev/null
++++ b/supabase/config.toml
+@@ -0,0 +1,23 @@
++# supabase/config.toml — NOT YET APPLIED / not previously present in this
++# repo. Added scoped to exactly the one new function this round needs a
++# setting for, rather than introducing a project-wide config file with
++# unrelated sections guessed at.
++#
++# omnia-library-catalog is a public, read-only catalog endpoint: the
++# frontend (src/api/libraryCatalog.ts) calls it with only the public
++# Supabase `apikey` header (the publishable key) and never sends an
++# `Authorization: Bearer` JWT -- the same calling pattern this project's
++# existing public functions (omnia-catalog, omnia-book-content) already
++# use, both already configured with JWT verification disabled at the
++# gateway. Without the equivalent setting here, the Supabase gateway
++# would reject every browser request to this function before it ever
++# reaches the function's own code (401, no JWT present) -- the function's
++# own internal service-role access control (see index.ts's own header
++# comment) is a separate, additional layer, not a substitute for this.
++#
++# If this file is not desired as a permanent addition to the repo, the
++# equivalent can be set at deploy time instead:
++#   supabase functions deploy omnia-library-catalog --no-verify-jwt
++# One or the other must happen -- this is not optional configuration.
++[functions.omnia-library-catalog]
++verify_jwt = false
+diff --git a/supabase/functions/omnia-library-catalog/deno.json b/supabase/functions/omnia-library-catalog/deno.json
+new file mode 100644
+index 0000000..ef32483
+--- /dev/null
++++ b/supabase/functions/omnia-library-catalog/deno.json
+@@ -0,0 +1,5 @@
++{
++  "imports": {
++    "supabase": "npm:@supabase/supabase-js@2.112.4"
++  }
++}
+diff --git a/supabase/functions/omnia-library-catalog/index.ts b/supabase/functions/omnia-library-catalog/index.ts
+new file mode 100644
+index 0000000..d36d265
+--- /dev/null
++++ b/supabase/functions/omnia-library-catalog/index.ts
+@@ -0,0 +1,404 @@
++// omnia-library-catalog — NEW Edge Function (not yet deployed).
++//
++// Reads AN.KI's own internal catalog (public.works / authors / editions /
++// book_files / rights_assertions, gated through public.work_readiness) and
++// serves it, paginated and searchable, to the frontend's Library screen
++// and to Home's SearchPanel. This is deliberately a SEPARATE function from
++// `omnia-library` (an external Gutendex/Wikisource aggregator, contract
++// confirmed separately -- action:"search", non-empty query, no relation to
++// these tables) and from `omnia-catalog` (a small, fixed, non-paginated
++// legacy response -- also unrelated to these tables). Neither of those is
++// touched by this file.
++//
++// WHY A NEW EDGE FUNCTION AND NOT DIRECT FRONTEND TABLE ACCESS:
++// RLS is enabled on all five base tables. A direct PostgREST read from the
++// frontend, using only the public anon/publishable key, was tested against
++// the live project (`/rest/v1/works?select=...&apikey=...`) and returned
++// `[]` for every table -- the empty-array-not-an-error pattern RLS
++// produces when no policy grants the `anon` role SELECT, rather than an
++// outright 401/403. So there is no way for the browser, using only the
++// public key, to read these tables at all. This function runs server-side
++// with the project's SERVICE_ROLE key (via the standard
++// `SUPABASE_SERVICE_ROLE_KEY` environment variable every Supabase Edge
++// Function receives automatically -- never sent to or embedded in the
++// frontend bundle) specifically so it can bypass RLS *safely*, deciding
++// itself exactly which columns and which rows are safe to expose.
++//
++// DEPLOYMENT REQUIREMENT -- verify_jwt = false:
++// This is a public, read-only endpoint. The frontend calls it with only
++// the public Supabase `apikey` header (see src/api/libraryCatalog.ts) and
++// never sends an `Authorization: Bearer` JWT -- the same pattern this
++// project's existing public functions (omnia-catalog, omnia-book-content)
++// already use, both already deployed with JWT verification disabled at
