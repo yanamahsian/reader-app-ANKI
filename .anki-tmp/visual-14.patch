@@ -1,0 +1,328 @@
++  font-family: "Cormorant Garamond", serif;
++  font-size: 17px;
++  line-height: 1.5;
++}
++
++.shell-page-body {
++  display: flex;
++  flex-direction: column;
++  gap: 40px;
++}
++
++.guest-notice {
++  padding: 32px 28px;
++
++  border: 1px solid var(--home-border);
++  background: rgba(23, 16, 13, 0.6);
++}
++
++.guest-notice-message {
++  margin: 0 0 20px;
++
++  color: rgba(246, 237, 224, 0.86);
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 19px;
++  line-height: 1.5;
++}
++
++.guest-notice-actions {
++  display: flex;
++  align-items: center;
++  gap: 20px;
++
++  margin-bottom: 16px;
++}
++
++.guest-notice-note {
++  margin: 0;
++
++  color: var(--home-muted);
++
++  font-size: 12px;
++  font-style: italic;
++}
++
++.profile-identity {
++  display: flex;
++  align-items: center;
++  gap: 20px;
++}
++
++.profile-avatar {
++  flex: 0 0 auto;
++
++  width: 64px;
++  height: 64px;
++
++  display: grid;
++  place-items: center;
++
++  border-radius: 50%;
++  border: 1px solid rgba(202, 160, 88, 0.4);
++
++  background: var(--home-surface-soft);
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 24px;
++  color: var(--home-gold);
++}
++
++.profile-name-placeholder {
++  margin: 0 0 4px;
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 22px;
++}
++
++.profile-email-placeholder {
++  margin: 0;
++
++  color: var(--home-muted);
++  font-size: 13px;
++}
++
++.settings-section {
++  padding-bottom: 28px;
++
++  border-bottom: 1px solid var(--home-border);
++}
++
++.settings-section:last-child {
++  border-bottom: 0;
++  padding-bottom: 0;
++}
++
++.settings-section h2 {
++  margin: 0 0 10px;
++
++  font-family: "Cormorant Garamond", serif;
++  font-weight: 500;
++  font-size: 23px;
++}
++
++.settings-section-note {
++  margin: 0;
++
++  color: var(--home-muted);
++
++  font-size: 13px;
++  line-height: 1.5;
++}
++
++.settings-lang-row {
++  display: flex;
++  gap: 12px;
++
++  margin-top: 14px;
++}
++
++.settings-lang-chip {
++  padding: 7px 16px;
++
++  border: 1px solid var(--home-border);
++
++  color: var(--home-muted);
++
++  font-size: 11px;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.settings-lang-chip.active {
++  border-color: var(--home-gold);
++  color: var(--home-gold);
++
++  background: rgba(202, 160, 88, 0.08);
++}
++
++
++/* =========================================================
++   SUBSCRIPTION
++   ========================================================= */
++
++.subscription-current {
++  padding: 20px 24px;
++
++  border: 1px solid var(--home-border);
++  background: rgba(23, 16, 13, 0.5);
++}
++
++.subscription-current h2 {
++  margin: 0 0 8px;
++
++  font-family: "Cormorant Garamond", serif;
++  font-weight: 500;
++  font-size: 20px;
++}
++
++.subscription-plans {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
++  gap: 20px;
++}
++
++.plan-card {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++
++  padding: 28px 24px;
++
++  border: 1px solid var(--home-border);
++  background: rgba(23, 16, 13, 0.55);
++}
++
++.plan-card-highlighted {
++  border-color: var(--home-gold);
++  background: rgba(74, 21, 29, 0.4);
++}
++
++.plan-card-name {
++  margin: 0;
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 26px;
++}
++
++.plan-card-price {
++  margin: 0;
++
++  color: var(--home-gold);
++
++  font-size: 11px;
++  font-weight: 600;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.plan-card-tagline {
++  margin: 0 0 6px;
++
++  color: var(--home-muted);
++
++  font-size: 13px;
++  line-height: 1.5;
++}
++
++.plan-card-features {
++  margin: 0;
++  padding: 0;
++  list-style: none;
++
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++
++  color: rgba(246, 237, 224, 0.82);
++  font-size: 13px;
++}
++
++.plan-card-features li {
++  position: relative;
++  padding-left: 16px;
++}
++
++.plan-card-features li::before {
++  content: "—";
++  position: absolute;
++  left: 0;
++
++  color: var(--home-gold);
++}
++
++.plan-card button {
++  margin-top: 10px;
++}
++
++.subscription-blocks {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
++  gap: 20px;
++}
++
++.subscription-block {
++  padding: 20px 22px;
++
++  border: 1px solid var(--home-border);
++  background: rgba(23, 16, 13, 0.4);
++}
++
++.subscription-block h2 {
++  margin: 0 0 8px;
++
++  font-family: "Cormorant Garamond", serif;
++  font-weight: 500;
++  font-size: 18px;
++}
++
++
++/* =========================================================
++   SUPPORT
++   ========================================================= */
++
++.support-topics {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
++  gap: 18px;
++}
++
++.support-topic-card {
++  display: flex;
++  flex-direction: column;
++  align-items: flex-start;
++  gap: 10px;
++
++  padding: 22px;
++
++  border: 1px solid var(--home-border);
++  background: rgba(23, 16, 13, 0.5);
++}
++
++.support-topic-card h3 {
++  margin: 0;
++
++  font-family: "Cormorant Garamond", serif;
++  font-weight: 500;
++  font-size: 19px;
++}
++
++.support-faq h2 {
++  margin: 0 0 8px;
++
++  font-family: "Cormorant Garamond", serif;
++  font-weight: 500;
++  font-size: 22px;
++}
++
++.support-faq-list {
++  margin: 0;
++}
++
++.support-faq-item {
++  padding: 18px 0;
++
++  border-bottom: 1px solid var(--home-border);
++}
++
++.support-faq-item:last-child {
++  border-bottom: 0;
++}
++
++.support-faq-item dt {
++  margin: 0 0 8px;
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 19px;
++}
++
++.support-faq-item dd {
++  margin: 0;
++
++  color: var(--home-muted);
++
++  font-size: 14px;
++  line-height: 1.55;
++}
++
++
