@@ -1,0 +1,100 @@
++  if (req.method === "OPTIONS") {
++    return new Response("ok", { headers: CORS_HEADERS });
++  }
++
++  if (req.method !== "GET") {
++    return jsonResponse({ error: "Method not allowed -- use GET" }, 405);
++  }
++
++  const supabaseUrl = Deno.env.get("SUPABASE_URL");
++  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
++
++  if (!supabaseUrl || !serviceRoleKey) {
++    // These two are populated automatically for every Supabase Edge
++    // Function -- if this fires, the function isn't actually running in a
++    // Supabase deployment, not a real runtime condition to design around
++    // further. Still returned generically, not with the missing var names,
++    // for the same reason as serverErrorResponse above.
++    console.error("omnia-library-catalog misconfigured: missing SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY");
++    return serverErrorResponse();
++  }
++
++  const supabase = createClient(supabaseUrl, serviceRoleKey);
++
++  const url = new URL(req.url);
++  const rawQuery = (url.searchParams.get("q") ?? "").trim();
++  const language = (url.searchParams.get("language") ?? "").trim();
++  const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0") || 0);
++  const limit = Math.min(
++    MAX_LIMIT,
++    Math.max(1, Number(url.searchParams.get("limit") ?? String(DEFAULT_LIMIT)) || DEFAULT_LIMIT)
++  );
++
++  // A query shorter than 2 characters is treated as "no filter" (browse
++  // all), same threshold Library's own empty-query browse and Search's
++  // "don't refine on a single keystroke" behavior already agree on
++  // client-side -- kept here too so the two stay consistent even if this
++  // endpoint is ever called directly.
++  const searchQuery = rawQuery.length >= 2 ? rawQuery : null;
++
++  try {
++
++    // Step 1: which works are eligible, and how many total, entirely
++    // inside the database -- see library_catalog_search's own header
++    // comment (supabase/sql/library_catalog_search.sql) for exactly how
++    // catalog_ready + publication_status + search + language are applied
++    // and why a bound function parameter (not a hand-built filter string)
++    // is what makes the search argument here safe against PostgREST
++    // filter-injection.
++    const { data: pageRows, error: rpcError } = await supabase.rpc("library_catalog_search", {
++      p_query: searchQuery,
++      p_language: language || null,
++      p_limit: limit,
++      p_offset: offset
++    });
++
++    if (rpcError) throw rpcError;
++
++    const rows = (pageRows ?? []) as Array<{ work_id: string; total_count: number | string }>;
++    const workIds = rows.map(row => row.work_id);
++    const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
++
++    if (workIds.length === 0) {
++      return jsonResponse({ books: [], authors: [], total, hasMore: false });
++    }
++
++    // Step 2: fetch full details for exactly these work ids -- never a
++    // broader scan. Every table read below is still service-role (RLS
++    // bypassed deliberately, as explained above), but scoped tightly to
++    // this one page's ids.
++    const { data: workRows, error: worksError } = await supabase
++      .from("works")
++      .select(WORKS_COLUMNS)
++      .in("id", workIds);
++    if (worksError) throw worksError;
++
++    const works = (workRows ?? []) as any[];
++
++    const authorIds = Array.from(new Set(works.map(w => w.author_id).filter(Boolean)));
++    const { data: authorRows, error: authorsError } = authorIds.length
++      ? await supabase
++          .from("authors")
++          .select("id, name, alternative_names, birth_year, death_year")
++          .in("id", authorIds)
++      : { data: [] as any[], error: null };
++    if (authorsError) throw authorsError;
++
++    // Only editions that are themselves ingestion_status=ready -- reader_ready
++    // (and so catalog_ready) is defined per-edition, not per-work, so a
++    // work can have some ready and some not-yet-ready editions.
++    const { data: editionRows, error: editionsError } = await supabase
++      .from("editions")
++      .select("id, work_id, language, is_original, translator_name, source_id, external_id")
++      .in("work_id", workIds)
++      .eq("ingestion_status", "ready");
++    if (editionsError) throw editionsError;
++
++    const editions = (editionRows ?? []) as any[];
++    const editionIds = editions.map(e => e.id);
++
++    // Exact reader_ready file match: kind=normalized AND format=anki-json
