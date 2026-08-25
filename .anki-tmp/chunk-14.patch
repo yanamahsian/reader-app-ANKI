@@ -1,0 +1,100 @@
++    // AND ingestion_status=ready -- all three, not just format +
++    // ingestion_status as the previous version checked. A book_file
++    // missing any one of these is not a qualifying file, matching
++    // work_readiness's own reader_ready definition exactly.
++    const { data: fileRows, error: filesError } = editionIds.length
++      ? await supabase
++          .from("book_files")
++          .select("id, edition_id, format, kind, ingestion_status")
++          .in("edition_id", editionIds)
++          .eq("kind", "normalized")
++          .eq("format", "anki-json")
++          .eq("ingestion_status", "ready")
++      : { data: [] as any[], error: null };
++    if (filesError) throw filesError;
++
++    const { data: rightsRows, error: rightsError } = editionIds.length
++      ? await supabase
++          .from("rights_assertions")
++          .select("id, edition_id, status, jurisdiction")
++          .in("edition_id", editionIds)
++          .eq("status", "public-domain")
++      : { data: [] as any[], error: null };
++    if (rightsError) throw rightsError;
++
++    const files = (fileRows ?? []) as any[];
++    const rights = (rightsRows ?? []) as any[];
++
++    const filesByEdition = new Map<string, any[]>();
++    for (const file of files) {
++      const list = filesByEdition.get(file.edition_id) ?? [];
++      list.push(file);
++      filesByEdition.set(file.edition_id, list);
++    }
++
++    const rightsByEdition = new Map<string, any[]>();
++    for (const assertion of rights) {
++      const list = rightsByEdition.get(assertion.edition_id) ?? [];
++      list.push(assertion);
++      rightsByEdition.set(assertion.edition_id, list);
++    }
++
++    const editionsByWork = new Map<string, any[]>();
++    for (const edition of editions) {
++      const list = editionsByWork.get(edition.work_id) ?? [];
++      list.push(edition);
++      editionsByWork.set(edition.work_id, list);
++    }
++
++    const authorNameById = new Map((authorRows ?? []).map((a: any) => [a.id, a.name as string]));
++
++    const books = works
++      .map((row: any) => {
++
++        const candidateEditions = editionsByWork.get(row.id) ?? [];
++
++        const qualifyingEditions = candidateEditions
++          .map((edition: any) => {
++
++            const readyFormats = new Set(
++              (filesByEdition.get(edition.id) ?? []).map((file: any) => file.format as string)
++            );
++            const editionRights = rightsByEdition.get(edition.id) ?? [];
++
++            if (editionRights.length === 0) return null;
++
++            // Prefer anki-json (this project's own normalized content)
++            // over epub/plaintext, same priority as the frontend reader --
++            // only ONE file entry per edition here, matching every
++            // existing seed Edition's own convention (one edition, one
++            // file). In practice the reader_ready file filter above
++            // (kind=normalized, format=anki-json) already narrows this to
++            // anki-json specifically; the priority list is kept so this
++            // still degrades sensibly if that filter is ever loosened.
++            const bestFormat = FORMAT_PRIORITY.find(format => readyFormats.has(format));
++            if (!bestFormat) return null;
++
++            // editions.source_id / editions.external_id are real columns
++            // on the live schema -- use them when present rather than
++            // always reporting the generic "anki-catalog" placeholder.
++            // "anki-catalog" is now only a fallback for the genuine edge
++            // case of a ready edition that itself has no recorded
++            // source_id, not the default for every internal-catalog
++            // edition regardless of its real provenance.
++            const hasSourceId = typeof edition.source_id === "string" && edition.source_id.trim().length > 0;
++            const sourceId = hasSourceId ? edition.source_id : "anki-catalog";
++            const externalIds = hasSourceId && edition.external_id
++              ? { [edition.source_id]: edition.external_id as string }
++              : {};
++
++            return {
++              id: edition.id,
++              language: edition.language,
++              isOriginal: Boolean(edition.is_original),
++              translatorName: edition.translator_name ?? null,
++              rights: editionRights.map((assertion: any) => ({
++                status: assertion.status,
++                jurisdiction: assertion.jurisdiction ?? null
++              })),
++              sourceId,
++              externalIds,
