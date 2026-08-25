@@ -1,0 +1,134 @@
++    question: "Почему я не вижу обложку у книги?",
++    answer:
++      "Часть изданий ещё не получила обложку в каталоге — вместо неё показывается фирменная заглушка AN.KI. Это не ошибка.",
++  },
++  {
++    question: "Почему книга недоступна для чтения?",
++    answer:
++      "Некоторые издания временно закрыты по юрисдикции или ещё проходят подготовку текста. Доступность может измениться.",
++  },
++  {
++    question: "Появится ли вход в аккаунт?",
++    answer:
++      "Да, авторизация, личная библиотека и заметки уже заложены в интерфейс и появятся в одном из следующих обновлений.",
++  },
++];
++
++interface TopicItem {
++  title: string;
++  description: string;
++}
++
++const TOPICS: TopicItem[] = [
++  { title: "Проблема с книгой", description: "Текст не открывается, отсутствует обложка или неверные данные издания." },
++  { title: "Проблема с оплатой", description: "Вопросы по подписке и оплате — раздел появится вместе с оплатой." },
++  { title: "Сообщить об ошибке", description: "Что-то выглядит или работает не так, как должно." },
++  { title: "Связаться с поддержкой", description: "Любой другой вопрос об AN.KI." },
++];
++
++// No ticket backend yet — this is a genuinely complete, finished-looking
++// page by design (per spec item 14), not an empty placeholder div. Every
++// contact action is disabled/"Скоро" rather than pretending to submit
++// somewhere, matching the pattern used across the other guest-state pages.
++export function SupportView({ onBack }: SupportViewProps) {
++  return (
++    <ShellPage onBack={onBack} eyebrow="Аккаунт" title="Помощь и поддержка" subtitle="Раздел обращений в поддержку появится позже. Ниже — ответы на частые вопросы.">
++
++      <section className="support-topics">
++        {TOPICS.map((topic) => (
++          <article key={topic.title} className="support-topic-card">
++            <h3>{topic.title}</h3>
++            <p className="settings-section-note">{topic.description}</p>
++            <button type="button" className="text-link" disabled>
++              Скоро
++            </button>
++          </article>
++        ))}
++      </section>
++
++      <section className="support-faq">
++        <h2>Частые вопросы</h2>
++        <dl className="support-faq-list">
++          {FAQ.map((item) => (
++            <div key={item.question} className="support-faq-item">
++              <dt>{item.question}</dt>
++              <dd>{item.answer}</dd>
++            </div>
++          ))}
++        </dl>
++      </section>
++
++    </ShellPage>
++  );
++}
+diff --git a/src/styles/global.css b/src/styles/global.css
+index ce72c58..3788470 100644
+--- a/src/styles/global.css
++++ b/src/styles/global.css
+@@ -72,6 +72,10 @@ body {
+ 
+ html {
+   scroll-behavior: smooth;
++
++  /* So Hero's href="#collections" anchor link doesn't land with the
++     target's heading hidden under the new fixed GlobalHeader. */
++  scroll-padding-top: 72px;
+ }
+ 
+ body {
+@@ -103,6 +107,16 @@ button {
+   cursor: pointer;
+ }
+ 
++/* Shared look for every explicitly-disabled control across the new
++   account-area shells (Subscription's "Скоро" buttons, Support's
++   contact actions, GuestNotice's guest CTAs, Settings' "Управление
++   данными") — a visibly inert control, distinct from a normal one,
++   rather than a button that looks clickable but silently does nothing. */
++button[disabled] {
++  opacity: 0.45;
++  cursor: not-allowed;
++}
++
+ button:focus-visible,
+ input:focus-visible,
+ select:focus-visible,
+@@ -309,7 +323,12 @@ body.theme-dark {
+   overflow: hidden;
+   isolation: isolate;
+ 
+-  background: #130c08;
++  /* Used to paint its own image/shade here (background: #130c08 as the
++     pre-image fallback color). The photo is now GlobalBackground's job
++     (see src/app/GlobalBackground.tsx), rendered once, fixed, behind
++     the whole app — this section stays transparent so that same photo
++     shows through instead of a second, possibly-different one. */
++  background: transparent;
+ }
+ 
+ .hero-image {
+@@ -358,7 +377,10 @@ body.theme-dark {
+ 
+ .hero-topline {
+   position: absolute;
+-  top: 30px;
++  /* Was 30px — nudged down to clear the new fixed GlobalHeader
++     (.global-header, ~64px tall) that now floats transparently over
++     Hero on every screen, not just Home. */
++  top: 80px;
+   left: 42px;
+   right: 42px;
+ 
+@@ -572,7 +594,11 @@ button.text-link {
+ .collections-view {
+   padding: 104px 7.5% 140px;
+ 
+-  background: var(--home-bg);
++  /* Was a solid var(--home-bg) — now translucent so the GlobalBackground
++     photo behind the app shell reads through (see the shared
++     app-shell-surface block near the end of this file, item 18 of the
++     visual spec: "darkening/translucent surfaces, not opaque blocks"). */
++  background: rgba(16, 11, 9, 0.74);
+ }
+ 
+ .collections-header {
