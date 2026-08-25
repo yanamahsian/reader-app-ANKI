@@ -1,0 +1,100 @@
++  // a slow request from before the panel was closed could still resolve
++  // after it reopens with a different prefillQuery and briefly stomp that
++  // fresh state with the old, now-irrelevant one.
++  function handleClose(): void {
++    requestIdRef.current += 1;
++    if (debounceRef.current) clearTimeout(debounceRef.current);
++    abortRef.current?.abort();
++    onClose();
+   }
+ 
+   useEffect(() => {
+@@ -86,7 +197,7 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
+ 
+   return (
+     <>
+-      <div className={"search-backdrop" + (isOpen ? "" : " hidden")} onClick={onClose} />
++      <div className={"search-backdrop" + (isOpen ? "" : " hidden")} onClick={handleClose} />
+ 
+       <aside className={"search-panel" + (isOpen ? " open" : "")} aria-label="Поиск книг" aria-hidden={!isOpen}>
+         <div className="search-panel-head">
+@@ -94,7 +205,7 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
+             <p className="eyebrow">Библиотека</p>
+             <h2>Найти книгу</h2>
+           </div>
+-          <button className="close-button" type="button" aria-label="Закрыть поиск" onClick={onClose}>×</button>
++          <button className="close-button" type="button" aria-label="Закрыть поиск" onClick={handleClose}>×</button>
+         </div>
+ 
+         <div className="search-form">
+@@ -121,7 +232,7 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
+             value={language}
+             onChange={event => handleLanguageChange(event.target.value)}
+           >
+-            {LANGUAGES.map(item => (
++            {LANGUAGE_OPTIONS.map(item => (
+               <option key={item.value} value={item.value}>{item.label}</option>
+             ))}
+           </select>
+diff --git a/src/features/library/LibraryView.tsx b/src/features/library/LibraryView.tsx
+new file mode 100644
+index 0000000..6128689
+--- /dev/null
++++ b/src/features/library/LibraryView.tsx
+@@ -0,0 +1,316 @@
++import { useEffect, useRef, useState } from "react";
++import { getBookById, getBooks, mergeLibraryPage } from "../../catalog";
++import type { Book as CatalogBook } from "../../catalog/types";
++import { searchCatalog } from "../../catalog/search";
++import { LANGUAGE_OPTIONS } from "../../catalog/languages";
++import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
++import { BookCard } from "../shared/BookCard";
++
++export interface LibraryRestoreState {
++  query: string;
++  language: string;
++  // Number of PAGE_SIZE-sized pages fetched from the server so far (not
++  // a client-side slice index) -- restoring this re-issues one real
++  // request sized to cover the same amount of content the visitor had
++  // already loaded, so "← Назад" lands on the same scroll depth.
++  page: number;
++}
++
++interface LibraryViewProps {
++  onBack: () => void;
++  // Non-null only when arriving here via "← Назад" from Book Detail —
++  // restores the exact query/language/page depth the visitor left,
++  // same pattern as HomeView's restoreSearch. A fresh open from Home
++  // always passes null, matching how Collections' own "Смотреть всё"
++  // already behaves.
++  restoreState: LibraryRestoreState | null;
++  onOpenBookDetail: (bookId: string, state: LibraryRestoreState) => void;
++}
++
++const PAGE_SIZE = 24;
++
++type Status = "loading" | "success" | "empty";
++
++export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryViewProps) {
++
++  const [query, setQuery] = useState(restoreState?.query ?? "");
++  const [language, setLanguage] = useState(restoreState?.language ?? "");
++  const [pagesLoaded, setPagesLoaded] = useState(restoreState?.page ?? 1);
++
++  const [books, setBooks] = useState<CatalogBook[]>([]);
++  const [hasMore, setHasMore] = useState(false);
++  const [status, setStatus] = useState<Status>("loading");
++  const [loadingMore, setLoadingMore] = useState(false);
++  // "server" once a real omnia-library-catalog response has produced
++  // this view's current list; "local" only when that request itself
++  // failed (network/server error) and this view fell back to whatever
++  // is already in this app's own catalog store — never used as the
++  // normal "browse everything" path any more (that IS the server path
++  // now: an empty query returns every eligible work, paginated, see
++  // omnia-library-catalog's own comment).
++  const [dataSource, setDataSource] = useState<"server" | "local">("server");
++
++  const requestIdRef = useRef(0);
++  const abortRef = useRef<AbortController | null>(null);
++  const isFirstRunRef = useRef(true);
++
