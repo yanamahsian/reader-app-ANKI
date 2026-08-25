@@ -1,0 +1,152 @@
++// component here rather than shared, since the two differ enough in
++// markup (this one is the whole page's header art, that one is an
++// inline row icon) that factoring out a shared component would mean
++// passing a size flag through, which is not worth it for two call sites.
++function AuthorPortrait({ author }: { author: Author }) {
++
++  const [imageFailed, setImageFailed] = useState(false);
++  const showImage = Boolean(author.portraitImage) && !imageFailed;
++  const monogram = author.name.trim().charAt(0).toUpperCase() || "?";
++
++  return (
++    <div className="author-detail-portrait">
++      {showImage ? (
++        <img
++          loading="lazy"
++          src={`${import.meta.env.BASE_URL}${author.portraitImage}`}
++          alt=""
++          onError={() => setImageFailed(true)}
++        />
++      ) : (
++        <span className="author-detail-portrait-fallback" aria-hidden="true">{monogram}</span>
++      )}
++    </div>
++  );
++
++}
++
+ export function AuthorDetailView({ authorId, onBack, onOpenBookDetail }: AuthorDetailViewProps) {
+ 
+   const author = getAuthorById(authorId);
+@@ -34,27 +65,44 @@ export function AuthorDetailView({ authorId, onBack, onOpenBookDetail }: AuthorD
+   const years = yearsLabel(author);
+ 
+   return (
+-    <section className="book-detail">
++    <section className="book-detail author-detail-page">
+ 
+       <button className="text-link" type="button" onClick={onBack}>
+         ← Назад
+       </button>
+ 
+-      <header className="book-detail-header">
+-        <p className="eyebrow">Автор</p>
+-        <h1 className="book-detail-title">{author.name}</h1>
+-        {years && <p className="book-detail-original-title">{years}</p>}
++      <header className="author-detail-header">
++
++        <AuthorPortrait author={author} />
++
++        <div className="author-detail-identity">
++          <p className="eyebrow">Автор</p>
++          <h1 className="book-detail-title">{author.name}</h1>
++          {years && <p className="book-detail-original-title">{years}</p>}
++        </div>
++
+       </header>
+ 
+-      {books.length > 0 ? (
+-        <div>
+-          {books.map(book => (
+-            <BookCard key={book.id} book={book} onOpen={onOpenBookDetail} />
+-          ))}
++      <section className="author-detail-works">
++
++        <div className="section-heading">
++          <div>
++            <p className="eyebrow">Каталог</p>
++            <h2>Произведения</h2>
++          </div>
+         </div>
+-      ) : (
+-        <p className="book-detail-not-found">В каталоге пока нет доступных книг этого автора.</p>
+-      )}
++
++        {books.length > 0 ? (
++          <BookGrid>
++            {books.map(book => (
++              <LibraryBookCard key={book.id} book={book} onOpen={onOpenBookDetail} />
++            ))}
++          </BookGrid>
++        ) : (
++          <p className="book-detail-not-found">В каталоге пока нет доступных книг этого автора.</p>
++        )}
++
++      </section>
+ 
+     </section>
+   );
+diff --git a/src/features/book-detail/BookDetailView.tsx b/src/features/book-detail/BookDetailView.tsx
+index 5995420..9d27c3b 100644
+--- a/src/features/book-detail/BookDetailView.tsx
++++ b/src/features/book-detail/BookDetailView.tsx
+@@ -1,3 +1,4 @@
++import { useState } from "react";
+ import {
+   getBookById,
+   getAuthorById,
+@@ -12,6 +13,7 @@ import {
+ import type { Book as ReaderBook } from "../reader/engine/types";
+ import { pickPreferredEditionAndFile, toReaderBook, hasAnyPhysicalEdition } from "../../catalog/toReaderBook";
+ import { useReaderJurisdiction } from "./readerJurisdiction";
++import { CoverFallback } from "../shared/CoverFallback";
+ 
+ interface BookDetailViewProps {
+   bookId: string;
+@@ -117,6 +119,7 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
+   // back) across re-renders of the same component instance, and a
+   // hook can never become conditional based on that.
+   const [readerJurisdiction, setReaderJurisdiction] = useReaderJurisdiction();
++  const [coverFailed, setCoverFailed] = useState(false);
+ 
+   if (!book) {
+     return <NotFound onBack={onBack} />;
+@@ -136,79 +139,113 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
+ 
+   const resolved = pickPreferredEditionAndFile(book, undefined, readerJurisdiction ?? undefined);
+ 
++  const showCover = Boolean(book.cover) && !coverFailed;
++  const languagesLabel = book.availableLanguages.length
++    ? book.availableLanguages.join(" · ")
++    : book.originalLanguage || null;
++
+   return (
+-    <section className="book-detail">
++    <section className="book-detail book-detail-page">
+ 
+       <button className="text-link" type="button" onClick={onBack}>
+         ← Назад
+       </button>
+ 
+-      <header className="book-detail-header">
++      <div className="book-detail-hero">
++
++        <div className="book-detail-cover">
++          {showCover ? (
++            <img
++              loading="lazy"
++              src={book.cover ?? undefined}
++              alt=""
++              onError={() => setCoverFailed(true)}
++            />
++          ) : (
++            <CoverFallback title={book.title} />
++          )}
++        </div>
+ 
+-        <p className="eyebrow">Произведение</p>
++        <div className="book-detail-info">
+ 
+-        <h1 className="book-detail-title">{book.title}</h1>
++          <header className="book-detail-header">
+ 
