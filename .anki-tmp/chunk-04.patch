@@ -1,0 +1,100 @@
++// Supabase-backed results are included -- most notably `ja`, with roughly
++// 586 catalog-ready Japanese works on the live snapshot this was checked
++// against, and no UI language option to filter by it at all.
++//
++// This list is a minimal, hand-maintained expansion covering every
++// language the live catalog-ready audit called out (en, ja, fr, de, es,
++// hu, it, fi, pt, nl, sv, da, pl) plus the languages the previous two
++// lists already had (ru, zh, la, grc) so nothing visible before this
++// change disappears. It is deliberately NOT a fully dynamic
++// language-facet system fetched from the API -- that would be a
++// reasonable future improvement (the note below on cover images is a
++// similarly out-of-scope future item) but is more than this pass asked
++// for; if the catalog's actual language mix drifts further from this
++// list, it only needs updating in this one file for both selectors to
++// pick it up.
++export interface LanguageOption {
++  value: string;
++  label: string;
++}
++
++export const LANGUAGE_OPTIONS: LanguageOption[] = [
++  { value: "", label: "Все языки" },
++  { value: "ru", label: "Русский" },
++  { value: "en", label: "English" },
++  { value: "ja", label: "日本語" },
++  { value: "de", label: "Deutsch" },
++  { value: "fr", label: "Français" },
++  { value: "es", label: "Español" },
++  { value: "hu", label: "Magyar" },
++  { value: "it", label: "Italiano" },
++  { value: "fi", label: "Suomi" },
++  { value: "pt", label: "Português" },
++  { value: "nl", label: "Nederlands" },
++  { value: "sv", label: "Svenska" },
++  { value: "da", label: "Dansk" },
++  { value: "pl", label: "Polski" },
++  { value: "zh", label: "中文" },
++  { value: "la", label: "Latina" },
++  { value: "grc", label: "Ἑλληνική" }
++];
+diff --git a/src/features/home/Hero.tsx b/src/features/home/Hero.tsx
+index 69ad5e8..a96126e 100644
+--- a/src/features/home/Hero.tsx
++++ b/src/features/home/Hero.tsx
+@@ -33,9 +33,10 @@ function getCurrentHeroNumber(): number {
+ 
+ interface HeroProps {
+   onOpenSearch: () => void;
++  onOpenLibrary: () => void;
+ }
+ 
+-export function Hero({ onOpenSearch }: HeroProps) {
++export function Hero({ onOpenSearch, onOpenLibrary }: HeroProps) {
+ 
+   const heroNumber = getCurrentHeroNumber();
+ 
+@@ -73,6 +74,9 @@ export function Hero({ onOpenSearch }: HeroProps) {
+             Найти книгу
+           </button>
+           <a className="text-link" href="#collections">Открыть подборки</a>
++          <button className="text-link" type="button" onClick={onOpenLibrary}>
++            Вся библиотека
++          </button>
+         </div>
+ 
+       </div>
+diff --git a/src/features/home/HomeView.tsx b/src/features/home/HomeView.tsx
+index 033ddf9..ceaee3b 100644
+--- a/src/features/home/HomeView.tsx
++++ b/src/features/home/HomeView.tsx
+@@ -12,6 +12,7 @@ interface HomeViewProps {
+   restoreSearch: { query: string; language: string } | null;
+   onOpenAuthorDetail: (authorId: string) => void;
+   onOpenAuthorDetailFromSearch: (authorId: string, query: string, language: string) => void;
++  onOpenLibrary: () => void;
+ }
+ 
+ function authorYearsLabel(author: Author): string | null {
+@@ -116,7 +117,8 @@ export function HomeView({
+   onOpenCollections,
+   restoreSearch,
+   onOpenAuthorDetail,
+-  onOpenAuthorDetailFromSearch
++  onOpenAuthorDetailFromSearch,
++  onOpenLibrary
+ }: HomeViewProps) {
+ 
+   const [isSearchOpen, setSearchOpen] = useState(false);
+@@ -154,17 +156,27 @@ export function HomeView({
+             AN.KI
+             <span>ATLAS</span>
+           </div>
+-          <button
+-            className="icon-button"
+-            type="button"
+-            aria-label="Открыть поиск"
+-            onClick={() => openSearch()}
+-          >
+-            ⌕
+-          </button>
