@@ -78,23 +78,23 @@
 +  return data;
 +
 +}
-+diff --git a/src/catalog/catalogStore.ts b/src/catalog/catalogStore.ts
-+index 2f64adf..798877c 100644
-+--- a/src/catalog/catalogStore.ts
-++++ b/src/catalog/catalogStore.ts
-+@@ -1,4 +1,4 @@
-+-import type { Book, Author, Edition } from "./types";
-++import type { Book, Author, Edition, RightsAssertion, BookFile } from "./types";
-+ import { books as seedBooks } from "./books";
-+ import { authors as seedAuthors } from "./authors";
-+ import { BATCH50_BOOKS, BATCH50_AUTHORS } from "./batch50";
-+@@ -41,6 +41,13 @@ export function isRemoteCatalogLoaded(): boolean {
-+   return remoteLoaded;
-+ }
-+ 
-++// Original HEAD 1e3faae helpers -- used ONLY by setRemoteCatalog below,
-++// unchanged in semantics: a plain last-write-wins merge by id (remote
-++// always overwrites an existing seed record wholesale on a matching id).
-++// setRemoteCatalog's own behavior must stay byte/semantically identical
-++// to before the Library work -- these are kept exactly as they were
-++// rather than switched to the curated-safe logic below, which is for
+diff --git a/src/catalog/catalogStore.ts b/src/catalog/catalogStore.ts
+index 2f64adf..798877c 100644
+--- a/src/catalog/catalogStore.ts
++++ b/src/catalog/catalogStore.ts
+@@ -1,4 +1,4 @@
+-import type { Book, Author, Edition } from "./types";
++import type { Book, Author, Edition, RightsAssertion, BookFile } from "./types";
+ import { books as seedBooks } from "./books";
+ import { authors as seedAuthors } from "./authors";
+ import { BATCH50_BOOKS, BATCH50_AUTHORS } from "./batch50";
+@@ -41,6 +41,13 @@ export function isRemoteCatalogLoaded(): boolean {
+   return remoteLoaded;
+ }
+ 
++// Original HEAD 1e3faae helpers -- used ONLY by setRemoteCatalog below,
++// unchanged in semantics: a plain last-write-wins merge by id (remote
++// always overwrites an existing seed record wholesale on a matching id).
++// setRemoteCatalog's own behavior must stay byte/semantically identical
++// to before the Library work -- these are kept exactly as they were
++// rather than switched to the curated-safe logic below, which is for
