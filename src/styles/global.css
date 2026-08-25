@@ -276,7 +276,13 @@ body.theme-dark {
    ========================================================= */
 
 .home-main {
-  margin-left: var(--home-sidebar);
+  /* No sidebar is rendered in HomeView any more (see Sidebar.tsx's
+     usage — there is none), so this never carries a sidebar-width
+     margin. Previously this read `margin-left: var(--home-sidebar)`
+     (258px), which left a permanent empty column on desktop even
+     though nothing occupied it — HomeView.tsx was papering over that
+     with an inline `style={{ marginLeft: 0 }}`. Fixed at the source
+     here instead; the inline override is gone. */
   min-width: 0;
 }
 
@@ -542,119 +548,15 @@ button.text-link {
   background: transparent;
 }
 
-.collection-grid {
-  display: grid;
-
-  grid-template-columns:
-    repeat(3, minmax(0, 1fr));
-
-  border-top: 1px solid var(--home-border);
-  border-left: 1px solid var(--home-border);
-}
-
-.collection-card {
-  position: relative;
-
-  min-height: 330px;
-
-  padding: 25px;
-
-  display: flex;
-  flex-direction: column;
-
-  border-right: 1px solid var(--home-border);
-  border-bottom: 1px solid var(--home-border);
-
-  background:
-    linear-gradient(
-      145deg,
-      rgba(255, 255, 255, 0.018),
-      transparent 55%
-    );
-}
-
-.collection-card-featured {
-  grid-row: span 2;
-
-  min-height: 660px;
-
-  background:
-    radial-gradient(
-      circle at 20% 18%,
-      rgba(202, 160, 88, 0.13),
-      transparent 34%
-    ),
-    linear-gradient(
-      145deg,
-      rgba(74, 21, 29, 0.5),
-      rgba(19, 12, 9, 0.4)
-    );
-}
-
-.collection-number {
-  color: rgba(202, 160, 88, 0.72);
-
-  font-family: "Cormorant Garamond", serif;
-  font-size: 17px;
-}
-
-.collection-card-body {
-  margin-top: auto;
-}
-
-.collection-card-body p {
-  margin: 0 0 10px;
-
-  color: var(--home-gold);
-
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.collection-card h3 {
-  max-width: 380px;
-
-  margin: 0;
-
-  font-family: "Cormorant Garamond", serif;
-  font-size: 34px;
-  font-weight: 500;
-  line-height: 1.06;
-}
-
-.collection-card-featured h3 {
-  font-size: clamp(42px, 4vw, 62px);
-}
-
-.collection-card button {
-  margin-top: 26px;
-
-  padding: 0 0 4px;
-
-  border: 0;
-  border-bottom: 1px solid rgba(202, 160, 88, 0.5);
-
-  background: transparent;
-  color: var(--home-muted);
-
-  font-size: 10px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.collection-card:hover {
-  background-color: rgba(202, 160, 88, 0.035);
-}
-
-
 /* =========================================================
    COLLECTIONS VIEW (full-screen — Phase 6)
-   Deliberately separate class names from .collection-card /
-   .collection-grid above (the home-page teaser strip), even though
-   the visual language is the same bordered, no-radius, no-shadow
-   editorial grid — reusing those exact classes here would risk
-   changing the teaser section's look as a side effect.
+   .collections-grid/.collection-tile below are now also what
+   HomeView's "Подборки" teaser section renders (same CollectionCard
+   component, same 6-collections-from-catalog data source) — one
+   visual system, not two. The old hand-styled .collection-card/
+   .collection-grid teaser (with its own approximate collection_N.png
+   backgrounds) has been removed along with the hardcoded HOME_COLLECTIONS
+   array in HomeView.tsx that used it.
    ========================================================= */
 
 .collections-view {
@@ -867,6 +769,7 @@ button.text-link {
   padding: 22px 0;
 
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 24px;
 
@@ -879,22 +782,68 @@ button.text-link {
   text-align: left;
 }
 
-.author-list button span:first-child {
+/* Portrait + name, grouped so justify-content: space-between on the
+   button above still separates exactly two things: this identity
+   group on the left, the years on the right — same row layout as
+   before, just with a small portrait slot added. */
+.author-identity {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/* Same image-with-fallback sizing language as .book-cover (also
+   4px radius, same muted surface background) — no new visual style
+   introduced, just applied to a person instead of a book. */
+.author-portrait {
+  flex: 0 0 auto;
+
+  width: 64px;
+  height: 64px;
+
+  overflow: hidden;
+  border-radius: 4px;
+
+  background: var(--home-surface-soft);
+}
+
+.author-portrait img {
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover;
+  display: block;
+}
+
+.author-portrait-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  height: 100%;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 22px;
+  color: var(--home-gold);
+
+  background: var(--home-surface-soft);
+}
+
+.author-name {
   font-family: "Cormorant Garamond", serif;
   font-size: clamp(29px, 3.5vw, 47px);
   line-height: 1;
 }
 
-.author-list button span:last-child {
-  align-self: center;
-
+.author-years {
   color: var(--home-muted);
 
   font-size: 10px;
   letter-spacing: 0.13em;
 }
 
-.author-list button:hover span:first-child {
+.author-list button:hover .author-name {
   color: var(--home-gold);
 }
 
@@ -1620,10 +1569,6 @@ button.text-link {
     height:40px;
   }
 
-  .home-main{
-    margin-left:0;
-  }
-
   .hero{
     min-height:100svh;
     padding-top:64px;
@@ -1653,15 +1598,6 @@ button.text-link {
   .hero-controls{
     right:24px;
     bottom:24px;
-  }
-
-  .collection-grid{
-    grid-template-columns:1fr;
-  }
-
-  .collection-card-featured{
-    grid-row:auto;
-    min-height:420px;
   }
 
   .academy-panel{
@@ -1704,23 +1640,11 @@ button.text-link {
     gap:18px;
   }
 
-  .collection-card{
-    min-height:260px;
-  }
-
-  .collection-card-featured{
-    min-height:330px;
-  }
-
-  .collection-card h3{
-    font-size:34px;
-  }
-
   .author-list button{
     display:block;
   }
 
-  .author-list button span:last-child{
+  .author-years{
     display:block;
     margin-top:8px;
   }
