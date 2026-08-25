@@ -4,10 +4,12 @@ import { ReaderView } from "./features/reader/ReaderView";
 import { CollectionsView } from "./features/collections/CollectionsView";
 import { BookDetailView } from "./features/book-detail/BookDetailView";
 import { AuthorDetailView } from "./features/author-detail/AuthorDetailView";
+import { LibraryView } from "./features/library/LibraryView";
+import type { LibraryRestoreState } from "./features/library/LibraryView";
 import { loadRemoteCatalog } from "./catalog";
 import type { Book } from "./features/reader/engine/types";
 
-type View = "home" | "reader" | "collections" | "book-detail" | "author";
+type View = "home" | "reader" | "collections" | "book-detail" | "author" | "library";
 
 export type AuthorDetailOrigin =
   | { type: "book-detail"; bookId: string; bookDetailOrigin: BookDetailOrigin | null }
@@ -17,7 +19,8 @@ export type AuthorDetailOrigin =
 export type BookDetailOrigin =
   | { type: "search"; query: string; language: string }
   | { type: "collection"; collectionId: string }
-  | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin };
+  | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin }
+  | { type: "library"; state: LibraryRestoreState };
 
 const TEST_EPUB_BOOK: Book = {
   id: "phase3-test-epub",
@@ -39,6 +42,8 @@ export function App() {
 
   const [restoreSearch, setRestoreSearch] = useState<{ query: string; language: string } | null>(null);
   const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(null);
+
+  const [libraryRestoreState, setLibraryRestoreState] = useState<LibraryRestoreState | null>(null);
 
   const [, setCatalogVersion] = useState(0);
 
@@ -114,8 +119,34 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "library") {
+      setLibraryRestoreState(bookDetailOrigin.state);
+      setView("library");
+      return;
+    }
+
     setView("home");
 
+  }
+
+  // collectionId is optional from HomeView (no id -> generic entry
+  // point); Library has no such teaser entry point, so this is always
+  // a fresh, from-scratch open — libraryRestoreState is reset to null,
+  // matching how handleOpenCollections() with no id resets
+  // collectionsInitialId. Returning here from Book Detail / the reader
+  // goes through handleBackFromBookDetail / handleExitReader instead,
+  // which restore the exact prior state.
+  function handleOpenLibrary(): void {
+    setLibraryRestoreState(null);
+    setView("library");
+  }
+
+  function handleBackFromLibrary(): void {
+    setView("home");
+  }
+
+  function handleOpenBookDetailFromLibrary(bookId: string, state: LibraryRestoreState): void {
+    handleOpenBookDetail(bookId, { type: "library", state });
   }
 
   function handleOpenAuthorDetail(authorId: string): void {
@@ -208,6 +239,16 @@ export function App() {
     );
   }
 
+  if (view === "library") {
+    return (
+      <LibraryView
+        restoreState={libraryRestoreState}
+        onBack={handleBackFromLibrary}
+        onOpenBookDetail={handleOpenBookDetailFromLibrary}
+      />
+    );
+  }
+
   return (
     <HomeView
       restoreSearch={restoreSearch}
@@ -217,6 +258,7 @@ export function App() {
       onOpenCollections={handleOpenCollections}
       onOpenAuthorDetail={handleOpenAuthorDetailFromHome}
       onOpenAuthorDetailFromSearch={handleOpenAuthorDetailFromSearch}
+      onOpenLibrary={handleOpenLibrary}
     />
   );
 

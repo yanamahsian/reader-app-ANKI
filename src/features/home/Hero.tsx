@@ -33,9 +33,10 @@ function getCurrentHeroNumber(): number {
 
 interface HeroProps {
   onOpenSearch: () => void;
+  onOpenLibrary: () => void;
 }
 
-export function Hero({ onOpenSearch }: HeroProps) {
+export function Hero({ onOpenSearch, onOpenLibrary }: HeroProps) {
 
   const heroNumber = getCurrentHeroNumber();
 
@@ -73,6 +74,9 @@ export function Hero({ onOpenSearch }: HeroProps) {
             Найти книгу
           </button>
           <a className="text-link" href="#collections">Открыть подборки</a>
+          <button className="text-link" type="button" onClick={onOpenLibrary}>
+            Вся библиотека
+          </button>
         </div>
 
       </div>

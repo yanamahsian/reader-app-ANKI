@@ -270,6 +270,16 @@ body.theme-dark {
   display: none;
 }
 
+/* Groups the two mobile-header icon buttons (Library, Search) so
+   .mobile-header's own space-between still separates exactly two
+   things -- the brand and this group -- instead of spreading three
+   raw children across the row. */
+.mobile-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 
 /* =========================================================
    MAIN
@@ -749,6 +759,40 @@ button.text-link {
 
 .collection-detail-books {
   max-width: 720px;
+}
+
+/* =========================================================
+   LIBRARY VIEW (Phase — connect real Supabase catalog)
+   Reuses .collections-view/.collections-header (page shell),
+   .search-form/.search-input/.language-select (SearchPanel's own
+   field styles, unchanged), and .results/.book-card (SearchPanel's
+   own result-row styles, unchanged) — the only genuinely new rules
+   this view needs are its own inline (non-slide-over) form spacing,
+   the fallback-notice line, and the "Показать ещё" row below.
+   ========================================================= */
+
+.library-search-form {
+  max-width: 520px;
+  margin: 0 0 40px;
+}
+
+.library-note {
+  max-width: 640px;
+  margin: 0 0 24px;
+
+  color: var(--home-muted);
+
+  font-size: 13px;
+  font-style: italic;
+}
+
+.library-results {
+  max-width: 720px;
+}
+
+.library-pager {
+  max-width: 720px;
+  margin-top: 8px;
 }
 
 /* =========================================================

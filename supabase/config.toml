@@ -1,0 +1,23 @@
+# supabase/config.toml — NOT YET APPLIED / not previously present in this
+# repo. Added scoped to exactly the one new function this round needs a
+# setting for, rather than introducing a project-wide config file with
+# unrelated sections guessed at.
+#
+# omnia-library-catalog is a public, read-only catalog endpoint: the
+# frontend (src/api/libraryCatalog.ts) calls it with only the public
+# Supabase `apikey` header (the publishable key) and never sends an
+# `Authorization: Bearer` JWT -- the same calling pattern this project's
+# existing public functions (omnia-catalog, omnia-book-content) already
+# use, both already configured with JWT verification disabled at the
+# gateway. Without the equivalent setting here, the Supabase gateway
+# would reject every browser request to this function before it ever
+# reaches the function's own code (401, no JWT present) -- the function's
+# own internal service-role access control (see index.ts's own header
+# comment) is a separate, additional layer, not a substitute for this.
+#
+# If this file is not desired as a permanent addition to the repo, the
+# equivalent can be set at deploy time instead:
+#   supabase functions deploy omnia-library-catalog --no-verify-jwt
+# One or the other must happen -- this is not optional configuration.
+[functions.omnia-library-catalog]
+verify_jwt = false

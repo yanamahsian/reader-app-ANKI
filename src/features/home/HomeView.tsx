@@ -12,6 +12,7 @@ interface HomeViewProps {
   restoreSearch: { query: string; language: string } | null;
   onOpenAuthorDetail: (authorId: string) => void;
   onOpenAuthorDetailFromSearch: (authorId: string, query: string, language: string) => void;
+  onOpenLibrary: () => void;
 }
 
 function authorYearsLabel(author: Author): string | null {
@@ -116,7 +117,8 @@ export function HomeView({
   onOpenCollections,
   restoreSearch,
   onOpenAuthorDetail,
-  onOpenAuthorDetailFromSearch
+  onOpenAuthorDetailFromSearch,
+  onOpenLibrary
 }: HomeViewProps) {
 
   const [isSearchOpen, setSearchOpen] = useState(false);
@@ -154,17 +156,27 @@ export function HomeView({
             AN.KI
             <span>ATLAS</span>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Открыть поиск"
-            onClick={() => openSearch()}
-          >
-            ⌕
-          </button>
+          <div className="mobile-header-actions">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Библиотека"
+              onClick={onOpenLibrary}
+            >
+              ⌸
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Открыть поиск"
+              onClick={() => openSearch()}
+            >
+              ⌕
+            </button>
+          </div>
         </header>
 
-        <Hero onOpenSearch={() => openSearch()} />
+        <Hero onOpenSearch={() => openSearch()} onOpenLibrary={onOpenLibrary} />
 
         <section id="collections" className="editorial-section">
 

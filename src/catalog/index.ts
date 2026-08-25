@@ -10,7 +10,7 @@ export { epochs, centuries, countries, movements, genres, themes } from "./taxon
 // (called once at app startup, see App.tsx) succeeds. Every lookup
 // below stays exactly as it was; only where its data comes from
 // changed.
-export { getBooks, getAuthors, isRemoteCatalogLoaded } from "./catalogStore";
+export { getBooks, getAuthors, isRemoteCatalogLoaded, mergeLibraryPage } from "./catalogStore";
 export { loadRemoteCatalog } from "./remoteCatalog";
 
 import type { Author, Book, Collection } from "./types";
