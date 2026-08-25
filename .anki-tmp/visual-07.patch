@@ -1,0 +1,155 @@
+-        className="hero-image active"
+-        style={{ backgroundImage: heroBackground(heroNumber) }}
+-      />
+-
+-      <div className="hero-shade" aria-hidden="true" />
+-
+       <div className="hero-topline">
+         <span>Цифровая библиотека</span>
+       </div>
+diff --git a/src/features/home/HomeView.tsx b/src/features/home/HomeView.tsx
+index ceaee3b..e63f016 100644
+--- a/src/features/home/HomeView.tsx
++++ b/src/features/home/HomeView.tsx
+@@ -1,18 +1,17 @@
+-import { useEffect, useState } from "react";
++import { useState } from "react";
+ import { Hero } from "./Hero";
+-import { SearchPanel } from "./SearchPanel";
+ import { getAuthors, getBooksByCollection, getCollectionById } from "../../catalog";
+ import type { Author } from "../../catalog/types";
+ import { CollectionCard } from "../collections/CollectionCard";
+ 
+ interface HomeViewProps {
+-  onOpenBookDetail: (bookId: string, query: string, language: string) => void;
+   // collectionId is optional — see App.tsx's handleOpenCollections.
+   onOpenCollections: (collectionId?: string) => void;
+-  restoreSearch: { query: string; language: string } | null;
+   onOpenAuthorDetail: (authorId: string) => void;
+-  onOpenAuthorDetailFromSearch: (authorId: string, query: string, language: string) => void;
+   onOpenLibrary: () => void;
++  // Opens the app-wide search panel (now owned by App.tsx / rendered
++  // once alongside AppShell) with no prefill — see App.tsx's openSearch.
++  onOpenSearch: () => void;
+ }
+ 
+ function authorYearsLabel(author: Author): string | null {
+@@ -113,36 +112,12 @@ function AuthorListItem({ author, onOpen }: { author: Author; onOpen: () => void
+ }
+ 
+ export function HomeView({
+-  onOpenBookDetail,
+   onOpenCollections,
+-  restoreSearch,
+   onOpenAuthorDetail,
+-  onOpenAuthorDetailFromSearch,
+-  onOpenLibrary
++  onOpenLibrary,
++  onOpenSearch
+ }: HomeViewProps) {
+ 
+-  const [isSearchOpen, setSearchOpen] = useState(false);
+-  const [searchPrefill, setSearchPrefill] = useState<string | null>(null);
+-  const [searchPrefillLanguage, setSearchPrefillLanguage] = useState("");
+-
+-  function openSearch(query?: string, language?: string): void {
+-    setSearchPrefill(query ?? "");
+-    setSearchPrefillLanguage(language ?? "");
+-    setSearchOpen(true);
+-  }
+-
+-  function closeSearch(): void {
+-    setSearchOpen(false);
+-    setSearchPrefill(null);
+-  }
+-
+-  useEffect(() => {
+-    if (restoreSearch) {
+-      openSearch(restoreSearch.query, restoreSearch.language);
+-    }
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, []);
+-
+   const curatedAuthors = getCuratedHomeAuthors();
+   const homeCollections = getHomeCollections();
+ 
+@@ -151,32 +126,7 @@ export function HomeView({
+ 
+       <div className="home-main">
+ 
+-        <header className="mobile-header">
+-          <div className="mobile-brand">
+-            AN.KI
+-            <span>ATLAS</span>
+-          </div>
+-          <div className="mobile-header-actions">
+-            <button
+-              className="icon-button"
+-              type="button"
+-              aria-label="Библиотека"
+-              onClick={onOpenLibrary}
+-            >
+-              ⌸
+-            </button>
+-            <button
+-              className="icon-button"
+-              type="button"
+-              aria-label="Открыть поиск"
+-              onClick={() => openSearch()}
+-            >
+-              ⌕
+-            </button>
+-          </div>
+-        </header>
+-
+-        <Hero onOpenSearch={() => openSearch()} onOpenLibrary={onOpenLibrary} />
++        <Hero onOpenSearch={onOpenSearch} onOpenLibrary={onOpenLibrary} />
+ 
+         <section id="collections" className="editorial-section">
+ 
+@@ -261,15 +211,6 @@ export function HomeView({
+ 
+       </div>
+ 
+-      <SearchPanel
+-        isOpen={isSearchOpen}
+-        prefillQuery={searchPrefill}
+-        prefillLanguage={searchPrefillLanguage}
+-        onClose={closeSearch}
+-        onOpenBookDetail={onOpenBookDetail}
+-        onOpenAuthorDetail={onOpenAuthorDetailFromSearch}
+-      />
+-
+     </section>
+   );
+ 
+diff --git a/src/features/library/LibraryView.tsx b/src/features/library/LibraryView.tsx
+index 6128689..b31cf51 100644
+--- a/src/features/library/LibraryView.tsx
++++ b/src/features/library/LibraryView.tsx
+@@ -4,7 +4,8 @@ import type { Book as CatalogBook } from "../../catalog/types";
+ import { searchCatalog } from "../../catalog/search";
+ import { LANGUAGE_OPTIONS } from "../../catalog/languages";
+ import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
+-import { BookCard } from "../shared/BookCard";
++import { BookGrid } from "../shared/BookGrid";
++import { LibraryBookCard } from "../shared/LibraryBookCard";
+ 
+ export interface LibraryRestoreState {
+   query: string;
+@@ -286,14 +287,18 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
+         </p>
+       )}
+ 
+-      <div className="results library-results" aria-live="polite">
++      <div className="library-results" aria-live="polite">
+ 
+         {status === "loading" && books.length === 0 && <div className="empty-state">Загрузка…</div>}
+         {status === "empty" && <div className="empty-state">Ничего не найдено.</div>}
+ 
+-        {books.map(book => (
+-          <BookCard key={book.id} book={book} onOpen={bookId => onOpenBookDetail(bookId, snapshot())} />
+-        ))}
++        {books.length > 0 && (
++          <BookGrid>
++            {books.map(book => (
