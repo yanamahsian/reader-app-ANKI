@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   getBookById,
   getAuthorById,
@@ -12,6 +13,7 @@ import {
 import type { Book as ReaderBook } from "../reader/engine/types";
 import { pickPreferredEditionAndFile, toReaderBook, hasAnyPhysicalEdition } from "../../catalog/toReaderBook";
 import { useReaderJurisdiction } from "./readerJurisdiction";
+import { CoverFallback } from "../shared/CoverFallback";
 
 interface BookDetailViewProps {
   bookId: string;
@@ -117,6 +119,7 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
   // back) across re-renders of the same component instance, and a
   // hook can never become conditional based on that.
   const [readerJurisdiction, setReaderJurisdiction] = useReaderJurisdiction();
+  const [coverFailed, setCoverFailed] = useState(false);
 
   if (!book) {
     return <NotFound onBack={onBack} />;
@@ -136,79 +139,113 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
 
   const resolved = pickPreferredEditionAndFile(book, undefined, readerJurisdiction ?? undefined);
 
+  const showCover = Boolean(book.cover) && !coverFailed;
+  const languagesLabel = book.availableLanguages.length
+    ? book.availableLanguages.join(" · ")
+    : book.originalLanguage || null;
+
   return (
-    <section className="book-detail">
+    <section className="book-detail book-detail-page">
 
       <button className="text-link" type="button" onClick={onBack}>
         ← Назад
       </button>
 
-      <header className="book-detail-header">
+      <div className="book-detail-hero">
 
-        <p className="eyebrow">Произведение</p>
+        <div className="book-detail-cover">
+          {showCover ? (
+            <img
+              loading="lazy"
+              src={book.cover ?? undefined}
+              alt=""
+              onError={() => setCoverFailed(true)}
+            />
+          ) : (
+            <CoverFallback title={book.title} />
+          )}
+        </div>
 
-        <h1 className="book-detail-title">{book.title}</h1>
+        <div className="book-detail-info">
 
-        {book.originalTitle && (
-          <p className="book-detail-original-title">{book.originalTitle}</p>
-        )}
+          <header className="book-detail-header">
 
-        {author && (
-          <button
-            className="book-detail-author-link"
-            type="button"
-            onClick={() => onOpenAuthorDetail(author.id)}
-          >
-            {author.name}
-          </button>
-        )}
+            <p className="eyebrow">Произведение</p>
 
-      </header>
+            <h1 className="book-detail-title">{book.title}</h1>
 
-      <div className="book-detail-read">
-        {resolved ? (
-          <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
-            Читать
-          </button>
-        ) : hasAnyPhysicalEdition(book) ? (
-          <JurisdictionPrompt readerJurisdiction={readerJurisdiction} onChange={setReaderJurisdiction} />
-        ) : (
-          <p className="book-detail-unavailable">Книга пока недоступна для чтения</p>
-        )}
+            {book.originalTitle && (
+              <p className="book-detail-original-title">{book.originalTitle}</p>
+            )}
+
+            {author && (
+              <button
+                className="book-detail-author-link"
+                type="button"
+                onClick={() => onOpenAuthorDetail(author.id)}
+              >
+                {author.name}
+              </button>
+            )}
+
+          </header>
+
+          <dl className="book-detail-quick-meta">
+            <MetaRow label="Год публикации" value={book.publicationYear ? String(book.publicationYear) : null} />
+            <MetaRow label="Язык" value={languagesLabel} />
+          </dl>
+
+          <div className="book-detail-read">
+            {resolved ? (
+              <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
+                Читать
+              </button>
+            ) : hasAnyPhysicalEdition(book) ? (
+              <JurisdictionPrompt readerJurisdiction={readerJurisdiction} onChange={setReaderJurisdiction} />
+            ) : (
+              <p className="book-detail-unavailable">Книга пока недоступна для чтения</p>
+            )}
+          </div>
+
+        </div>
+
       </div>
 
-      {book.description && (
-        <p className="book-detail-description">{book.description}</p>
-      )}
+      <div className="book-detail-body">
 
-      <dl className="book-detail-meta">
-        <MetaRow label="Год публикации" value={book.publicationYear ? String(book.publicationYear) : null} />
-        <MetaRow label="Оригинальный язык" value={book.originalLanguage || null} />
-        <MetaRow label="Страна" value={countryLabel} />
-        <MetaRow label="Век" value={centuryLabel} />
-        <MetaRow label="Эпоха" value={epochLabel} />
-        <MetaRow label="Направление" value={movementLabel} />
-        <MetaRow label="Жанры" value={genreLabels.length ? genreLabels.join(" · ") : null} />
-        <MetaRow label="Темы" value={themeLabels.length ? themeLabels.join(" · ") : null} />
-      </dl>
+        {book.description && (
+          <p className="book-detail-description">{book.description}</p>
+        )}
 
-      {relatedCollections.length > 0 && (
-        <div className="book-detail-collections">
-          <p className="eyebrow">Подборки</p>
-          <div className="book-detail-collections-list">
-            {relatedCollections.map(collection => (
-              <button
-                key={collection.id}
-                className="text-link"
-                type="button"
-                onClick={() => onOpenCollection(collection.id)}
-              >
-                {collection.title}
-              </button>
-            ))}
+        <dl className="book-detail-meta">
+          <MetaRow label="Оригинальный язык" value={book.originalLanguage || null} />
+          <MetaRow label="Страна" value={countryLabel} />
+          <MetaRow label="Век" value={centuryLabel} />
+          <MetaRow label="Эпоха" value={epochLabel} />
+          <MetaRow label="Направление" value={movementLabel} />
+          <MetaRow label="Жанры" value={genreLabels.length ? genreLabels.join(" · ") : null} />
+          <MetaRow label="Темы" value={themeLabels.length ? themeLabels.join(" · ") : null} />
+        </dl>
+
+        {relatedCollections.length > 0 && (
+          <div className="book-detail-collections">
+            <p className="eyebrow">Подборки</p>
+            <div className="book-detail-collections-list">
+              {relatedCollections.map(collection => (
+                <button
+                  key={collection.id}
+                  className="text-link"
+                  type="button"
+                  onClick={() => onOpenCollection(collection.id)}
+                >
+                  {collection.title}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+      </div>
 
     </section>
   );

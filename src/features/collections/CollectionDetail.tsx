@@ -1,54 +1,13 @@
 import { useState } from "react";
-import type { Collection, Book as CatalogBook } from "../../catalog/types";
+import type { Collection } from "../../catalog/types";
 import { getBooksByCollection } from "../../catalog";
+import { BookGrid } from "../shared/BookGrid";
+import { LibraryBookCard } from "../shared/LibraryBookCard";
 
 interface CollectionDetailProps {
   collection: Collection;
   onBack: () => void;
   onOpenBookDetail: (bookId: string) => void;
-}
-
-function coverFallback(title: string): string {
-  const initial = (title || "?").trim().charAt(0).toUpperCase() || "?";
-  return initial;
-}
-
-// Book Detail decides everything about availability/reading now — a
-// card here is always clickable and always goes there first, per
-// Phase 7 ("книга сначала должна открываться как объект каталога").
-function CollectionBookCard({ book, onOpen }: { book: CatalogBook; onOpen: (bookId: string) => void }) {
-
-  const [coverFailed, setCoverFailed] = useState(false);
-  const showCover = Boolean(book.cover) && !coverFailed;
-
-  return (
-    <article className="book-card" onClick={() => onOpen(book.id)}>
-
-      <div className="book-cover">
-        {showCover ? (
-          <img
-            loading="lazy"
-            src={book.cover ?? undefined}
-            alt=""
-            onError={() => setCoverFailed(true)}
-          />
-        ) : (
-          <div className="book-cover-fallback">{coverFallback(book.title)}</div>
-        )}
-      </div>
-
-      <div className="book-content">
-        <h3 className="book-title">{book.title}</h3>
-        <div className="book-author">{book.authorName}</div>
-        <div className="book-meta">
-          <span>{book.originalLanguage}</span>
-          <span>{book.publicationYear ?? ""}</span>
-        </div>
-      </div>
-
-    </article>
-  );
-
 }
 
 export function CollectionDetail({ collection, onBack, onOpenBookDetail }: CollectionDetailProps) {
@@ -76,6 +35,11 @@ export function CollectionDetail({ collection, onBack, onOpenBookDetail }: Colle
             onError={() => setImageFailed(true)}
           />
         ) : (
+          // No dedicated collection image — rather than a flat gradient
+          // block, this now stays transparent and lets the app-wide
+          // GlobalBackground photo show through (global.css), darkened
+          // by the same shade treatment used everywhere else, so it
+          // never reads as an empty box.
           <div className="collection-detail-fallback" aria-hidden="true" />
         )}
 
@@ -88,9 +52,15 @@ export function CollectionDetail({ collection, onBack, onOpenBookDetail }: Colle
       </div>
 
       <div className="collection-detail-books">
-        {books.map(book => (
-          <CollectionBookCard key={book.id} book={book} onOpen={onOpenBookDetail} />
-        ))}
+        {books.length > 0 ? (
+          <BookGrid>
+            {books.map(book => (
+              <LibraryBookCard key={book.id} book={book} onOpen={onOpenBookDetail} />
+            ))}
+          </BookGrid>
+        ) : (
+          <p className="book-detail-not-found">В этой подборке пока нет доступных книг.</p>
+        )}
       </div>
 
     </section>

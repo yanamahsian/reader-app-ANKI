@@ -1,18 +1,17 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Hero } from "./Hero";
-import { SearchPanel } from "./SearchPanel";
 import { getAuthors, getBooksByCollection, getCollectionById } from "../../catalog";
 import type { Author } from "../../catalog/types";
 import { CollectionCard } from "../collections/CollectionCard";
 
 interface HomeViewProps {
-  onOpenBookDetail: (bookId: string, query: string, language: string) => void;
   // collectionId is optional — see App.tsx's handleOpenCollections.
   onOpenCollections: (collectionId?: string) => void;
-  restoreSearch: { query: string; language: string } | null;
   onOpenAuthorDetail: (authorId: string) => void;
-  onOpenAuthorDetailFromSearch: (authorId: string, query: string, language: string) => void;
   onOpenLibrary: () => void;
+  // Opens the app-wide search panel (now owned by App.tsx / rendered
+  // once alongside AppShell) with no prefill — see App.tsx's openSearch.
+  onOpenSearch: () => void;
 }
 
 function authorYearsLabel(author: Author): string | null {
@@ -113,35 +112,11 @@ function AuthorListItem({ author, onOpen }: { author: Author; onOpen: () => void
 }
 
 export function HomeView({
-  onOpenBookDetail,
   onOpenCollections,
-  restoreSearch,
   onOpenAuthorDetail,
-  onOpenAuthorDetailFromSearch,
-  onOpenLibrary
+  onOpenLibrary,
+  onOpenSearch
 }: HomeViewProps) {
-
-  const [isSearchOpen, setSearchOpen] = useState(false);
-  const [searchPrefill, setSearchPrefill] = useState<string | null>(null);
-  const [searchPrefillLanguage, setSearchPrefillLanguage] = useState("");
-
-  function openSearch(query?: string, language?: string): void {
-    setSearchPrefill(query ?? "");
-    setSearchPrefillLanguage(language ?? "");
-    setSearchOpen(true);
-  }
-
-  function closeSearch(): void {
-    setSearchOpen(false);
-    setSearchPrefill(null);
-  }
-
-  useEffect(() => {
-    if (restoreSearch) {
-      openSearch(restoreSearch.query, restoreSearch.language);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const curatedAuthors = getCuratedHomeAuthors();
   const homeCollections = getHomeCollections();
@@ -151,32 +126,7 @@ export function HomeView({
 
       <div className="home-main">
 
-        <header className="mobile-header">
-          <div className="mobile-brand">
-            AN.KI
-            <span>ATLAS</span>
-          </div>
-          <div className="mobile-header-actions">
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="Библиотека"
-              onClick={onOpenLibrary}
-            >
-              ⌸
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="Открыть поиск"
-              onClick={() => openSearch()}
-            >
-              ⌕
-            </button>
-          </div>
-        </header>
-
-        <Hero onOpenSearch={() => openSearch()} onOpenLibrary={onOpenLibrary} />
+        <Hero onOpenSearch={onOpenSearch} onOpenLibrary={onOpenLibrary} />
 
         <section id="collections" className="editorial-section">
 
@@ -260,15 +210,6 @@ export function HomeView({
         </footer>
 
       </div>
-
-      <SearchPanel
-        isOpen={isSearchOpen}
-        prefillQuery={searchPrefill}
-        prefillLanguage={searchPrefillLanguage}
-        onClose={closeSearch}
-        onOpenBookDetail={onOpenBookDetail}
-        onOpenAuthorDetail={onOpenAuthorDetailFromSearch}
-      />
 
     </section>
   );

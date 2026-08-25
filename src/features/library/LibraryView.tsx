@@ -4,7 +4,8 @@ import type { Book as CatalogBook } from "../../catalog/types";
 import { searchCatalog } from "../../catalog/search";
 import { LANGUAGE_OPTIONS } from "../../catalog/languages";
 import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
-import { BookCard } from "../shared/BookCard";
+import { BookGrid } from "../shared/BookGrid";
+import { LibraryBookCard } from "../shared/LibraryBookCard";
 
 export interface LibraryRestoreState {
   query: string;
@@ -286,14 +287,18 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
         </p>
       )}
 
-      <div className="results library-results" aria-live="polite">
+      <div className="library-results" aria-live="polite">
 
         {status === "loading" && books.length === 0 && <div className="empty-state">Загрузка…</div>}
         {status === "empty" && <div className="empty-state">Ничего не найдено.</div>}
 
-        {books.map(book => (
-          <BookCard key={book.id} book={book} onOpen={bookId => onOpenBookDetail(bookId, snapshot())} />
-        ))}
+        {books.length > 0 && (
+          <BookGrid>
+            {books.map(book => (
+              <LibraryBookCard key={book.id} book={book} onOpen={bookId => onOpenBookDetail(bookId, snapshot())} />
+            ))}
+          </BookGrid>
+        )}
 
       </div>
 

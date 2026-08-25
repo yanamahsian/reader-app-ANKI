@@ -1,54 +1,19 @@
-const HERO_COUNT = 45;
-const ROTATION_PERIOD_DAYS = 3;
-
-function heroImagePath(n: number): string {
-  return `${import.meta.env.BASE_URL}Hero/hero_${n}.webp`;
-}
-
-function heroBackground(n: number): string {
-  return `linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.65)),url("${heroImagePath(n)}")`;
-}
-
-// Deterministic, date-based rotation: no timer, no localStorage, no
-// backend, no randomness. The image is a pure function of the current
-// UTC calendar date, so every reload within the same 3-day window
-// resolves to the exact same picture, and it advances sequentially
-// (hero_1 → hero_2 → ... → hero_45 → hero_1) every 3 calendar days.
-// Using UTC (not local time) means the change happens on the same
-// instant for everyone, regardless of the visitor's timezone.
-function getCurrentHeroNumber(): number {
-
-  const now = new Date();
-
-  const daysSinceEpoch = Math.floor(
-    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86_400_000
-  );
-
-  const periodIndex = Math.floor(daysSinceEpoch / ROTATION_PERIOD_DAYS);
-  const zeroBasedHeroIndex = periodIndex % HERO_COUNT;
-
-  return zeroBasedHeroIndex + 1;
-
-}
-
 interface HeroProps {
   onOpenSearch: () => void;
   onOpenLibrary: () => void;
 }
 
+// The hero photo itself (image + darkening shade) used to be rendered
+// right here. It's now rendered once, app-wide, by GlobalBackground
+// (src/app/GlobalBackground.tsx), using the same rotation logic moved
+// into the shared src/app/hero.ts module -- so Home and every other
+// non-Reader screen always show the exact same photo instead of each
+// screen picking its own. This component keeps only the text overlay
+// that sits on top of that shared background.
 export function Hero({ onOpenSearch, onOpenLibrary }: HeroProps) {
-
-  const heroNumber = getCurrentHeroNumber();
 
   return (
     <section id="hero" className="hero" aria-label="AN.KI Atlas">
-
-      <div
-        className="hero-image active"
-        style={{ backgroundImage: heroBackground(heroNumber) }}
-      />
-
-      <div className="hero-shade" aria-hidden="true" />
 
       <div className="hero-topline">
         <span>Цифровая библиотека</span>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { HomeView } from "./features/home/HomeView";
 import { ReaderView } from "./features/reader/ReaderView";
 import { CollectionsView } from "./features/collections/CollectionsView";
@@ -6,10 +7,30 @@ import { BookDetailView } from "./features/book-detail/BookDetailView";
 import { AuthorDetailView } from "./features/author-detail/AuthorDetailView";
 import { LibraryView } from "./features/library/LibraryView";
 import type { LibraryRestoreState } from "./features/library/LibraryView";
+import { SearchPanel } from "./features/home/SearchPanel";
+import { AppShell } from "./app/AppShell";
+import type { AccountShellView } from "./app/AccountMenu";
+import { ProfileView } from "./features/profile/ProfileView";
+import { MyLibraryView } from "./features/my-library/MyLibraryView";
+import { NotesView } from "./features/notes/NotesView";
+import { SubscriptionView } from "./features/subscription/SubscriptionView";
+import { SettingsView } from "./features/settings/SettingsView";
+import { SupportView } from "./features/support/SupportView";
 import { loadRemoteCatalog } from "./catalog";
 import type { Book } from "./features/reader/engine/types";
 
-type View = "home" | "reader" | "collections" | "book-detail" | "author" | "library";
+// The six account-shell screens (see App() below and the six view
+// components under src/features/*) share the AccountShellView union
+// already defined next to AccountMenu -- reused here rather than
+// redeclared, so the two can never drift apart.
+type View =
+  | "home"
+  | "reader"
+  | "collections"
+  | "book-detail"
+  | "author"
+  | "library"
+  | AccountShellView;
 
 export type AuthorDetailOrigin =
   | { type: "book-detail"; bookId: string; bookDetailOrigin: BookDetailOrigin | null }
@@ -47,6 +68,18 @@ export function App() {
 
   const [, setCatalogVersion] = useState(0);
 
+  // Search panel state used to live inside HomeView, which owned the
+  // only <SearchPanel/> instance. It's lifted up here so that
+  // GlobalHeader's persistent "Поиск" button/icon (visible on every
+  // non-Reader screen, not just Home) can open the exact same panel.
+  // SearchPanel itself is unchanged -- it's a self-contained fixed
+  // overlay -- only who controls it moved.
+  const [isSearchOpen, setSearchOpen] = useState(false);
+  const [searchPrefill, setSearchPrefill] = useState<string | null>(null);
+  const [searchPrefillLanguage, setSearchPrefillLanguage] = useState("");
+
+  const [isAccountMenuOpen, setAccountMenuOpen] = useState(false);
+
   useEffect(() => {
     loadRemoteCatalog()
       .then(() => setCatalogVersion(version => version + 1))
@@ -61,6 +94,71 @@ export function App() {
       setView("reader");
     }
   }, []);
+
+  // Mirrors HomeView's old mount-time effect (it used to run once,
+  // synchronously, every time HomeView itself was freshly mounted --
+  // i.e. every time `view` became "home"). restoreSearch is set by
+  // handleBackFromBookDetail/handleBackFromAuthorDetail's "search"
+  // origin branches just before switching back to "home", so re-running
+  // this whenever `view` changes to "home" reopens the panel with the
+  // same query/language exactly as before.
+  useEffect(() => {
+    if (view === "home" && restoreSearch) {
+      openSearch(restoreSearch.query, restoreSearch.language);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  function openSearch(query?: string, language?: string): void {
+    setSearchPrefill(query ?? "");
+    setSearchPrefillLanguage(language ?? "");
+    setSearchOpen(true);
+  }
+
+  function closeSearch(): void {
+    setSearchOpen(false);
+    setSearchPrefill(null);
+  }
+
+  function toggleAccountMenu(): void {
+    setAccountMenuOpen(open => !open);
+  }
+
+  function closeAccountMenu(): void {
+    setAccountMenuOpen(false);
+  }
+
+  function handleAccountNavigate(accountView: AccountShellView): void {
+    setView(accountView);
+  }
+
+  // "Back" from any of the six account shells always lands on Home --
+  // acceptable for this visual pass since none of them are reachable
+  // from a deep navigation chain (they only open from GlobalHeader's
+  // account menu, which is available everywhere).
+  function handleBackFromAccountShell(): void {
+    setView("home");
+  }
+
+  function handleNavigateHome(): void {
+    closeAccountMenu();
+    setView("home");
+  }
+
+  function handleNavigateLibrary(): void {
+    closeAccountMenu();
+    handleOpenLibrary();
+  }
+
+  function handleNavigateCollections(): void {
+    closeAccountMenu();
+    handleOpenCollections();
+  }
+
+  function handleOpenSearchFromHeader(): void {
+    closeAccountMenu();
+    openSearch();
+  }
 
   function handleOpenBook(book: Book): void {
     setCurrentBook(book);
@@ -199,8 +297,10 @@ export function App() {
     return <ReaderView book={currentBook} onExit={handleExitReader} />;
   }
 
+  let content: ReactNode;
+
   if (view === "book-detail" && selectedBookId) {
-    return (
+    content = (
       <BookDetailView
         bookId={selectedBookId}
         onBack={handleBackFromBookDetail}
@@ -209,10 +309,8 @@ export function App() {
         onOpenCollection={handleOpenCollectionFromDetail}
       />
     );
-  }
-
-  if (view === "author" && selectedAuthorId) {
-    return (
+  } else if (view === "author" && selectedAuthorId) {
+    content = (
       <AuthorDetailView
         authorId={selectedAuthorId}
         onBack={handleBackFromAuthorDetail}
@@ -225,10 +323,8 @@ export function App() {
         }
       />
     );
-  }
-
-  if (view === "collections") {
-    return (
+  } else if (view === "collections") {
+    content = (
       <CollectionsView
         initialCollectionId={collectionsInitialId}
         onOpenBookDetail={(bookId, collectionId) =>
@@ -237,29 +333,63 @@ export function App() {
         onBack={handleExitCollections}
       />
     );
-  }
-
-  if (view === "library") {
-    return (
+  } else if (view === "library") {
+    content = (
       <LibraryView
         restoreState={libraryRestoreState}
         onBack={handleBackFromLibrary}
         onOpenBookDetail={handleOpenBookDetailFromLibrary}
       />
     );
+  } else if (view === "profile") {
+    content = <ProfileView onBack={handleBackFromAccountShell} />;
+  } else if (view === "my-library") {
+    content = <MyLibraryView onBack={handleBackFromAccountShell} />;
+  } else if (view === "notes") {
+    content = <NotesView onBack={handleBackFromAccountShell} />;
+  } else if (view === "subscription") {
+    content = <SubscriptionView onBack={handleBackFromAccountShell} />;
+  } else if (view === "settings") {
+    content = <SettingsView onBack={handleBackFromAccountShell} />;
+  } else if (view === "support") {
+    content = <SupportView onBack={handleBackFromAccountShell} />;
+  } else {
+    content = (
+      <HomeView
+        onOpenCollections={handleOpenCollections}
+        onOpenAuthorDetail={handleOpenAuthorDetailFromHome}
+        onOpenLibrary={handleOpenLibrary}
+        onOpenSearch={() => openSearch()}
+      />
+    );
   }
 
   return (
-    <HomeView
-      restoreSearch={restoreSearch}
-      onOpenBookDetail={(bookId, query, language) =>
-        handleOpenBookDetail(bookId, { type: "search", query, language })
-      }
-      onOpenCollections={handleOpenCollections}
-      onOpenAuthorDetail={handleOpenAuthorDetailFromHome}
-      onOpenAuthorDetailFromSearch={handleOpenAuthorDetailFromSearch}
-      onOpenLibrary={handleOpenLibrary}
-    />
+    <>
+      <AppShell
+        onNavigateHome={handleNavigateHome}
+        onNavigateLibrary={handleNavigateLibrary}
+        onNavigateCollections={handleNavigateCollections}
+        onOpenSearch={handleOpenSearchFromHeader}
+        isAccountMenuOpen={isAccountMenuOpen}
+        onToggleAccountMenu={toggleAccountMenu}
+        onCloseAccountMenu={closeAccountMenu}
+        onAccountNavigate={handleAccountNavigate}
+      >
+        {content}
+      </AppShell>
+
+      <SearchPanel
+        isOpen={isSearchOpen}
+        prefillQuery={searchPrefill}
+        prefillLanguage={searchPrefillLanguage}
+        onClose={closeSearch}
+        onOpenBookDetail={(bookId, query, language) =>
+          handleOpenBookDetail(bookId, { type: "search", query, language })
+        }
+        onOpenAuthorDetail={handleOpenAuthorDetailFromSearch}
+      />
+    </>
   );
 
 }
