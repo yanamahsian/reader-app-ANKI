@@ -1,0 +1,100 @@
++  function runLocalFallback(trimmedQuery: string, activeLanguage: string): void {
++    if (!trimmedQuery) {
++      const all = getBooks().filter(book =>
++        !activeLanguage || book.originalLanguage === activeLanguage || book.availableLanguages.includes(activeLanguage)
++      );
++      setBooks(all);
++      setHasMore(false);
++      setDataSource("local");
++      setStatus(all.length ? "success" : "empty");
++      return;
++    }
++    const { books: ranked } = searchCatalog(trimmedQuery, activeLanguage);
++    const localBooks = ranked.map(r => r.book);
++    setBooks(localBooks);
++    setHasMore(false);
++    setDataSource("local");
++    setStatus(localBooks.length ? "success" : "empty");
++  }
++
++  // Bumps the generation token and aborts whatever request is currently
++  // in flight or was merely scheduled -- called SYNCHRONOUSLY at the
++  // moment query/language actually changes (see the query-change effect
++  // and handleLanguageChange below), not only once a debounce timer
++  // later fires. This closes a race the previous version had: requestId
++  // used to be bumped only inside loadFromStart itself, which for the
++  // debounced query-change path only ran once the 350ms timer actually
++  // fired -- leaving a window, between a keystroke and that timer firing,
++  // where an EARLIER still-in-flight request (from an even older
++  // keystroke) was not yet invalidated at all. If that older request's
++  // network response happened to arrive during that window, it would
++  // still pass the `requestId === requestIdRef.current` check and
++  // silently overwrite state with stale results, even though a newer
++  // (still-debouncing) query had already superseded it. Bumping here,
++  // synchronously, the instant the query/language changes, means that
++  // window no longer exists -- the stale request's captured id stops
++  // matching before it has any chance to resolve.
++  function invalidatePending(): number {
++    const requestId = ++requestIdRef.current;
++    abortRef.current?.abort();
++    return requestId;
++  }
++
++  // Loads `pages` * PAGE_SIZE worth of results from offset 0 -- used on
++  // mount (pages = restored page depth, or 1 for a fresh open) and
++  // whenever query/language changes (pages reset to 1). This is still a
++  // single real request, just sized to cover however much the visitor
++  // had already scrolled through before navigating away, so a restored
++  // Library looks exactly like it did before, without replaying every
++  // individual "Показать ещё" click as a separate request.
++  //
++  // `requestId` is supplied by the caller (always via invalidatePending,
++  // called synchronously at the moment the request was decided on) rather
++  // than generated in here -- see invalidatePending's own comment above
++  // for why that distinction is the actual race-condition fix.
++  async function loadFromStart(rawQuery: string, activeLanguage: string, pages: number, requestId: number): Promise<void> {
++
++    const trimmedQuery = rawQuery.trim();
++
++    const controller = new AbortController();
++    abortRef.current = controller;
++
++    setStatus("loading");
++
++    try {
++
++      const page = await fetchLibraryCatalogPage({
++        query: trimmedQuery,
++        language: activeLanguage,
++        limit: pages * PAGE_SIZE,
++        offset: 0,
++        signal: controller.signal
++      });
++
++      if (requestId !== requestIdRef.current) return;
++
++      mergeLibraryPage(page.books, page.authors);
++      // Re-read through the store rather than trusting the response
++      // objects directly -- guarantees what's rendered here is exactly
++      // what getBookById (and so Book Detail / Author Detail) will find
++      // for the same id, with no possibility of drift between the two.
++      const merged = page.books.map(book => getBookById(book.id) ?? book);
++
++      setBooks(merged);
++      setHasMore(page.hasMore);
++      setPagesLoaded(pages);
++      setDataSource("server");
++      setStatus(merged.length ? "success" : "empty");
++
++    } catch (error) {
++
++      if (requestId !== requestIdRef.current) return;
++      if ((error as { name?: string }).name === "AbortError") return;
++
++      console.error(
++        "omnia-library-catalog request failed -- falling back to the local catalog. Real cause:",
++        error
++      );
++
++      runLocalFallback(trimmedQuery, activeLanguage);
++
