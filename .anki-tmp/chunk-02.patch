@@ -1,0 +1,100 @@
++// mergeLibraryPage only (see that function's own comment).
+ function mergeById<T extends { id: string }>(seed: T[], remote: T[]): T[] {
+   const merged = new Map<string, T>();
+   for (const record of seed) merged.set(record.id, record);
+@@ -77,3 +84,171 @@ export function setRemoteCatalog(books: Book[], authors: Author[]): void {
+   currentBooks = assessGermanRights(merged, currentAuthors).map(syncAvailableLanguages);
+   remoteLoaded = true;
+ }
++
++// --- Everything below is used ONLY by mergeLibraryPage, never by
++// setRemoteCatalog above. ---
++//
++// A curated (seed/batch50) record is never overwritten wholesale by an
++// incoming remote one -- only an actually-empty field on the existing
++// record may be filled in from the incoming side. "Filled" for a
++// string (including the nullable string fields) means non-null and
++// non-blank; isFilledString is the one shared test for that.
++function isFilledString(value: string | null | undefined): value is string {
++  return typeof value === "string" && value.trim().length > 0;
++}
++
++function unionStrings(seed: string[], remote: string[]): string[] {
++  return Array.from(new Set([...seed, ...remote]));
++}
++
++// existing (seed) author is always the base record; only an author id
++// that doesn't exist yet is taken from remote as-is. portraitImage is
++// never taken from remote at all, in either direction -- a curated
++// author's portrait (including a deliberate null, meaning "known, no
++// portrait yet") must never be replaced just because a Library/Search
++// page happened to merge that same author in again.
++function mergeLibraryAuthor(seed: Author, remote: Author): Author {
++  return {
++    id: seed.id,
++    name: isFilledString(seed.name) ? seed.name : remote.name,
++    alternativeNames: unionStrings(seed.alternativeNames, remote.alternativeNames),
++    birthYear: seed.birthYear ?? remote.birthYear,
++    deathYear: seed.deathYear ?? remote.deathYear,
++    portraitImage: seed.portraitImage
++  };
++}
++
++function mergeLibraryAuthorsById(seed: Author[], remote: Author[]): Author[] {
++  const merged = new Map<string, Author>();
++  for (const author of seed) merged.set(author.id, author);
++  for (const author of remote) {
++    const existing = merged.get(author.id);
++    merged.set(author.id, existing ? mergeLibraryAuthor(existing, author) : author);
++  }
++  return Array.from(merged.values());
++}
++
++// Rights/files don't carry their own id -- "union" here means: keep
++// every existing entry, then add any incoming entry that isn't already
++// present (compared field-by-field), rather than either silently
++// dropping one side or accumulating exact duplicates across repeated
++// merges of the same edition (e.g. the same Supabase edition appearing
++// again on a later Library/Search page).
++function mergeLibraryRights(seedRights: RightsAssertion[], remoteRights: RightsAssertion[]): RightsAssertion[] {
++  const merged = [...seedRights];
++  for (const assertion of remoteRights) {
++    const alreadyPresent = merged.some(existing =>
++      existing.status === assertion.status &&
++      existing.jurisdiction === assertion.jurisdiction &&
++      existing.assessedBy === assertion.assessedBy
++    );
++    if (!alreadyPresent) merged.push(assertion);
++  }
++  return merged;
++}
++
++function mergeLibraryFiles(seedFiles: BookFile[], remoteFiles: BookFile[]): BookFile[] {
++  const merged = [...seedFiles];
++  for (const file of remoteFiles) {
++    const alreadyPresent = merged.some(existing => existing.format === file.format && existing.url === file.url);
++    if (!alreadyPresent) merged.push(file);
++  }
++  return merged;
++}
++
++// Same "existing is the base, incoming only fills genuinely empty
++// fields" rule as mergeLibraryBook below, applied per-Edition.
++// rights/files are unioned (mergeLibraryRights/mergeLibraryFiles above),
++// never replaced -- this is specifically what keeps an existing DE
++// catalog-assessment rights entry (added by assessGermanRights, see
++// below) from being lost: it's already in `seed.rights`, so it survives
++// the union unconditionally.
++function mergeLibraryEdition(seed: Edition, remote: Edition): Edition {
++  return {
++    id: seed.id,
++    language: isFilledString(seed.language) ? seed.language : remote.language,
++    isOriginal: seed.isOriginal,
++    translatorName: isFilledString(seed.translatorName) ? seed.translatorName : remote.translatorName,
++    rights: mergeLibraryRights(seed.rights, remote.rights),
++    sourceId: isFilledString(seed.sourceId) ? seed.sourceId : remote.sourceId,
++    externalIds: { ...remote.externalIds, ...seed.externalIds },
++    files: mergeLibraryFiles(seed.files, remote.files)
++  };
++}
++
