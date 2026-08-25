@@ -1,0 +1,136 @@
+-        {book.originalTitle && (
+-          <p className="book-detail-original-title">{book.originalTitle}</p>
+-        )}
++            <p className="eyebrow">Произведение</p>
+ 
+-        {author && (
+-          <button
+-            className="book-detail-author-link"
+-            type="button"
+-            onClick={() => onOpenAuthorDetail(author.id)}
+-          >
+-            {author.name}
+-          </button>
+-        )}
++            <h1 className="book-detail-title">{book.title}</h1>
+ 
+-      </header>
+-
+-      <div className="book-detail-read">
+-        {resolved ? (
+-          <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
+-            Читать
+-          </button>
+-        ) : hasAnyPhysicalEdition(book) ? (
+-          <JurisdictionPrompt readerJurisdiction={readerJurisdiction} onChange={setReaderJurisdiction} />
+-        ) : (
+-          <p className="book-detail-unavailable">Книга пока недоступна для чтения</p>
+-        )}
+-      </div>
++            {book.originalTitle && (
++              <p className="book-detail-original-title">{book.originalTitle}</p>
++            )}
+ 
+-      {book.description && (
+-        <p className="book-detail-description">{book.description}</p>
+-      )}
+-
+-      <dl className="book-detail-meta">
+-        <MetaRow label="Год публикации" value={book.publicationYear ? String(book.publicationYear) : null} />
+-        <MetaRow label="Оригинальный язык" value={book.originalLanguage || null} />
+-        <MetaRow label="Страна" value={countryLabel} />
+-        <MetaRow label="Век" value={centuryLabel} />
+-        <MetaRow label="Эпоха" value={epochLabel} />
+-        <MetaRow label="Направление" value={movementLabel} />
+-        <MetaRow label="Жанры" value={genreLabels.length ? genreLabels.join(" · ") : null} />
+-        <MetaRow label="Темы" value={themeLabels.length ? themeLabels.join(" · ") : null} />
+-      </dl>
+-
+-      {relatedCollections.length > 0 && (
+-        <div className="book-detail-collections">
+-          <p className="eyebrow">Подборки</p>
+-          <div className="book-detail-collections-list">
+-            {relatedCollections.map(collection => (
++            {author && (
+               <button
+-                key={collection.id}
+-                className="text-link"
++                className="book-detail-author-link"
+                 type="button"
+-                onClick={() => onOpenCollection(collection.id)}
++                onClick={() => onOpenAuthorDetail(author.id)}
+               >
+-                {collection.title}
++                {author.name}
++              </button>
++            )}
++
++          </header>
++
++          <dl className="book-detail-quick-meta">
++            <MetaRow label="Год публикации" value={book.publicationYear ? String(book.publicationYear) : null} />
++            <MetaRow label="Язык" value={languagesLabel} />
++          </dl>
++
++          <div className="book-detail-read">
++            {resolved ? (
++              <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
++                Читать
+               </button>
+-            ))}
++            ) : hasAnyPhysicalEdition(book) ? (
++              <JurisdictionPrompt readerJurisdiction={readerJurisdiction} onChange={setReaderJurisdiction} />
++            ) : (
++              <p className="book-detail-unavailable">Книга пока недоступна для чтения</p>
++            )}
+           </div>
++
+         </div>
+-      )}
++
++      </div>
++
++      <div className="book-detail-body">
++
++        {book.description && (
++          <p className="book-detail-description">{book.description}</p>
++        )}
++
++        <dl className="book-detail-meta">
++          <MetaRow label="Оригинальный язык" value={book.originalLanguage || null} />
++          <MetaRow label="Страна" value={countryLabel} />
++          <MetaRow label="Век" value={centuryLabel} />
++          <MetaRow label="Эпоха" value={epochLabel} />
++          <MetaRow label="Направление" value={movementLabel} />
++          <MetaRow label="Жанры" value={genreLabels.length ? genreLabels.join(" · ") : null} />
++          <MetaRow label="Темы" value={themeLabels.length ? themeLabels.join(" · ") : null} />
++        </dl>
++
++        {relatedCollections.length > 0 && (
++          <div className="book-detail-collections">
++            <p className="eyebrow">Подборки</p>
++            <div className="book-detail-collections-list">
++              {relatedCollections.map(collection => (
++                <button
++                  key={collection.id}
++                  className="text-link"
++                  type="button"
++                  onClick={() => onOpenCollection(collection.id)}
++                >
++                  {collection.title}
++                </button>
++              ))}
++            </div>
++          </div>
++        )}
++
++      </div>
+ 
+     </section>
+   );
+diff --git a/src/features/collections/CollectionDetail.tsx b/src/features/collections/CollectionDetail.tsx
+index 57fadd7..43cef83 100644
+--- a/src/features/collections/CollectionDetail.tsx
++++ b/src/features/collections/CollectionDetail.tsx
+@@ -1,6 +1,8 @@
+ import { useState } from "react";
