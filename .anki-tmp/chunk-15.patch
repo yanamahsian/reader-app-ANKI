@@ -1,0 +1,100 @@
++              files: [{
++                format: bestFormat,
++                url: `${BOOK_CONTENT_ENDPOINT}?editionId=${encodeURIComponent(edition.id)}`
++              }]
++            };
++
++          })
++          .filter((edition): edition is NonNullable<typeof edition> => edition !== null);
++
++        // catalog_ready implies at least one qualifying edition should
++        // exist; if this particular work has none by the time of this
++        // detail-fetch (a data-consistency edge case, not expected in
++        // normal operation), it is simply left out of this page rather
++        // than shown with an empty editions array a visitor could open
++        // into a book with nothing to read.
++        if (qualifyingEditions.length === 0) return null;
++
++        return {
++          id: row.id,
++          title: row.title,
++          originalTitle: row.original_title ?? null,
++          alternativeTitles: row.alternative_titles ?? [],
++          authorId: row.author_id ?? "",
++          authorName: authorNameById.get(row.author_id) ?? "",
++          originalLanguage: row.original_language ?? "",
++          availableLanguages: row.available_languages ?? [],
++          publicationYear: row.publication_year ?? null,
++          countryId: row.country_id ?? null,
++          centuryId: row.century_id ?? null,
++          epochId: row.epoch_id ?? null,
++          movementId: row.movement_id ?? null,
++          genreIds: row.genre_ids ?? [],
++          themeIds: row.theme_ids ?? [],
++          description: row.description ?? "",
++          cover: row.cover ?? null,
++          editions: qualifyingEditions,
++          collectionIds: row.collection_ids ?? []
++        };
++
++      })
++      .filter((book): book is NonNullable<typeof book> => book !== null);
++
++    // Re-ordered to match the RPC's own ordering (workIds, w.id asc) --
++    // the detail-fetch .in() calls above do not themselves guarantee
++    // response row order, so books is rebuilt by that map above rather
++    // than trusted to already be in page order, then reordered here.
++    const booksById = new Map(books.map(book => [book.id, book]));
++    const orderedBooks = workIds
++      .map(id => booksById.get(id))
++      .filter((book): book is NonNullable<typeof book> => book !== undefined);
++
++    const authors = (authorRows ?? []).map((a: any) => ({
++      id: a.id,
++      name: a.name,
++      alternativeNames: a.alternative_names ?? [],
++      birthYear: a.birth_year ?? null,
++      deathYear: a.death_year ?? null
++    }));
++
++    return jsonResponse({
++      books: orderedBooks,
++      authors,
++      total,
++      hasMore: offset + workIds.length < total
++    });
++
++  } catch (error) {
++    console.error("omnia-library-catalog failed:", error);
++    return serverErrorResponse();
++  }
++
++});
+diff --git a/supabase/sql/library_catalog_search.sql b/supabase/sql/library_catalog_search.sql
+new file mode 100644
+index 0000000..27ae175
+--- /dev/null
++++ b/supabase/sql/library_catalog_search.sql
+@@ -0,0 +1,114 @@
++-- library_catalog_search — NEW Postgres function, NOT YET APPLIED.
++--
++-- Run this against the live database BEFORE deploying the rewritten
++-- omnia-library-catalog Edge Function (supabase/functions/omnia-library-catalog/
++-- index.ts), which calls this function via supabase.rpc(...) using the
++-- service-role client.
++--
++-- WHY A FUNCTION INSTEAD OF A POSTGREST FILTER STRING:
++-- The previous version of omnia-library-catalog built a PostgREST
++-- `.or("title.ilike.%<raw text>%,...")` filter string by directly
++-- interpolating the visitor's search text. PostgREST's own filter
++-- syntax uses commas and dots as operators, so a search string
++-- containing those characters could alter the meaning of the filter
++-- itself -- a real (if narrow) injection surface, not a theoretical one.
++-- Here, p_query is a genuine bound SQL function parameter: Postgres
++-- treats its value purely as data, never as SQL/filter syntax, no
++-- matter what characters it contains. The only characters with special
++-- meaning inside the resulting value are ILIKE's own wildcards (% and
++-- _), which only make the match broader or narrower -- they cannot
++-- escape the string or change the query's structure.
++--
++-- WHY catalog_ready FROM work_readiness, NOT publication_status:
