@@ -1,0 +1,100 @@
++    }
++
++  }
++
++  async function loadMore(): Promise<void> {
++
++    // A genuine separate request -- not part of the query-change
++    // debounce path above, so there is no "still waiting to fire" window
++    // to worry about here: invalidatePending's bump+abort and the actual
++    // request both happen synchronously, back to back, exactly as before.
++    const requestId = invalidatePending();
++    const controller = new AbortController();
++    abortRef.current = controller;
++
++    setLoadingMore(true);
++
++    try {
++
++      const page = await fetchLibraryCatalogPage({
++        query: query.trim(),
++        language,
++        limit: PAGE_SIZE,
++        offset: books.length,
++        signal: controller.signal
++      });
++
++      if (requestId !== requestIdRef.current) return;
++
++      mergeLibraryPage(page.books, page.authors);
++      const merged = page.books.map(book => getBookById(book.id) ?? book);
++
++      setBooks(prev => [...prev, ...merged]);
++      setHasMore(page.hasMore);
++      setPagesLoaded(pages => pages + 1);
++
++    } catch (error) {
++      if (requestId !== requestIdRef.current) return;
++      if ((error as { name?: string }).name === "AbortError") return;
++      // A failed "Показать ещё" leaves the already-loaded results in
++      // place rather than wiping the list -- the local fallback here
++      // would silently restart pagination from a different, unrelated
++      // data source mid-scroll, which is worse than just letting the
++      // visitor retry.
++      console.error("omnia-library-catalog request failed on \"Показать ещё\":", error);
++    } finally {
++      if (requestId === requestIdRef.current) setLoadingMore(false);
++    }
++
++  }
++
++  // Fires once on mount (restoring the prior page depth if any), then
++  // again -- debounced -- whenever the visitor types. Does not depend on
++  // `language`: handleLanguageChange below calls loadFromStart directly,
++  // the same way SearchPanel's own handleLanguageChange does.
++  //
++  // invalidatePending() is called every time this effect runs -- i.e. on
++  // every `query` change, immediately, well before the 350ms debounce
++  // timer below ever fires. That's what makes the invalidation
++  // synchronous-with-the-change rather than synchronous-with-the-debounce;
++  // see invalidatePending's own comment for the exact race this closes.
++  useEffect(() => {
++    if (isFirstRunRef.current) {
++      isFirstRunRef.current = false;
++      const requestId = invalidatePending();
++      loadFromStart(query, language, pagesLoaded, requestId);
++      return;
++    }
++    const requestId = invalidatePending();
++    const handle = setTimeout(() => {
++      setPagesLoaded(1);
++      loadFromStart(query, language, 1, requestId);
++    }, 350);
++    return () => clearTimeout(handle);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [query]);
++
++  function handleLanguageChange(nextLanguage: string): void {
++    setLanguage(nextLanguage);
++    setPagesLoaded(1);
++    const requestId = invalidatePending();
++    loadFromStart(query, nextLanguage, 1, requestId);
++  }
++
++  function snapshot(): LibraryRestoreState {
++    return { query, language, page: pagesLoaded };
++  }
++
++  return (
++    <section className="library-view collections-view">
++
++      <header className="collections-header">
++        <button className="text-link" type="button" onClick={onBack}>
++          ← Назад
++        </button>
++        <p className="eyebrow" style={{ marginTop: 24 }}>AN.KI Atlas</p>
++        <h1>Библиотека</h1>
++        <p className="collections-subtitle">
++          Полный каталог AN.KI — ищите по названию или автору, либо просто листайте.
++        </p>
++      </header>
