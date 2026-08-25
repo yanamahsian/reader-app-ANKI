@@ -78,6 +78,16 @@ export interface Author {
   alternativeNames: string[];
   birthYear: number | null;
   deathYear: number | null;
+  // Same path convention as Collection.image below: a full path
+  // relative to /public (e.g. "authors/tolstoy.png"), never a bare
+  // filename or an id-derived guess. Optional (unlike Collection.image,
+  // which is required-but-nullable) specifically so the already-ingested
+  // BATCH50_AUTHORS records in batch50.ts — generated data this project
+  // deliberately doesn't hand-edit — don't need touching to keep
+  // compiling; an absent field renders exactly like an explicit null
+  // (a monogram fallback, never a broken image). Every hand-curated
+  // seed author in authors.ts sets it explicitly to null.
+  portraitImage?: string | null;
 }
 
 // A single system-taxonomy dictionary entry (epoch, century, country
@@ -145,4 +155,3 @@ export interface Book {
 
   collectionIds: string[];
 }
-
