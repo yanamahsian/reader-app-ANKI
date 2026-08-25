@@ -56,7 +56,7 @@ jobs:
           supabase/sql/library_catalog_search.sql
           EOF
           sort -o /tmp/expected-files /tmp/expected-files
-          git diff --name-only | sort > /tmp/actual-files
+          git status --porcelain=v1 | sed 's/^...//' | sort > /tmp/actual-files
           diff -u /tmp/expected-files /tmp/actual-files
 
       - name: Setup Node
