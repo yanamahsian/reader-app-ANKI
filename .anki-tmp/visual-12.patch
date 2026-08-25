@@ -1,0 +1,220 @@
+@@ -685,9 +711,12 @@ button.text-link {
+ }
+ 
+ .collection-detail {
+-  padding: 64px 7.5% 140px;
++  /* Top padding raised from 64px to clear the new fixed GlobalHeader;
++     background switched from solid to translucent for the same reason
++     as .collections-view above. */
++  padding: 96px 7.5% 140px;
+ 
+-  background: var(--home-bg);
++  background: rgba(16, 11, 9, 0.74);
+ }
+ 
+ .collection-detail-hero {
+@@ -717,17 +746,12 @@ button.text-link {
+   position: absolute;
+   inset: 0;
+ 
+-  background:
+-    radial-gradient(
+-      circle at 22% 20%,
+-      rgba(202, 160, 88, 0.12),
+-      transparent 55%
+-    ),
+-    linear-gradient(
+-      145deg,
+-      rgba(74, 21, 29, 0.5),
+-      rgba(19, 12, 9, 0.4)
+-    );
++  /* Used to be a flat gradient plate. Now left transparent on purpose:
++     .collection-detail-hero has no background of its own, so this
++     reveals .collection-detail's translucent surface (and, through it,
++     the app-wide GlobalBackground photo) instead of a fabricated block
++     — "use the current global hero background", per the visual spec. */
++  background: transparent;
+ }
+ 
+ .collection-detail-heading {
+@@ -758,7 +782,9 @@ button.text-link {
+ }
+ 
+ .collection-detail-books {
+-  max-width: 720px;
++  /* Same reasoning as .library-results above — now a wide .book-grid,
++     not the old narrow vertical card list. */
++  max-width: none;
+ }
+ 
+ /* =========================================================
+@@ -787,7 +813,11 @@ button.text-link {
+ }
+ 
+ .library-results {
+-  max-width: 720px;
++  /* Used to cap at 720px (matching the old vertical BookCard list).
++     Library now renders a wide .book-grid of .library-book-card tiles
++     (see LibraryView.tsx) and needs the section's full working width,
++     not a narrow single column. */
++  max-width: none;
+ }
+ 
+ .library-pager {
+@@ -1917,9 +1947,14 @@ button.text-link {
+ .book-detail {
+   max-width: 720px;
+ 
+-  padding: 64px 7.5% 140px;
++  /* Top padding raised from 64px to clear the new fixed GlobalHeader;
++     background switched from solid to translucent so the app-wide
++     GlobalBackground photo reads through, same as .collections-view/
++     .collection-detail above. .book-detail-page/.author-detail-page
++     (below) widen this further for their two-column layouts. */
++  padding: 96px 7.5% 140px;
+ 
+-  background: var(--home-bg);
++  background: rgba(16, 11, 9, 0.74);
+ }
+ 
+ .book-detail-header {
+@@ -2227,6 +2262,921 @@ button.text-link {
+   flex: 1 1 auto;
+ }
+ 
++
++/* =========================================================
++   APP SHELL / GLOBAL BACKGROUND / GLOBAL HEADER
++   New app-wide frame (src/app/AppShell.tsx and friends) — mounted once
++   around every non-Reader screen (App.tsx renders <ReaderView/> alone,
++   with none of this, when the reader is open). GlobalBackground is a
++   single fixed hero photo behind the whole app; GlobalHeader is a
++   single persistent nav bar on top of it. Neither remounts as the
++   visitor navigates between Home/Library/Collections/Book Detail/
++   Author Detail/the account shells — only .app-shell-content's
++   children swap underneath them.
++   ========================================================= */
++
++.app-shell {
++  position: relative;
++  min-height: 100vh;
++}
++
++.app-shell-content {
++  position: relative;
++  min-height: 100vh;
++}
++
++.global-bg {
++  position: fixed;
++  inset: 0;
++
++  /* Negative z-index keeps this behind ordinary in-flow content
++     without needing every page section to opt into its own stacking
++     context — see the comment on .app-shell-content above: nothing in
++     this file gives .app-shell/.app-shell-content a transform, which
++     would otherwise re-anchor this fixed element to that ancestor
++     instead of the viewport. */
++  z-index: -1;
++}
++
++.global-bg-image {
++  position: absolute;
++  inset: 0;
++
++  background-position: center;
++  background-size: cover;
++
++  animation: global-bg-reveal 1.4s ease both;
++}
++
++.global-bg-shade {
++  position: absolute;
++  inset: 0;
++
++  background:
++    linear-gradient(
++      180deg,
++      rgba(10, 6, 5, 0.5) 0%,
++      rgba(10, 6, 5, 0.68) 55%,
++      rgba(10, 6, 5, 0.92) 100%
++    ),
++    linear-gradient(
++      90deg,
++      rgba(10, 6, 5, 0.32) 0%,
++      transparent 40%,
++      rgba(10, 6, 5, 0.32) 100%
++    );
++}
++
++@keyframes global-bg-reveal {
++  from {
++    opacity: 0;
++    transform: scale(1.02);
++  }
++  to {
++    opacity: 1;
++    transform: scale(1);
++  }
++}
++
++.global-header {
++  position: fixed;
++  top: 0;
++  left: 0;
++  right: 0;
++
++  z-index: 500;
++
++  height: 64px;
++
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 24px;
++
++  padding: 0 7.5%;
++
++  background: linear-gradient(180deg, rgba(9, 6, 5, 0.7), rgba(9, 6, 5, 0));
++
++  backdrop-filter: blur(6px);
++  -webkit-backdrop-filter: blur(6px);
++}
++
++.global-header-brand {
++  border: 0;
++  background: transparent;
++  color: var(--home-text);
++
++  font-family: "Cormorant Garamond", serif;
++  font-size: 20px;
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++
++  cursor: pointer;
++}
++
++.global-header-brand span {
++  color: var(--home-gold);
++}
++
++.global-header-nav {
++  display: flex;
++  align-items: center;
++  gap: 36px;
++}
++
++.global-header-nav button {
++  border: 0;
++  background: transparent;
++  color: rgba(241, 231, 216, 0.78);
++
++  font-size: 11px;
++  letter-spacing: 0.12em;
++  text-transform: uppercase;
++}
++
++.global-header-nav button:hover {
++  color: var(--home-gold);
++}
++
