@@ -1,0 +1,141 @@
++// Thin, reusable responsive grid wrapper — 5-6 columns on a wide desktop
++// screen, 3-4 on tablet, 2 on mobile (all handled in global.css's
++// .book-grid rule; nothing here is responsive on its own). Used by
++// Library, Author Detail's works list, and Collection Detail, so the
++// column-count logic exists in exactly one place.
++export function BookGrid({ children }: { children: ReactNode }) {
++  return <div className="book-grid">{children}</div>;
++}
+diff --git a/src/features/shared/CoverFallback.tsx b/src/features/shared/CoverFallback.tsx
+new file mode 100644
+index 0000000..7d6bfa6
+--- /dev/null
++++ b/src/features/shared/CoverFallback.tsx
+@@ -0,0 +1,28 @@
++interface CoverFallbackProps {
++  title: string;
++}
++
++// Shown in place of a book cover whenever `book.cover` is null — which
++// is most of the catalog today. Deliberately NOT a generic gray
++// placeholder or a bright SaaS-style gradient tile: dark
++// burgundy-to-black plate, a thin gold inset frame, and a small
++// monogram (the title's first letter) with a modest rule above/below,
++// echoing this app's existing collection-tile/collection-detail
++// fallback treatment (same burgundy/gold radial-gradient formula) so a
++// missing cover reads as "a book this library hasn't photographed yet"
++// rather than "broken image". Always the same footprint as a real
++// cover — sized entirely by its parent's aspect-ratio (2 / 3), not by
++// anything in here.
++export function CoverFallback({ title }: CoverFallbackProps) {
++
++  const monogram = (title || "?").trim().charAt(0).toUpperCase() || "?";
++
++  return (
++    <div className="cover-fallback" aria-hidden="true">
++      <span className="cover-fallback-rule" />
++      <span className="cover-fallback-monogram">{monogram}</span>
++      <span className="cover-fallback-rule" />
++    </div>
++  );
++
++}
+diff --git a/src/features/shared/GuestNotice.tsx b/src/features/shared/GuestNotice.tsx
+new file mode 100644
+index 0000000..701fa7e
+--- /dev/null
++++ b/src/features/shared/GuestNotice.tsx
+@@ -0,0 +1,22 @@
++interface GuestNoticeProps {
++  message: string;
++}
++
++// Shown on My Library / Notes (and inside Profile's own guest state)
++// while there is no real Supabase Auth wired up yet. Buttons are
++// disabled rather than silently doing nothing on click — same
++// principle as Subscription's "Скоро" plans: a control that looks
++// clickable but has no effect reads as broken, an explicitly disabled
++// one reads as "not built yet, on purpose".
++export function GuestNotice({ message }: GuestNoticeProps) {
++  return (
++    <div className="guest-notice">
++      <p className="guest-notice-message">{message}</p>
++      <div className="guest-notice-actions">
++        <button type="button" className="primary-button" disabled>Создать аккаунт</button>
++        <button type="button" className="text-link" disabled>Войти</button>
++      </div>
++      <p className="guest-notice-note">Авторизация появится в одном из следующих обновлений.</p>
++    </div>
++  );
++}
+diff --git a/src/features/shared/LibraryBookCard.tsx b/src/features/shared/LibraryBookCard.tsx
+new file mode 100644
+index 0000000..45af0a5
+--- /dev/null
++++ b/src/features/shared/LibraryBookCard.tsx
+@@ -0,0 +1,45 @@
++import { useState } from "react";
++import type { Book as CatalogBook } from "../../catalog/types";
++import { CoverFallback } from "./CoverFallback";
++
++interface LibraryBookCardProps {
++  book: CatalogBook;
++  onOpen: (bookId: string) => void;
++}
++
++// The grid card used by Library, Author Detail's works list, and
++// Collection Detail — a large 2:3 cover (real or CoverFallback) with
++// title/author underneath, nothing else. Deliberately separate from
++// BookCard.tsx (kept as-is for SearchPanel's compact horizontal
++// row-with-small-thumbnail layout) rather than a variant of it: the
++// two are different enough in shape (tall grid tile vs. wide list row)
++// that sharing one component would mean branching most of its markup
++// on a layout flag, which is worse than two small, honest components.
++export function LibraryBookCard({ book, onOpen }: LibraryBookCardProps) {
++
++  const [coverFailed, setCoverFailed] = useState(false);
++  const showCover = Boolean(book.cover) && !coverFailed;
++
++  return (
++    <article className="library-book-card" onClick={() => onOpen(book.id)}>
++
++      <div className="library-book-cover">
++        {showCover ? (
++          <img
++            loading="lazy"
++            src={book.cover ?? undefined}
++            alt=""
++            onError={() => setCoverFailed(true)}
++          />
++        ) : (
++          <CoverFallback title={book.title} />
++        )}
++      </div>
++
++      <h3 className="library-book-title">{book.title}</h3>
++      <div className="library-book-author">{book.authorName}</div>
++
++    </article>
++  );
++
++}
+diff --git a/src/features/shared/ShellPage.tsx b/src/features/shared/ShellPage.tsx
+new file mode 100644
+index 0000000..9d23a78
+--- /dev/null
++++ b/src/features/shared/ShellPage.tsx
+@@ -0,0 +1,40 @@
++import type { ReactNode } from "react";
++
++interface ShellPageProps {
++  onBack: () => void;
++  backLabel?: string;
++  eyebrow: string;
++  title: string;
++  subtitle?: string;
++  children: ReactNode;
++}
++
++// Shared page frame for the six account-area shells (Profile, My
++// Library, Notes, Subscription, Settings, Support) — same back button
++// + eyebrow + title + optional subtitle header every one of them
