@@ -1,0 +1,95 @@
+name: Notes v2 build gate
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-notes-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout temporary gate commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct uploaded patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, lzma, hashlib
+          encoded = Path('.tmp/notes_v2_1.b85').read_text() + Path('.tmp/notes_v2_2.b85').read_text()
+          data = lzma.decompress(base64.b85decode(encoded.encode()))
+          got = hashlib.sha256(data).hexdigest()
+          expected = '6b276a30c855486fad0afa3ed13a23f5d3fd4e1ba38812cc5cfe42093ca5859c'
+          if got != expected:
+              raise SystemExit(f'patch sha mismatch: {got}')
+          Path('/tmp/notes-highlights-v2.patch').write_bytes(data)
+          print(f'patch sha256={got}, bytes={len(data)}')
+          PY
+
+      - name: Apply patch on exact base
+        shell: bash
+        run: |
+          git reset --hard 66f53d1feb6d06785a334a2501a389d26aeba7bf
+          git apply --check /tmp/notes-highlights-v2.patch
+          git apply /tmp/notes-highlights-v2.patch
+          git add -A
+          python - <<'PY'
+          import subprocess
+          expected = sorted([
+            'src/App.tsx',
+            'src/api/annotations.ts',
+            'src/catalog/toReaderBook.ts',
+            'src/features/notes/NotesView.tsx',
+            'src/features/reader/ReaderView.tsx',
+            'src/features/reader/annotationStore.ts',
+            'src/features/reader/engine/highlightAnchor.overlap.test.ts',
+            'src/features/reader/engine/highlightAnchor.ts',
+            'src/features/reader/engine/readerEngine.ts',
+            'src/features/reader/engine/selection.ts',
+            'src/features/reader/engine/types.ts',
+            'src/styles/global.css',
+            'supabase/sql/annotations.sql',
+          ])
+          actual = sorted(subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines())
+          if actual != expected:
+              raise SystemExit(f'scope mismatch\nactual={actual}\nexpected={expected}')
+          forbidden = {'src/features/reader/progressStore/progressStore.ts','src/features/reader/progressStore/localStorageStore.ts'}
+          if forbidden.intersection(actual):
+              raise SystemExit('ProgressStore/localStorageStore changed unexpectedly')
+          print('scope OK: 13 files')
+          PY
+          git diff --cached --check
+
+      - name: Install dependencies
+        run: npm install --no-package-lock
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run overlap tests
+        shell: bash
+        run: |
+          rm -rf /tmp/notes-overlap-test
+          npx tsc --target ES2021 --module commonjs --moduleResolution node --types node --skipLibCheck --outDir /tmp/notes-overlap-test src/features/reader/engine/highlightAnchor.ts src/features/reader/engine/highlightAnchor.overlap.test.ts
+          node /tmp/notes-overlap-test/highlightAnchor.overlap.test.js
+
+      - name: Build
+        run: npm run build
+
+      - name: Create clean commit
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Build Notes and Highlights'
+          git push --force origin HEAD:refs/heads/notes-v2-clean-20260826
+          echo "CLEAN_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Report clean SHA
+        run: echo "$CLEAN_SHA"
