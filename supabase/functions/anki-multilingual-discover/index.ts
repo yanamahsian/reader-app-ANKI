@@ -128,17 +128,37 @@ function bestLatinSearchTerm(names: string[]): string | null {
   return candidates[0] ?? null;
 }
 
-async function fetchGutendexByAuthor(knownNames: string[]) {
+function parsePositivePage(value: string | null, fallback = 1): number {
+  const n = Number(value ?? "");
+  return Number.isInteger(n) && n >= 1 && n <= 10000 ? n : fallback;
+}
+
+function pageFromUrl(value: string | null): number | null {
+  if (!value) return null;
+  try {
+    const page = Number(new URL(value).searchParams.get("page") ?? "");
+    return Number.isInteger(page) && page >= 1 ? page : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchGutendexByAuthor(knownNames: string[], startPage: number) {
   const term = bestLatinSearchTerm(knownNames);
   const byId = new Map<number, GutendexBook>();
   let requests = 0;
   let truncated = false;
-  if (!term) return { books: [], term, requests, truncated };
+  let nextPage: number | null = null;
+  if (!term) return { books: [], term, requests, truncated, startPage, nextPage };
 
   const startedAt = Date.now();
-  let next: string | null = `${GUTENDEX_BASE}?search=${encodeURIComponent(term)}`;
-  let page = 0;
-  while (next && page < GUTENDEX_MAX_PAGES) {
+  const initial = new URL(GUTENDEX_BASE);
+  initial.searchParams.set("search", term);
+  if (startPage > 1) initial.searchParams.set("page", String(startPage));
+  let next: string | null = initial.toString();
+  let pagesFetched = 0;
+
+  while (next && pagesFetched < GUTENDEX_MAX_PAGES) {
     if (Date.now() - startedAt > GUTENDEX_WALL_CLOCK_BUDGET_MS) {
       truncated = true;
       break;
@@ -152,10 +172,15 @@ async function fetchGutendexByAuthor(knownNames: string[]) {
       if (authorOk && Number.isFinite(book.id)) byId.set(book.id, book);
     }
     next = typeof data?.next === "string" ? data.next : null;
-    page++;
+    pagesFetched++;
   }
-  if (next) truncated = true;
-  return { books: Array.from(byId.values()), term, requests, truncated };
+
+  if (next) {
+    truncated = true;
+    nextPage = pageFromUrl(next);
+  }
+
+  return { books: Array.from(byId.values()), term, requests, truncated, startPage, nextPage };
 }
 
 async function fetchWikidata(ids: string[]) {
@@ -178,6 +203,7 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-omnia-run-token") ?? url.searchParams.get("token") ?? "";
   const runId = url.searchParams.get("runId") ?? "";
   const authorId = url.searchParams.get("authorId") ?? "";
+  const gutendexStartPage = parsePositivePage(url.searchParams.get("page"), 1);
   if ((!token && !runId) || !authorId) return json({ error: "Missing run access or authorId" }, 400);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -218,6 +244,7 @@ Deno.serve(async (req: Request) => {
       aliasToWorks.set(variant, set);
     }
   };
+
   for (const work of workRows) {
     addAlias(work.id, work.title);
     addAlias(work.id, work.original_title);
@@ -261,20 +288,7 @@ Deno.serve(async (req: Request) => {
       const old = existingCandidateByKey.get(`${SOURCE_WIKISOURCE}|${externalId}|${work.id}`);
       const existingEditionReady = existingEdition?.work_id === work.id && existingEdition?.ingestion_status === "ready";
       const status = resolveCandidateStatus(existingEditionReady, old?.status, "review");
-      rows.push({
-        work_id: work.id,
-        author_id: authorId,
-        source_id: SOURCE_WIKISOURCE,
-        external_id: externalId,
-        language,
-        title,
-        work_qid: qid,
-        status,
-        rights_status: "unknown",
-        jurisdiction: null,
-        provider_metadata: { workQid: qid, wikiLanguage: language, pageTitle: title, identity: "wikidata-sitelink-exact" },
-        updated_at: now
-      });
+      rows.push({ work_id: work.id, author_id: authorId, source_id: SOURCE_WIKISOURCE, external_id: externalId, language, title, work_qid: qid, status, rights_status: "unknown", jurisdiction: null, provider_metadata: { workQid: qid, wikiLanguage: language, pageTitle: title, identity: "wikidata-sitelink-exact" }, updated_at: now });
       if (status === "review") wikisourceQueuedForReview++;
     }
   }
@@ -285,28 +299,26 @@ Deno.serve(async (req: Request) => {
   let gutendexTerm: string | null = null;
   let gutendexRequests = 0;
   let gutendexTruncated = false;
+  let gutendexNextPage: number | null = null;
 
   try {
-    const found = await fetchGutendexByAuthor(knownNames);
+    const found = await fetchGutendexByAuthor(knownNames, gutendexStartPage);
     gutendexTerm = found.term;
     gutendexRequests = found.requests;
     gutendexTruncated = found.truncated;
+    gutendexNextPage = found.nextPage;
     gutenbergAuthorRows = found.books.length;
 
     for (const book of found.books) {
       const externalId = String(book.id);
       const title = (book.title ?? "").trim();
       if (!externalId || !title) continue;
-
       const matchedWorkIds = new Set<string>();
-      for (const variant of titleVariants(title)) {
-        for (const id of aliasToWorks.get(variant) ?? []) matchedWorkIds.add(id);
-      }
+      for (const variant of titleVariants(title)) for (const id of aliasToWorks.get(variant) ?? []) matchedWorkIds.add(id);
       if (matchedWorkIds.size !== 1) {
         if (matchedWorkIds.size > 1) gutenbergAmbiguous++;
         continue;
       }
-
       const workId = Array.from(matchedWorkIds)[0];
       const language = (book.languages ?? []).find(Boolean) ?? "en";
       const existingEdition = editionBySourceExternal.get(`${SOURCE_GUTENBERG}|${externalId}`);
@@ -314,24 +326,10 @@ Deno.serve(async (req: Request) => {
         gutenbergAmbiguous++;
         continue;
       }
-
-      const old = existingCandidateByKey.get(`${SOURCE_GUTENBERG}|${externalId}|${workId}`);
       const existingEditionReady = existingEdition?.work_id === workId && existingEdition?.ingestion_status === "ready";
+      const old = existingCandidateByKey.get(`${SOURCE_GUTENBERG}|${externalId}|${workId}`);
       const status = resolveCandidateStatus(existingEditionReady, old?.status, "discovered");
-      rows.push({
-        work_id: workId,
-        author_id: authorId,
-        source_id: SOURCE_GUTENBERG,
-        external_id: externalId,
-        language,
-        title,
-        work_qid: qidByWork.get(workId) ?? null,
-        status,
-        rights_status: "public-domain",
-        jurisdiction: "US",
-        provider_metadata: { titleMatch: "exact-normalized-alias-or-article-stripped", gutendexSearch: true },
-        updated_at: now
-      });
+      rows.push({ work_id: workId, author_id: authorId, source_id: SOURCE_GUTENBERG, external_id: externalId, language, title, work_qid: qidByWork.get(workId) ?? null, status, rights_status: "public-domain", jurisdiction: "US", provider_metadata: { titleMatch: "exact-normalized-alias-or-article-stripped", gutendexSearch: true }, updated_at: now });
       gutenbergMatched++;
     }
   } catch (error) {
@@ -363,11 +361,13 @@ Deno.serve(async (req: Request) => {
     gutendexTerm,
     gutendexRequests,
     gutendexTruncated,
+    gutendexStartPage,
+    gutendexNextPage,
     gutenbergAuthorRows,
     gutenbergMatched,
     gutenbergAmbiguous,
     storedCandidates: finalRows.length,
     bySource,
-    rule: "Single best-Latin-name Gutendex search + exact identity matching at edition level; same-language translations remain eligible; Wikisource QID sitelinks stay rights-review; processing/review/skipped candidates are never reset by rediscovery"
+    rule: "Single best-Latin-name Gutendex search + exact identity matching at edition level; same-language translations remain eligible; paginated continuation enabled; Wikisource QID sitelinks stay rights-review; processing/review/skipped candidates are never reset by rediscovery"
   });
 });
