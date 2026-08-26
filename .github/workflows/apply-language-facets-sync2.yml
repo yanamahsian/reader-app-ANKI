@@ -46,6 +46,7 @@ jobs:
 
       - name: Verify exact scope
         run: |
+          git add -N supabase/sql/library_language_facets.sql
           expected=$(printf '%s\n' \
             'src/api/libraryCatalog.ts' \
             'src/catalog/languages.ts' \
