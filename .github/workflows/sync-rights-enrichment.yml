@@ -1,0 +1,255 @@
+name: Sync rights enrichment
+
+on:
+  push:
+    branches:
+      - rights-enrichment-sync-20260826
+    paths:
+      - '.github/workflows/sync-rights-enrichment.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync-build-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact base
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "6910209a3c60eb33ed0fd72678373555b1504876"
+
+      - name: Apply rights enrichment source sync
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f"Expected text not found in {path}: {old[:100]!r}")
+              p.write_text(s.replace(old, new, 1))
+
+          replace_once(
+              'src/api/libraryCatalog.ts',
+              '  language?: string;\n  limit?: number;',
+              '  language?: string;\n  jurisdiction?: string;\n  limit?: number;'
+          )
+          replace_once(
+              'src/api/libraryCatalog.ts',
+              '  if (params.language) url.searchParams.set("language", params.language);\n  url.searchParams.set("limit", String(params.limit ?? 24));',
+              '  if (params.language) url.searchParams.set("language", params.language);\n  if (params.jurisdiction) url.searchParams.set("jurisdiction", params.jurisdiction);\n  url.searchParams.set("limit", String(params.limit ?? 24));'
+          )
+
+          replace_once(
+              'src/features/library/LibraryView.tsx',
+              'import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";\n',
+              'import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";\nimport { useReaderJurisdiction } from "../book-detail/readerJurisdiction";\n'
+          )
+          replace_once(
+              'src/features/library/LibraryView.tsx',
+              '  const [pagesLoaded, setPagesLoaded] = useState(restoreState?.page ?? 1);\n\n  const [books, setBooks] = useState<CatalogBook[]>([]);',
+              '  const [pagesLoaded, setPagesLoaded] = useState(restoreState?.page ?? 1);\n  const [readerJurisdiction] = useReaderJurisdiction();\n\n  const [books, setBooks] = useState<CatalogBook[]>([]);'
+          )
+          replace_once(
+              'src/features/library/LibraryView.tsx',
+              '        language: activeLanguage,\n        limit: pages * PAGE_SIZE,',
+              '        language: activeLanguage,\n        jurisdiction: readerJurisdiction ?? undefined,\n        limit: pages * PAGE_SIZE,'
+          )
+          replace_once(
+              'src/features/library/LibraryView.tsx',
+              '        language,\n        limit: PAGE_SIZE,',
+              '        language,\n        jurisdiction: readerJurisdiction ?? undefined,\n        limit: PAGE_SIZE,'
+          )
+
+          replace_once(
+              'supabase/functions/omnia-library-catalog/index.ts',
+              '  const language = (url.searchParams.get("language") ?? "").trim();\n  const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0") || 0);',
+              '  const language = (url.searchParams.get("language") ?? "").trim();\n  const jurisdiction = (url.searchParams.get("jurisdiction") ?? "").trim();\n  const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0") || 0);'
+          )
+          replace_once(
+              'supabase/functions/omnia-library-catalog/index.ts',
+              '      p_limit: limit,\n      p_offset: offset\n',
+              '      p_limit: limit,\n      p_offset: offset,\n      p_jurisdiction: jurisdiction || null\n'
+          )
+
+          sql = Path('supabase/sql/library_catalog_search.sql')
+          s = sql.read_text()
+          s = s.replace(
+              'create or replace function public.library_catalog_search(\n  p_query text default null,\n  p_language text default null,\n  p_limit int default 24,\n  p_offset int default 0\n)',
+              'drop function if exists public.library_catalog_search(text, text, int, int);\n\ncreate or replace function public.library_catalog_search(\n  p_query text default null,\n  p_language text default null,\n  p_limit int default 24,\n  p_offset int default 0,\n  p_jurisdiction text default null\n)'
+          )
+          s = s.replace(
+              "            where ra.edition_id = e.id\n              and ra.status = 'public-domain'\n",
+              "            where ra.edition_id = e.id\n              and ra.status = 'public-domain'\n              and (\n                p_jurisdiction is null\n                or p_jurisdiction = ''\n                or ra.jurisdiction = p_jurisdiction\n              )\n",
+              1
+          )
+          s = s.replace('library_catalog_search(text, text, int, int)', 'library_catalog_search(text, text, int, int, text)')
+          sql.write_text(s)
+
+          Path('supabase/sql/rights_backfill_death_year.sql').write_text(r'''-- Idempotent RU/UK German-rights backfill based on original author's death year.
+-- Dry-run by default; translations are never auto-confirmed without translator death-year evidence.
+
+create or replace function public.backfill_rights_from_death_year(
+  p_dry_run boolean default true
+)
+returns table (
+  edition_id text,
+  work_id text,
+  work_title text,
+  author_id text,
+  author_name text,
+  language text,
+  is_original boolean,
+  translator_name text,
+  author_death_year int,
+  outcome text,
+  reason text
+)
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_current_year int := extract(year from now())::int;
+begin
+  return query
+  with candidates as (
+    select
+      e.id as c_edition_id,
+      e.work_id as c_work_id,
+      w.title as c_work_title,
+      a.id as c_author_id,
+      a.name as c_author_name,
+      e.language as c_language,
+      e.is_original as c_is_original,
+      e.translator_name as c_translator_name,
+      a.death_year as c_author_death_year,
+      exists (
+        select 1 from rights_assertions ra
+        where ra.edition_id = e.id
+          and ra.status = 'public-domain'
+          and ra.jurisdiction = 'DE'
+      ) as c_already_confirmed
+    from editions e
+    join works w on w.id = e.work_id
+    join authors a on a.id = w.author_id
+    where e.language in ('ru', 'uk')
+      and e.ingestion_status = 'ready'
+  )
+  select
+    c.c_edition_id,
+    c.c_work_id,
+    c.c_work_title,
+    c.c_author_id,
+    c.c_author_name,
+    c.c_language,
+    c.c_is_original,
+    c.c_translator_name,
+    c.c_author_death_year,
+    case
+      when c.c_already_confirmed then 'already_confirmed'
+      when c.c_is_original is null then 'needs_review'
+      when c.c_is_original = true and c.c_translator_name is not null then 'conflict'
+      when c.c_is_original = true and c.c_author_death_year is null then 'insufficient_metadata'
+      when c.c_is_original = true and v_current_year >= c.c_author_death_year + 71 then 'confirmed_public_domain'
+      when c.c_is_original = true then 'needs_review'
+      when c.c_is_original = false and c.c_translator_name is null then 'insufficient_metadata'
+      else 'insufficient_metadata'
+    end as outcome,
+    case
+      when c.c_already_confirmed
+        then 'A public-domain/DE assertion already exists for this edition -- idempotent no-op.'
+      when c.c_is_original is null
+        then 'editions.is_original is not set -- cannot tell original from translation without guessing.'
+      when c.c_is_original = true and c.c_translator_name is not null
+        then 'Marked is_original=true but also carries a translator_name -- contradictory edition metadata.'
+      when c.c_is_original = true and c.c_author_death_year is null
+        then 'Original edition, but authors.death_year is not on record.'
+      when c.c_is_original = true and v_current_year >= c.c_author_death_year + 71
+        then c.c_author_name || ' died ' || c.c_author_death_year || ' -- public domain in Germany since Jan 1, ' || (c.c_author_death_year + 71) || '.'
+      when c.c_is_original = true
+        then c.c_author_name || ' died ' || c.c_author_death_year || ' -- still under German copyright until Dec 31, ' || (c.c_author_death_year + 70) || '.'
+      when c.c_is_original = false and c.c_translator_name is null
+        then 'Translation edition with no recorded translator_name -- cannot assess.'
+      else 'Translation edition has no server-side translator death-year evidence -- cannot auto-confirm.'
+    end as reason
+  from candidates c
+  order by c.c_language, c.c_author_name, c.c_edition_id;
+
+  if not p_dry_run then
+    insert into rights_assertions (edition_id, status, jurisdiction, rights_metadata)
+    select
+      e.id,
+      'public-domain',
+      'DE',
+      jsonb_build_object(
+        'assessment', 'de-life-plus-70',
+        'basis', 'original-author-death-year',
+        'author_id', a.id,
+        'author_name', a.name,
+        'author_death_year', a.death_year,
+        'rule', 'current_year >= death_year + 71',
+        'current_year_at_assessment', v_current_year,
+        'computed_by', 'backfill_rights_from_death_year'
+      )
+    from editions e
+    join works w on w.id = e.work_id
+    join authors a on a.id = w.author_id
+    where e.language in ('ru', 'uk')
+      and e.ingestion_status = 'ready'
+      and e.is_original = true
+      and e.translator_name is null
+      and a.death_year is not null
+      and v_current_year >= a.death_year + 71
+      and not exists (
+        select 1 from rights_assertions ra
+        where ra.edition_id = e.id
+          and ra.status = 'public-domain'
+          and ra.jurisdiction = 'DE'
+      );
+  end if;
+end;
+$$;
+
+revoke all on function public.backfill_rights_from_death_year(boolean) from public;
+revoke all on function public.backfill_rights_from_death_year(boolean) from anon;
+revoke all on function public.backfill_rights_from_death_year(boolean) from authenticated;
+grant execute on function public.backfill_rights_from_death_year(boolean) to service_role;
+''')
+          PY
+
+          git diff --check
+          printf '%s\n' \
+            src/api/libraryCatalog.ts \
+            src/features/library/LibraryView.tsx \
+            supabase/functions/omnia-library-catalog/index.ts \
+            supabase/sql/library_catalog_search.sql \
+            supabase/sql/rights_backfill_death_year.sql > /tmp/expected
+          git diff --name-only | sort > /tmp/actual
+          sort /tmp/expected -o /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit synced source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/api/libraryCatalog.ts src/features/library/LibraryView.tsx supabase/functions/omnia-library-catalog/index.ts supabase/sql/library_catalog_search.sql supabase/sql/rights_backfill_death_year.sql
+          git commit -m "Add RU UK rights enrichment"
+          git push origin HEAD:rights-enrichment-sync-20260826
