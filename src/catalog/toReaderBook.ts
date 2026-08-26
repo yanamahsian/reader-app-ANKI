@@ -313,9 +313,23 @@ export function resolveEditionFile(
 // scope at exactly this moment -- there was never a need to bake a
 // jurisdiction into the Book/Edition model earlier, upstream, or persist
 // a second copy of it anywhere.
+// USER LIBRARY PHASE (requirement #8, edition-specific progress): `id`
+// below used to be catalogBook.id -- the WORK id. readerEngine.ts uses
+// this Book.id as the key for every progressStore.getPosition/
+// savePosition call, and as Fragment.bookId/Bookmark.bookId -- so a
+// Work-scoped id meant reading position was shared across every
+// translation of the same Work (e.g. switching from an English edition
+// to a German one would silently show/overwrite the English position).
+// This is now resolved.edition.id instead: each Edition gets its own
+// independent position, matching the new public.reader_progress table's
+// own unique(user_id, edition_id) constraint (see supabaseProgressStore.ts
+// and the migration). Confirmed via grep that no other code in this repo
+// relied on this being Work-scoped specifically (NotesView.tsx, the only
+// other reader of Fragment/Bookmark.bookId, is still an unimplemented
+// shell) -- readerEngine.ts itself has zero changes for this.
 export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile, jurisdiction?: string): ReaderBook {
   return {
-    id: catalogBook.id,
+    id: resolved.edition.id,
     title: catalogBook.title,
     author: catalogBook.authorName,
     language: resolved.edition.language,

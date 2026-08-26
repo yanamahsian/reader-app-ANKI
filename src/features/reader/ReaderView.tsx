@@ -2,6 +2,9 @@ import { useEffect, useRef } from "react";
 import type { Book } from "./engine/types";
 import { createReaderEngine, type ReaderEngine } from "./engine/readerEngine";
 import { createLocalStorageStore } from "./progressStore/localStorageStore";
+import { createSupabaseProgressStore } from "./progressStore/supabaseProgressStore";
+import { getSession } from "../../auth/supabaseAuth";
+import { fetchProgress } from "../../api/readerProgress";
 
 interface ReaderViewProps {
   book: Book;
@@ -21,27 +24,51 @@ export function ReaderView({ book, onExit }: ReaderViewProps) {
   useEffect(() => {
 
     if (!containerRef.current) return;
+    const container = containerRef.current;
 
-    // Phase 2 ships only the localStorage implementation of
-    // progressStore. Swapping this for a Supabase-backed one later
-    // (phase 8) does not require any change to readerEngine.ts.
-    const progressStore = createLocalStorageStore();
+    // USER LIBRARY PHASE: book.id is now an Edition id (see
+    // toReaderBook.ts's own comment on this). A signed-in visitor gets
+    // a Supabase-backed store, seeded with their saved position for
+    // THIS edition, fetched here -- before the store is constructed and
+    // before engine.open() is called -- because ProgressStore.
+    // getPosition() must stay synchronous (readerEngine.ts's open() uses
+    // it immediately; changing that contract is out of scope). A guest
+    // visitor's path is completely unchanged: createLocalStorageStore()
+    // synchronously, same as every prior phase.
+    let cancelled = false;
 
-    const engine = createReaderEngine({
-      container: containerRef.current,
-      progressStore,
-      onExit
-    });
+    async function setUpReader() {
 
-    engineRef.current = engine;
+      const session = getSession();
+      const progressStore = session
+        ? createSupabaseProgressStore(book.id, await fetchProgress(book.id))
+        : createLocalStorageStore();
 
-    engine.open(book).catch(error => {
-      console.error(error);
-      alert("Не удалось открыть книгу.");
-    });
+      // The visitor could have navigated away (book changed, or this
+      // view unmounted) while fetchProgress() above was in flight --
+      // don't build/open an engine for a book that's no longer current.
+      if (cancelled) return;
+
+      const engine = createReaderEngine({
+        container,
+        progressStore,
+        onExit
+      });
+
+      engineRef.current = engine;
+
+      engine.open(book).catch(error => {
+        console.error(error);
+        alert("Не удалось открыть книгу.");
+      });
+
+    }
+
+    setUpReader();
 
     return () => {
-      engine.destroy();
+      cancelled = true;
+      engineRef.current?.destroy();
       engineRef.current = null;
     };
 

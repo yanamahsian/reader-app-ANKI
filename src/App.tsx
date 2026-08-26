@@ -12,6 +12,7 @@ import { AppShell } from "./app/AppShell";
 import type { AccountShellView } from "./app/AccountMenu";
 import { ProfileView } from "./features/profile/ProfileView";
 import { MyLibraryView } from "./features/my-library/MyLibraryView";
+import type { MyLibraryRestoreState } from "./features/my-library/MyLibraryView";
 import { NotesView } from "./features/notes/NotesView";
 import { SubscriptionView } from "./features/subscription/SubscriptionView";
 import { SettingsView } from "./features/settings/SettingsView";
@@ -41,7 +42,12 @@ export type BookDetailOrigin =
   | { type: "search"; query: string; language: string }
   | { type: "collection"; collectionId: string }
   | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin }
-  | { type: "library"; state: LibraryRestoreState };
+  | { type: "library"; state: LibraryRestoreState }
+  // USER LIBRARY PHASE (requirement #18): mirrors the "library" origin
+  // above exactly, so "Моя библиотека → Book Detail → Назад" returns to
+  // My Library with its selected tab restored, the same way the public
+  // Library already restores its query/language/page.
+  | { type: "my-library"; state: MyLibraryRestoreState };
 
 const TEST_EPUB_BOOK: Book = {
   id: "phase3-test-epub",
@@ -57,6 +63,15 @@ export function App() {
 
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [bookDetailOrigin, setBookDetailOrigin] = useState<BookDetailOrigin | null>(null);
+  // USER LIBRARY PHASE (requirement #9): seeds BookDetailView's
+  // language/edition selection when arriving from a saved Work in My
+  // Library -- see MyLibraryView's own comment and BookDetailView's
+  // initialEdition prop comment for why this never bypasses the
+  // Reader's rights gate. Reset to null on every handleOpenBookDetail
+  // call that doesn't explicitly supply one, so it never bleeds into
+  // an unrelated later navigation.
+  const [bookDetailInitialEdition, setBookDetailInitialEdition] =
+    useState<{ editionId: string; language: string } | null>(null);
 
   const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
   const [authorDetailOrigin, setAuthorDetailOrigin] = useState<AuthorDetailOrigin | null>(null);
@@ -65,6 +80,7 @@ export function App() {
   const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(null);
 
   const [libraryRestoreState, setLibraryRestoreState] = useState<LibraryRestoreState | null>(null);
+  const [myLibraryRestoreState, setMyLibraryRestoreState] = useState<MyLibraryRestoreState | null>(null);
 
   const [, setCatalogVersion] = useState(0);
 
@@ -190,9 +206,14 @@ export function App() {
     setView("home");
   }
 
-  function handleOpenBookDetail(bookId: string, origin: BookDetailOrigin): void {
+  function handleOpenBookDetail(
+    bookId: string,
+    origin: BookDetailOrigin,
+    initialEdition: { editionId: string; language: string } | null = null
+  ): void {
     setSelectedBookId(bookId);
     setBookDetailOrigin(origin);
+    setBookDetailInitialEdition(initialEdition);
     setView("book-detail");
   }
 
@@ -223,6 +244,12 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "my-library") {
+      setMyLibraryRestoreState(bookDetailOrigin.state);
+      setView("my-library");
+      return;
+    }
+
     setView("home");
 
   }
@@ -245,6 +272,29 @@ export function App() {
 
   function handleOpenBookDetailFromLibrary(bookId: string, state: LibraryRestoreState): void {
     handleOpenBookDetail(bookId, { type: "library", state });
+  }
+
+  // USER LIBRARY PHASE: My Library is reached only via the account
+  // menu (handleAccountNavigate -> setView("my-library") already
+  // handles that), so there is no separate "open fresh" entry point to
+  // mirror handleOpenLibrary's reset-on-open behavior for -- the tab
+  // itself simply keeps whatever it was last set to. Returning here
+  // from Book Detail goes through handleBackFromBookDetail above, which
+  // restores the exact prior tab.
+  function handleOpenBookDetailFromMyLibrary(
+    bookId: string,
+    state: MyLibraryRestoreState,
+    initialEdition: { editionId: string; language: string } | null
+  ): void {
+    handleOpenBookDetail(bookId, { type: "my-library", state }, initialEdition);
+  }
+
+  // Both AccountMenu's guest buttons and BookDetailView's own
+  // "Добавить в библиотеку" (when signed out) land here -- Profile is
+  // this app's one real auth home (requirement #4: reuse the existing
+  // flow, never a second one).
+  function handleRequireSignIn(): void {
+    setView("profile");
   }
 
   function handleOpenAuthorDetail(authorId: string): void {
@@ -307,6 +357,8 @@ export function App() {
         onOpenBook={handleOpenBook}
         onOpenAuthorDetail={handleOpenAuthorDetail}
         onOpenCollection={handleOpenCollectionFromDetail}
+        onRequireSignIn={handleRequireSignIn}
+        initialEdition={bookDetailInitialEdition}
       />
     );
   } else if (view === "author" && selectedAuthorId) {
@@ -344,7 +396,15 @@ export function App() {
   } else if (view === "profile") {
     content = <ProfileView onBack={handleBackFromAccountShell} />;
   } else if (view === "my-library") {
-    content = <MyLibraryView onBack={handleBackFromAccountShell} />;
+    content = (
+      <MyLibraryView
+        onBack={handleBackFromAccountShell}
+        restoreState={myLibraryRestoreState}
+        onOpenBookDetail={handleOpenBookDetailFromMyLibrary}
+        onRequireSignIn={handleRequireSignIn}
+        onOpenLibrary={handleOpenLibrary}
+      />
+    );
   } else if (view === "notes") {
     content = <NotesView onBack={handleBackFromAccountShell} />;
   } else if (view === "subscription") {

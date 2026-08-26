@@ -5,6 +5,12 @@ import { CoverFallback } from "./CoverFallback";
 interface LibraryBookCardProps {
   book: CatalogBook;
   onOpen: (bookId: string) => void;
+  // USER LIBRARY PHASE: optional quiet status text (e.g. "Читаю",
+  // "Прочитано", "Хочу прочитать") shown under the author line — used
+  // by MyLibraryView only. Every other existing caller (Library,
+  // Author Detail, Collection Detail) omits this prop and renders
+  // exactly as before, unchanged.
+  badge?: string;
 }
 
 // The grid card used by Library, Author Detail's works list, and
@@ -15,7 +21,7 @@ interface LibraryBookCardProps {
 // two are different enough in shape (tall grid tile vs. wide list row)
 // that sharing one component would mean branching most of its markup
 // on a layout flag, which is worse than two small, honest components.
-export function LibraryBookCard({ book, onOpen }: LibraryBookCardProps) {
+export function LibraryBookCard({ book, onOpen, badge }: LibraryBookCardProps) {
 
   const [coverFailed, setCoverFailed] = useState(false);
   const showCover = Boolean(book.cover) && !coverFailed;
@@ -38,6 +44,7 @@ export function LibraryBookCard({ book, onOpen }: LibraryBookCardProps) {
 
       <h3 className="library-book-title">{book.title}</h3>
       <div className="library-book-author">{book.authorName}</div>
+      {badge ? <div className="library-book-badge">{badge}</div> : null}
 
     </article>
   );

@@ -1,3 +1,5 @@
+import { useAuth } from "../auth/supabaseAuth";
+
 export type AccountShellView =
   | "profile"
   | "my-library"
@@ -12,21 +14,19 @@ interface AccountMenuProps {
   onNavigate: (view: AccountShellView) => void;
 }
 
-// No real Supabase Auth exists yet — this is deliberately hardcoded
-// false, not read from any store. The point of this component is that
-// the visual/navigation architecture for an account exists now, so a
-// real auth integration later only has to flip this one flag (and feed
-// it a real user object) rather than build the menu from scratch. Every
-// item below stays reachable either way — MyLibraryView/NotesView/
-// ProfileView each render their own honest "not signed in yet" empty
-// state internally (see those files) rather than being hidden here,
-// so this pass's new shells are actually visitable for review.
-const isAuthenticated = false;
-
 // Compact dropdown anchored under the header's account icon — not a
 // side panel/drawer like SearchPanel, deliberately smaller and lighter
 // so it doesn't compete with it.
 export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
+
+  // USER LIBRARY PHASE: this used to be a hardcoded `const
+  // isAuthenticated = false` with a comment saying a real integration
+  // would only need to "flip this one flag ... and feed it a real user
+  // object" -- useAuth() (src/auth/supabaseAuth.ts) is exactly that real
+  // integration now. Every item below stays reachable either way, same
+  // as before -- MyLibraryView/ProfileView still render their own
+  // honest state internally rather than being hidden here.
+  const { isAuthenticated, user } = useAuth();
 
   if (!isOpen) return null;
 
@@ -40,6 +40,12 @@ export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
       <div className="account-menu-backdrop" onClick={onClose} />
 
       <div className="account-menu" role="menu" aria-label="Аккаунт">
+
+        {isAuthenticated && user?.email && (
+          <div className="account-menu-identity">
+            <p>{user.email}</p>
+          </div>
+        )}
 
         {!isAuthenticated && (
           <div className="account-menu-guest">

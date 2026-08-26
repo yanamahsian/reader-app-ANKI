@@ -4,6 +4,16 @@
 // deployed)", which stopped being true two phases ago -- corrected here
 // as pure hygiene, no behavior change.
 //
+// USER LIBRARY PHASE: a second, self-contained request mode was added
+// (see the `workIds` branch near the top of Deno.serve below) so "Моя
+// библиотека" can batch-fetch exactly the Works a user has saved --
+// without a second Edge Function (see instruction #23) and without
+// reusing library_catalog_search's own query/pagination/facets RPCs,
+// which this new mode never calls. See that branch's own comment for
+// the full reasoning (auth-gated, readiness-agnostic, capped id count).
+// The default (no `workIds`) request mode below -- q/language/
+// jurisdiction/pagination/facets -- is completely unchanged.
+//
 // Reads AN.KI's own internal catalog (public.works / authors / editions /
 // book_files / rights_assertions, gated through public.work_readiness) and
 // serves it, paginated and searchable, to the frontend's Library screen
@@ -121,6 +131,16 @@ const BOOK_CONTENT_ENDPOINT =
 // of the same ordering, not one shared module.
 const FORMAT_PRIORITY = ["anki-json", "epub", "plaintext"];
 
+// USER LIBRARY PHASE: a saved-but-not-yet-readable Work must still be
+// fetchable (My Library shows membership regardless of current
+// readability -- requirement #16), so a single caller passing a large,
+// pathological workIds list is the only real abuse surface this new
+// branch adds. Capped generously above any real My Library page size
+// (LibraryView.tsx's own PAGE_SIZE is 24) -- this is a backstop, not a
+// pagination mechanism; My Library paginates its OWN list of ids
+// client-side before ever calling this.
+const MAX_WORK_IDS = 200;
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -157,6 +177,236 @@ function serverErrorResponse(): Response {
 // Vite/tsc either way.
 import { createClient } from "supabase";
 
+// Shared by both request modes below (the default q/language/pagination
+// path and the USER LIBRARY PHASE workIds path) -- one place that turns
+// a Work's candidate editions into the exact "qualifying edition" shape
+// the frontend's Book/Edition catalog type expects (see
+// src/catalog/types.ts), so the two modes can never quietly diverge in
+// what counts as a qualifying edition.
+function buildQualifyingEditions(
+  candidateEditions: any[],
+  filesByEdition: Map<string, any[]>,
+  rightsByEdition: Map<string, any[]>
+): any[] {
+
+  return candidateEditions
+    .map((edition: any) => {
+
+      const readyFormats = new Set(
+        (filesByEdition.get(edition.id) ?? []).map((file: any) => file.format as string)
+      );
+      const editionRights = rightsByEdition.get(edition.id) ?? [];
+
+      if (editionRights.length === 0) return null;
+
+      const bestFormat = FORMAT_PRIORITY.find(format => readyFormats.has(format));
+      if (!bestFormat) return null;
+
+      const hasSourceId = typeof edition.source_id === "string" && edition.source_id.trim().length > 0;
+      const sourceId = hasSourceId ? edition.source_id : "anki-catalog";
+      const externalIds = hasSourceId && edition.external_id
+        ? { [edition.source_id]: edition.external_id as string }
+        : {};
+
+      return {
+        id: edition.id,
+        language: edition.language,
+        isOriginal: Boolean(edition.is_original),
+        translatorName: edition.translator_name ?? null,
+        rights: editionRights.map((assertion: any) => ({
+          status: assertion.status,
+          jurisdiction: assertion.jurisdiction ?? null
+        })),
+        sourceId,
+        externalIds,
+        files: [{
+          format: bestFormat,
+          url: `${BOOK_CONTENT_ENDPOINT}?editionId=${encodeURIComponent(edition.id)}`
+        }]
+      };
+
+    })
+    .filter((edition): edition is NonNullable<typeof edition> => edition !== null);
+
+}
+
+// Same split: the plain "Work row + its already-built qualifying
+// editions + author name lookup -> frontend Book shape" mapping, used by
+// both request modes.
+function buildBookFromWork(row: any, qualifyingEditions: any[], authorNameById: Map<string, string>): any {
+  return {
+    id: row.id,
+    title: row.title,
+    originalTitle: row.original_title ?? null,
+    alternativeTitles: row.alternative_titles ?? [],
+    authorId: row.author_id ?? "",
+    authorName: authorNameById.get(row.author_id) ?? "",
+    originalLanguage: row.original_language ?? "",
+    availableLanguages: row.available_languages ?? [],
+    publicationYear: row.publication_year ?? null,
+    countryId: row.country_id ?? null,
+    centuryId: row.century_id ?? null,
+    epochId: row.epoch_id ?? null,
+    movementId: row.movement_id ?? null,
+    genreIds: row.genre_ids ?? [],
+    themeIds: row.theme_ids ?? [],
+    description: row.description ?? "",
+    cover: row.cover ?? null,
+    editions: qualifyingEditions,
+    collectionIds: row.collection_ids ?? []
+  };
+}
+
+// USER LIBRARY PHASE: fetches exactly the given Works (and their
+// authors/qualifying editions), for My Library -- deliberately NOT
+// gated on work_readiness.catalog_ready, unlike every other path in
+// this file. A saved Work stays a saved Work even if it currently has
+// no readable edition anywhere (requirement #16: "Membership не
+// означает право читать") -- excluding it here would make a real, still-
+// saved book silently vanish from My Library, which is a worse and more
+// confusing failure than showing a card whose own Book Detail then
+// explains it isn't readable yet (exactly what happens today for any
+// Work with zero qualifying editions, via hasAnyPhysicalEdition /
+// JurisdictionPrompt in BookDetailView.tsx -- unchanged).
+//
+// AUTH-GATED, UNLIKE THE REST OF THIS PUBLIC ENDPOINT: this branch
+// requires a real, valid Supabase Auth JWT in `Authorization: Bearer`
+// (verified via supabase.auth.getUser -- the service-role client can
+// verify any project JWT regardless of which client issued it). The
+// function itself stays verify_jwt=false at the gateway (so CORS
+// preflight and the existing public q/pagination path are unaffected),
+// but this specific capability -- reading Work metadata without the
+// catalog_ready gate -- is deliberately NOT handed to anonymous callers:
+// the normal q/browse path already exposes every catalog_ready Work's
+// metadata publicly, so the only NEW thing this branch adds is
+// visibility into not-yet-ready Works, which should require being a
+// real, signed-in visitor, not an anonymous scraper. No service_role
+// key or other secret ever reaches the browser for this -- the caller
+// sends only their own already-issued user JWT, the same one every
+// authenticated PostgREST call from this app already sends (see
+// src/api/userLibrary.ts).
+async function handleWorkIdsLookup(supabase: any, req: Request, workIdsParam: string): Promise<Response> {
+
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) {
+    return jsonResponse({ error: "Missing Authorization bearer token" }, 401);
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData?.user) {
+    return jsonResponse({ error: "Invalid or expired session" }, 401);
+  }
+
+  const workIds = Array.from(new Set(
+    workIdsParam.split(",").map(id => id.trim()).filter(Boolean)
+  )).slice(0, MAX_WORK_IDS);
+
+  if (workIds.length === 0) {
+    return jsonResponse({ books: [], authors: [] });
+  }
+
+  const { data: workRows, error: worksError } = await supabase
+    .from("works")
+    .select(WORKS_COLUMNS)
+    .in("id", workIds);
+  if (worksError) throw worksError;
+
+  const works = (workRows ?? []) as any[];
+
+  const authorIds = Array.from(new Set(works.map(w => w.author_id).filter(Boolean)));
+  const { data: authorRows, error: authorsError } = authorIds.length
+    ? await supabase
+        .from("authors")
+        .select("id, name, alternative_names, birth_year, death_year")
+        .in("id", authorIds)
+    : { data: [] as any[], error: null };
+  if (authorsError) throw authorsError;
+
+  // Note: NOT filtered to ingestion_status='ready' here, unlike the
+  // default path -- a not-ready edition simply won't produce a
+  // qualifying edition below (buildQualifyingEditions still requires a
+  // ready, rights-carrying file), so including it costs nothing and
+  // keeps this query identical in shape to the default path's.
+  const { data: editionRows, error: editionsError } = await supabase
+    .from("editions")
+    .select("id, work_id, language, is_original, translator_name, source_id, external_id, ingestion_status")
+    .in("work_id", workIds)
+    .eq("ingestion_status", "ready");
+  if (editionsError) throw editionsError;
+
+  const editions = (editionRows ?? []) as any[];
+  const editionIds = editions.map(e => e.id);
+
+  const { data: fileRows, error: filesError } = editionIds.length
+    ? await supabase
+        .from("book_files")
+        .select("id, edition_id, format, kind, ingestion_status")
+        .in("edition_id", editionIds)
+        .eq("kind", "normalized")
+        .eq("format", "anki-json")
+        .eq("ingestion_status", "ready")
+    : { data: [] as any[], error: null };
+  if (filesError) throw filesError;
+
+  const { data: rightsRows, error: rightsError } = editionIds.length
+    ? await supabase
+        .from("rights_assertions")
+        .select("id, edition_id, status, jurisdiction")
+        .in("edition_id", editionIds)
+        .eq("status", "public-domain")
+    : { data: [] as any[], error: null };
+  if (rightsError) throw rightsError;
+
+  const files = (fileRows ?? []) as any[];
+  const rights = (rightsRows ?? []) as any[];
+
+  const filesByEdition = new Map<string, any[]>();
+  for (const file of files) {
+    const list = filesByEdition.get(file.edition_id) ?? [];
+    list.push(file);
+    filesByEdition.set(file.edition_id, list);
+  }
+
+  const rightsByEdition = new Map<string, any[]>();
+  for (const assertion of rights) {
+    const list = rightsByEdition.get(assertion.edition_id) ?? [];
+    list.push(assertion);
+    rightsByEdition.set(assertion.edition_id, list);
+  }
+
+  const editionsByWork = new Map<string, any[]>();
+  for (const edition of editions) {
+    const list = editionsByWork.get(edition.work_id) ?? [];
+    list.push(edition);
+    editionsByWork.set(edition.work_id, list);
+  }
+
+  const authorNameById = new Map((authorRows ?? []).map((a: any) => [a.id, a.name as string]));
+
+  // Unlike the default path: NO `if (qualifyingEditions.length === 0)
+  // return null` here -- see this function's own header comment. A
+  // Work with zero qualifying editions is still returned, with
+  // editions: [] -- BookDetailView.tsx already renders that state
+  // correctly today (hasAnyPhysicalEdition / "книга пока недоступна").
+  const books = works.map((row: any) => {
+    const candidateEditions = editionsByWork.get(row.id) ?? [];
+    const qualifyingEditions = buildQualifyingEditions(candidateEditions, filesByEdition, rightsByEdition);
+    return buildBookFromWork(row, qualifyingEditions, authorNameById);
+  });
+
+  const authors = (authorRows ?? []).map((a: any) => ({
+    id: a.id,
+    name: a.name,
+    alternativeNames: a.alternative_names ?? [],
+    birthYear: a.birth_year ?? null,
+    deathYear: a.death_year ?? null
+  }));
+
+  return jsonResponse({ books, authors });
+
+}
+
 Deno.serve(async (req: Request) => {
 
   if (req.method === "OPTIONS") {
@@ -183,6 +433,23 @@ Deno.serve(async (req: Request) => {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   const url = new URL(req.url);
+
+  // USER LIBRARY PHASE: a completely separate, self-contained request
+  // mode -- see handleWorkIdsLookup's own comment. Branches off before
+  // any of the default path's q/language/jurisdiction/pagination
+  // parsing below, and never touches library_catalog_search /
+  // library_language_facets -- the default path (workIds absent) is
+  // byte-for-byte unchanged.
+  const workIdsParam = (url.searchParams.get("workIds") ?? "").trim();
+  if (workIdsParam) {
+    try {
+      return await handleWorkIdsLookup(supabase, req, workIdsParam);
+    } catch (error) {
+      console.error("omnia-library-catalog workIds lookup failed:", error);
+      return serverErrorResponse();
+    }
+  }
+
   const rawQuery = (url.searchParams.get("q") ?? "").trim();
   const language = (url.searchParams.get("language") ?? "").trim();
   const jurisdiction = (url.searchParams.get("jurisdiction") ?? "").trim();
@@ -340,90 +607,20 @@ Deno.serve(async (req: Request) => {
       .map((row: any) => {
 
         const candidateEditions = editionsByWork.get(row.id) ?? [];
-
-        const qualifyingEditions = candidateEditions
-          .map((edition: any) => {
-
-            const readyFormats = new Set(
-              (filesByEdition.get(edition.id) ?? []).map((file: any) => file.format as string)
-            );
-            const editionRights = rightsByEdition.get(edition.id) ?? [];
-
-            if (editionRights.length === 0) return null;
-
-            // Prefer anki-json (this project's own normalized content)
-            // over epub/plaintext, same priority as the frontend reader --
-            // only ONE file entry per edition here, matching every
-            // existing seed Edition's own convention (one edition, one
-            // file). In practice the reader_ready file filter above
-            // (kind=normalized, format=anki-json) already narrows this to
-            // anki-json specifically; the priority list is kept so this
-            // still degrades sensibly if that filter is ever loosened.
-            const bestFormat = FORMAT_PRIORITY.find(format => readyFormats.has(format));
-            if (!bestFormat) return null;
-
-            // editions.source_id / editions.external_id are real columns
-            // on the live schema -- use them when present rather than
-            // always reporting the generic "anki-catalog" placeholder.
-            // "anki-catalog" is now only a fallback for the genuine edge
-            // case of a ready edition that itself has no recorded
-            // source_id, not the default for every internal-catalog
-            // edition regardless of its real provenance.
-            const hasSourceId = typeof edition.source_id === "string" && edition.source_id.trim().length > 0;
-            const sourceId = hasSourceId ? edition.source_id : "anki-catalog";
-            const externalIds = hasSourceId && edition.external_id
-              ? { [edition.source_id]: edition.external_id as string }
-              : {};
-
-            return {
-              id: edition.id,
-              language: edition.language,
-              isOriginal: Boolean(edition.is_original),
-              translatorName: edition.translator_name ?? null,
-              rights: editionRights.map((assertion: any) => ({
-                status: assertion.status,
-                jurisdiction: assertion.jurisdiction ?? null
-              })),
-              sourceId,
-              externalIds,
-              files: [{
-                format: bestFormat,
-                url: `${BOOK_CONTENT_ENDPOINT}?editionId=${encodeURIComponent(edition.id)}`
-              }]
-            };
-
-          })
-          .filter((edition): edition is NonNullable<typeof edition> => edition !== null);
+        const qualifyingEditions = buildQualifyingEditions(candidateEditions, filesByEdition, rightsByEdition);
 
         // catalog_ready implies at least one qualifying edition should
         // exist; if this particular work has none by the time of this
         // detail-fetch (a data-consistency edge case, not expected in
         // normal operation), it is simply left out of this page rather
         // than shown with an empty editions array a visitor could open
-        // into a book with nothing to read.
+        // into a book with nothing to read. (Unlike this same shaping
+        // logic's other caller, handleWorkIdsLookup above, which keeps a
+        // zero-qualifying-edition Work on purpose -- see that function's
+        // own comment for why My Library needs the opposite rule here.)
         if (qualifyingEditions.length === 0) return null;
 
-        return {
-          id: row.id,
-          title: row.title,
-          originalTitle: row.original_title ?? null,
-          alternativeTitles: row.alternative_titles ?? [],
-          authorId: row.author_id ?? "",
-          authorName: authorNameById.get(row.author_id) ?? "",
-          originalLanguage: row.original_language ?? "",
-          availableLanguages: row.available_languages ?? [],
-          publicationYear: row.publication_year ?? null,
-          countryId: row.country_id ?? null,
-          centuryId: row.century_id ?? null,
-          epochId: row.epoch_id ?? null,
-          movementId: row.movement_id ?? null,
-          genreIds: row.genre_ids ?? [],
-          themeIds: row.theme_ids ?? [],
-          description: row.description ?? "",
-          cover: row.cover ?? null,
-          editions: qualifyingEditions,
-          collectionIds: row.collection_ids ?? []
-        };
+        return buildBookFromWork(row, qualifyingEditions, authorNameById);
 
       })
       .filter((book): book is NonNullable<typeof book> => book !== null);

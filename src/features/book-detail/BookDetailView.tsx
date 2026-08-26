@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getBookById,
   getAuthorById,
@@ -16,6 +16,15 @@ import type { ReadableEdition } from "../../catalog/toReaderBook";
 import { useReaderJurisdiction } from "./readerJurisdiction";
 import { CoverFallback } from "../shared/CoverFallback";
 import { LANGUAGE_OPTIONS } from "../../catalog/languages";
+import { useAuth } from "../../auth/supabaseAuth";
+import {
+  addToLibrary,
+  getLibraryEntry,
+  recordRealRead,
+  removeFromLibrary,
+  setLibraryStatus as setLibraryStatusApi
+} from "../../api/userLibrary";
+import type { LibraryEntry, LibraryStatus } from "../../api/userLibrary";
 
 interface BookDetailViewProps {
   bookId: string;
@@ -23,6 +32,26 @@ interface BookDetailViewProps {
   onOpenBook: (book: ReaderBook) => void;
   onOpenAuthorDetail: (authorId: string) => void;
   onOpenCollection: (collectionId: string) => void;
+  // USER LIBRARY PHASE: routes a signed-out visitor to the existing
+  // auth home (Profile) when they try to save a Work -- the same
+  // destination AccountMenu's own "Создать аккаунт"/"Войти" buttons
+  // already use, so this reuses the existing auth flow rather than
+  // inventing a second one (requirement #4). App.tsx wires this to
+  // navigate to the "profile" view.
+  onRequireSignIn: () => void;
+  // USER LIBRARY PHASE (requirement #9): when arriving here from a
+  // saved Work in My Library, the visitor's last-read language/edition
+  // -- used only to SEED the same selectedLanguage/selectedEditionId
+  // state this view already had (see below), never to open the Reader
+  // directly. This still goes through the exact same
+  // listReadableEditions/effectiveEditionId rights gate as every other
+  // entry point: if the saved edition is no longer readable for the
+  // current jurisdiction, effectiveEditionId below simply falls back
+  // to the first available edition instead -- Book Detail is shown
+  // either way, satisfying "no bypass" (requirement #16/#9) without a
+  // separate "Продолжить" control that would need its own rights
+  // check duplicated elsewhere.
+  initialEdition?: { editionId: string; language: string } | null;
 }
 
 function labelFor(id: string | null, dictionary: Array<{ id: string; label: string }>): string | null {
@@ -121,7 +150,114 @@ function JurisdictionPrompt({ readerJurisdiction, onChange }: JurisdictionPrompt
   );
 }
 
-export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail, onOpenCollection }: BookDetailViewProps) {
+// USER LIBRARY PHASE: secondary, quiet library-membership control --
+// deliberately separate from the primary "Читать" button (requirement
+// #3: "не панель кнопок", the main CTA stays primary). Membership is
+// Work-level and independent of whether the Work currently has a
+// readable edition (requirement #16) -- the caller renders this
+// regardless of which of the three "Читать" branches is active.
+type LibraryActionStatus = "idle" | "loading" | "saving" | "removing" | "error";
+
+interface LibraryActionProps {
+  isAuthenticated: boolean;
+  entry: LibraryEntry | null;
+  status: LibraryActionStatus;
+  error: string | null;
+  onAdd: () => void;
+  onRemove: () => void;
+  onSetStatus: (status: LibraryStatus) => void;
+  onRequireSignIn: () => void;
+}
+
+const STATUS_LABELS: Record<LibraryStatus, string> = {
+  want_to_read: "Хочу прочитать",
+  reading: "Читаю",
+  finished: "Прочитано"
+};
+
+function LibraryAction({
+  isAuthenticated,
+  entry,
+  status,
+  error,
+  onAdd,
+  onRemove,
+  onSetStatus,
+  onRequireSignIn
+}: LibraryActionProps) {
+
+  if (!isAuthenticated) {
+    return (
+      <div className="book-detail-library-action">
+        <button type="button" className="text-link" onClick={onRequireSignIn}>
+          Добавить в библиотеку
+        </button>
+      </div>
+    );
+  }
+
+  // Nothing rendered while the initial getLibraryEntry() lookup is in
+  // flight -- requirement #13 ("не должно мигать"): showing "Добавить"
+  // and then immediately swapping to "В библиотеке" a moment later
+  // reads as a flicker/bug; a brief blank beat while the real state
+  // loads, then the single correct label, does not.
+  if (status === "loading") {
+    return <div className="book-detail-library-action" />;
+  }
+
+  return (
+    <div className="book-detail-library-action">
+
+      {entry ? (
+        <>
+          <span className="book-detail-library-state">В библиотеке</span>
+          <select
+            className="book-detail-library-status-select"
+            aria-label="Статус чтения"
+            value={entry.status}
+            disabled={status === "saving" || status === "removing"}
+            onChange={event => onSetStatus(event.target.value as LibraryStatus)}
+          >
+            {(Object.keys(STATUS_LABELS) as LibraryStatus[]).map(value => (
+              <option key={value} value={value}>{STATUS_LABELS[value]}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="text-link"
+            onClick={onRemove}
+            disabled={status === "saving" || status === "removing"}
+          >
+            {status === "removing" ? "Удаление…" : "Убрать из библиотеки"}
+          </button>
+        </>
+      ) : (
+        <button type="button" className="text-link" onClick={onAdd} disabled={status === "saving"}>
+          {status === "saving" ? "Сохранение…" : "Добавить в библиотеку"}
+        </button>
+      )}
+
+      {status === "error" && error && (
+        <p className="book-detail-library-error">
+          {error}{" "}
+          <button type="button" className="text-link" onClick={entry ? onRemove : onAdd}>Повторить</button>
+        </p>
+      )}
+
+    </div>
+  );
+
+}
+
+export function BookDetailView({
+  bookId,
+  onBack,
+  onOpenBook,
+  onOpenAuthorDetail,
+  onOpenCollection,
+  onRequireSignIn,
+  initialEdition
+}: BookDetailViewProps) {
 
   const book = getBookById(bookId);
 
@@ -132,6 +268,134 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
   const [readerJurisdiction, setReaderJurisdiction] = useReaderJurisdiction();
   const [coverFailed, setCoverFailed] = useState(false);
 
+  const { isAuthenticated, user } = useAuth();
+  const [libraryEntry, setLibraryEntry] = useState<LibraryEntry | null>(null);
+  const [libraryActionStatus, setLibraryActionStatus] = useState<LibraryActionStatus>("idle");
+  const [libraryActionError, setLibraryActionError] = useState<string | null>(null);
+
+  // Loads the current membership row (if any) for THIS Work whenever
+  // the visitor lands on a different book, or signs in/out while
+  // already here. Guests never issue this request at all (getLibraryEntry
+  // would just throw "Не авторизован" -- checked here instead of relying
+  // on that throw, so signed-out is a clean, silent "not saved" state).
+  useEffect(() => {
+
+    if (!book) return;
+
+    if (!isAuthenticated) {
+      setLibraryEntry(null);
+      setLibraryActionStatus("idle");
+      setLibraryActionError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLibraryActionStatus("loading");
+
+    getLibraryEntry(book.id)
+      .then(entry => {
+        if (cancelled) return;
+        setLibraryEntry(entry);
+        setLibraryActionStatus("idle");
+      })
+      .catch(error => {
+        if (cancelled) return;
+        console.error("getLibraryEntry failed:", error);
+        setLibraryEntry(null);
+        setLibraryActionStatus("idle");
+      });
+
+    return () => { cancelled = true; };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book?.id, isAuthenticated]);
+
+  async function handleAddToLibrary(): Promise<void> {
+
+    if (!book || !user) return;
+
+    const previous = libraryEntry;
+    const nowIso = new Date().toISOString();
+
+    // Optimistic UI (requirement #13) -- shows "В библиотеке" the
+    // instant the visitor clicks, rolled back to the previous state
+    // (null, here) if the request actually fails below.
+    setLibraryActionStatus("saving");
+    setLibraryActionError(null);
+    setLibraryEntry({
+      id: "optimistic",
+      workId: book.id,
+      status: "want_to_read",
+      addedAt: nowIso,
+      updatedAt: nowIso,
+      lastEditionId: null,
+      lastLanguage: null
+    });
+
+    try {
+      await addToLibrary(user.id, book.id);
+    } catch (error) {
+      setLibraryEntry(previous);
+      setLibraryActionStatus("error");
+      setLibraryActionError((error as Error).message);
+      return;
+    }
+
+    // addToLibrary itself returns no row (return=minimal) -- re-fetch
+    // the canonical one so the id/timestamps shown/used afterwards are
+    // real, not the optimistic placeholder above.
+    try {
+      const fresh = await getLibraryEntry(book.id);
+      setLibraryEntry(fresh);
+    } catch {
+      // The write already succeeded -- a failed re-fetch just means the
+      // optimistic placeholder stays on screen a little longer; not
+      // worth surfacing as an error for an action that already worked.
+    }
+    setLibraryActionStatus("idle");
+
+  }
+
+  async function handleRemoveFromLibrary(): Promise<void> {
+
+    if (!book) return;
+
+    const previous = libraryEntry;
+    setLibraryActionStatus("removing");
+    setLibraryActionError(null);
+    setLibraryEntry(null);
+
+    try {
+      await removeFromLibrary(book.id);
+      setLibraryActionStatus("idle");
+    } catch (error) {
+      setLibraryEntry(previous);
+      setLibraryActionStatus("error");
+      setLibraryActionError((error as Error).message);
+    }
+
+  }
+
+  async function handleSetLibraryStatus(status: LibraryStatus): Promise<void> {
+
+    if (!book || !libraryEntry) return;
+
+    const previous = libraryEntry;
+    setLibraryEntry({ ...libraryEntry, status, updatedAt: new Date().toISOString() });
+    setLibraryActionStatus("saving");
+    setLibraryActionError(null);
+
+    try {
+      await setLibraryStatusApi(book.id, status);
+      setLibraryActionStatus("idle");
+    } catch (error) {
+      setLibraryEntry(previous);
+      setLibraryActionStatus("error");
+      setLibraryActionError((error as Error).message);
+    }
+
+  }
+
   // The visitor's own explicit choices, when they've made one. Both
   // start unset -- on first render (and whenever a choice no longer
   // applies to the current book, see effectiveLanguage/
@@ -141,8 +405,8 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
   // means a fresh mount of this component (e.g. navigating to a
   // different book id) never needs an extra effect just to reset these
   // -- an invalid selection for the new book is simply never used.
-  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
-  const [selectedEditionId, setSelectedEditionId] = useState<string | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(initialEdition?.language ?? null);
+  const [selectedEditionId, setSelectedEditionId] = useState<string | null>(initialEdition?.editionId ?? null);
 
   if (!book) {
     return <NotFound onBack={onBack} />;
@@ -317,7 +581,26 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => onOpenBook(toReaderBook(book, selectedResolved, readerJurisdiction ?? undefined))}
+                onClick={() => {
+                  onOpenBook(toReaderBook(book, selectedResolved, readerJurisdiction ?? undefined));
+                  // USER LIBRARY PHASE (requirements #9/#10): fired only
+                  // once the visitor actually opens the Reader on a real
+                  // edition -- never merely from viewing Book Detail.
+                  // Best-effort/fire-and-forget: a failure here must
+                  // never block the Reader, which is already opening via
+                  // onOpenBook above (see recordRealRead's own comment).
+                  if (isAuthenticated) {
+                    recordRealRead(book.id, selectedResolved.edition.id, selectedResolved.edition.language)
+                      .catch(error => console.error("recordRealRead failed:", error));
+                    setLibraryEntry(prev => prev ? {
+                      ...prev,
+                      status: prev.status === "want_to_read" ? "reading" : prev.status,
+                      lastEditionId: selectedResolved.edition.id,
+                      lastLanguage: selectedResolved.edition.language,
+                      updatedAt: new Date().toISOString()
+                    } : prev);
+                  }
+                }}
               >
                 Читать
               </button>
@@ -327,6 +610,17 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
               <p className="book-detail-unavailable">Книга пока недоступна для чтения</p>
             )}
           </div>
+
+          <LibraryAction
+            isAuthenticated={isAuthenticated}
+            entry={libraryEntry}
+            status={libraryActionStatus}
+            error={libraryActionError}
+            onAdd={handleAddToLibrary}
+            onRemove={handleRemoveFromLibrary}
+            onSetStatus={handleSetLibraryStatus}
+            onRequireSignIn={onRequireSignIn}
+          />
 
         </div>
 

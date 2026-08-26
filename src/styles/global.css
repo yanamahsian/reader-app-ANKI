@@ -2040,6 +2040,46 @@ button.text-link {
   margin: 26px 0 34px;
 }
 
+/* USER LIBRARY PHASE: the secondary "Добавить в библиотеку" control --
+   deliberately quiet (text-link scale, not a second primary-button) so
+   "Читать" stays the one obvious call to action (requirement #3). */
+.book-detail-library-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+
+  margin: -14px 0 34px;
+
+  min-height: 20px;
+}
+
+.book-detail-library-state {
+  color: rgba(202, 160, 88, 0.85);
+
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.book-detail-library-status-select {
+  padding: 4px 8px;
+
+  background: transparent;
+  border: 1px solid var(--home-border);
+  color: var(--home-text);
+
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.book-detail-library-error {
+  flex-basis: 100%;
+  margin: 0;
+
+  color: rgba(220, 120, 110, 0.9);
+  font-size: 12px;
+}
+
 .book-detail-unavailable {
   margin: 0;
 
@@ -2508,6 +2548,25 @@ button.text-link {
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5);
 }
 
+.account-menu-identity {
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+
+  border-bottom: 1px solid var(--home-border);
+}
+
+.account-menu-identity p {
+  margin: 0;
+
+  color: var(--home-muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .account-menu-guest {
   padding-bottom: 18px;
   margin-bottom: 14px;
@@ -2644,6 +2703,19 @@ button.text-link {
 
   font-size: 11px;
   letter-spacing: 0.02em;
+}
+
+/* USER LIBRARY PHASE: quiet per-card status text (e.g. "Читаю"),
+   MyLibraryView only -- every other caller of LibraryBookCard omits
+   the `badge` prop and renders exactly as before this addition. */
+.library-book-badge {
+  margin-top: 6px;
+
+  color: rgba(202, 160, 88, 0.85);
+
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* Same dark burgundy/gold-frame formula wherever a real cover is
@@ -2798,6 +2870,136 @@ button.text-link {
 
   color: var(--home-muted);
   font-size: 13px;
+}
+
+/* USER LIBRARY PHASE: My Library's status tabs (Все/Читаю/Хочу
+   прочитать/Прочитано) -- a plain underline-tab row, matching this
+   project's existing text-link/eyebrow vocabulary rather than a boxed
+   SaaS-style segmented control. */
+.my-library-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+
+  padding-bottom: 18px;
+  margin-bottom: 4px;
+
+  border-bottom: 1px solid var(--home-border);
+}
+
+.my-library-tab {
+  padding: 4px 0;
+
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+
+  color: var(--home-muted);
+
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.my-library-tab-active {
+  color: var(--home-gold);
+  border-bottom-color: var(--home-gold);
+}
+
+.my-library-error {
+  margin: 0;
+
+  color: rgba(220, 120, 110, 0.9);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* USER LIBRARY PHASE: Profile's real sign-in/sign-up form. */
+.profile-auth-form-wrap {
+  max-width: 340px;
+}
+
+.profile-auth-tabs {
+  display: flex;
+  gap: 22px;
+
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+
+  border-bottom: 1px solid var(--home-border);
+}
+
+.profile-auth-tab {
+  padding: 2px 0;
+
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+
+  color: var(--home-muted);
+
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.profile-auth-tab-active {
+  color: var(--home-gold);
+  border-bottom-color: var(--home-gold);
+}
+
+.profile-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-auth-form label {
+  margin-top: 12px;
+
+  color: var(--home-muted);
+
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.profile-auth-form input {
+  padding: 10px 2px;
+
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--home-border);
+  color: var(--home-text);
+
+  font-size: 15px;
+}
+
+.profile-auth-form input:focus {
+  outline: none;
+  border-bottom-color: var(--home-gold);
+}
+
+.profile-auth-form .primary-button {
+  margin-top: 22px;
+  align-self: flex-start;
+}
+
+.profile-auth-error {
+  margin: 10px 0 0;
+
+  color: rgba(220, 120, 110, 0.9);
+  font-size: 13px;
+}
+
+.profile-auth-note {
+  max-width: 420px;
+
+  color: rgba(246, 237, 224, 0.86);
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 17px;
+  line-height: 1.5;
 }
 
 .settings-section {
