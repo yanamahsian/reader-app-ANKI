@@ -1,5 +1,6 @@
 name: Apply user library patch
 
+# Retry after completing the verified patch transfer.
 on:
   push:
     branches:
