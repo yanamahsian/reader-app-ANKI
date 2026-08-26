@@ -5,6 +5,9 @@ const SOURCE_WIKISOURCE = "wikisource";
 const GUTENDEX_BASE = "https://gutendex.com/books";
 const WIKIDATA_LANGUAGES = ["en","ru","uk","de","fr","es","it","pl","pt","nl","sv","fi","cs","ro","hu","da","no","el","zh","ja","tr","bg","sr","hr","sk","sl","ca","eo","la"].join("|");
 const LEADING_ARTICLE = /^(?:the|a|an|der|die|das|ein|eine|einen|einem|einer|le|la|les|un|une|des|du|el|los|las|una|il|lo|i|gli|o|os|as|um|uma)\s+/iu;
+const PRESERVED_CANDIDATE_STATUSES = new Set(["processing", "review", "skipped"]);
+const GUTENDEX_MAX_PAGES = 25;
+const GUTENDEX_WALL_CLOCK_BUDGET_MS = 45_000;
 
 type WorkRow = {
   id: string;
@@ -109,45 +112,50 @@ function wikilangFromSite(site: string): string | null {
   return match ? match[1] : null;
 }
 
-function latinSearchTerms(names: string[]) {
+function resolveCandidateStatus(existingEditionReady: boolean, oldStatus: string | undefined | null, freshDefault: string): string {
+  if (existingEditionReady) return "ready";
+  if (oldStatus === "ready") return "ready";
+  if (oldStatus && PRESERVED_CANDIDATE_STATUSES.has(oldStatus)) return oldStatus;
+  return freshDefault;
+}
+
+function bestLatinSearchTerm(names: string[]): string | null {
   const candidates = names
     .map(name => name.trim())
     .filter(name => /[A-Za-zÀ-ž]/u.test(name) && !/[А-Яа-яЁё一-龯ぁ-ゟ゠-ヿ]/u.test(name))
     .filter(name => nameTokens(name).length >= 2)
     .sort((a, b) => nameTokens(a).length - nameTokens(b).length || a.length - b.length);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const name of candidates) {
-    const n = normalize(name);
-    if (seen.has(n)) continue;
-    seen.add(n);
-    out.push(name);
-    if (out.length >= 3) break;
-  }
-  return out;
+  return candidates[0] ?? null;
 }
 
 async function fetchGutendexByAuthor(knownNames: string[]) {
-  const terms = latinSearchTerms(knownNames);
+  const term = bestLatinSearchTerm(knownNames);
   const byId = new Map<number, GutendexBook>();
   let requests = 0;
-  for (const term of terms) {
-    let next: string | null = `${GUTENDEX_BASE}?search=${encodeURIComponent(term)}`;
-    let page = 0;
-    while (next && page < 30) {
-      const r = await fetch(next, { headers: { "User-Agent": "ANKI/1.0 multilingual enrichment" } });
-      requests++;
-      if (!r.ok) throw new Error(`Gutendex HTTP ${r.status} for ${term}`);
-      const data = await r.json();
-      for (const book of (data?.results ?? []) as GutendexBook[]) {
-        const authorOk = (book.authors ?? []).some(a => typeof a?.name === "string" && authorMatches(a.name!, knownNames));
-        if (authorOk && Number.isFinite(book.id)) byId.set(book.id, book);
-      }
-      next = typeof data?.next === "string" ? data.next : null;
-      page++;
+  let truncated = false;
+  if (!term) return { books: [], term, requests, truncated };
+
+  const startedAt = Date.now();
+  let next: string | null = `${GUTENDEX_BASE}?search=${encodeURIComponent(term)}`;
+  let page = 0;
+  while (next && page < GUTENDEX_MAX_PAGES) {
+    if (Date.now() - startedAt > GUTENDEX_WALL_CLOCK_BUDGET_MS) {
+      truncated = true;
+      break;
     }
+    const r = await fetch(next, { headers: { "User-Agent": "ANKI/1.0 multilingual enrichment" } });
+    requests++;
+    if (!r.ok) throw new Error(`Gutendex HTTP ${r.status} for ${term}`);
+    const data = await r.json();
+    for (const book of (data?.results ?? []) as GutendexBook[]) {
+      const authorOk = (book.authors ?? []).some(a => typeof a?.name === "string" && authorMatches(a.name!, knownNames));
+      if (authorOk && Number.isFinite(book.id)) byId.set(book.id, book);
+    }
+    next = typeof data?.next === "string" ? data.next : null;
+    page++;
   }
-  return { books: Array.from(byId.values()), terms, requests };
+  if (next) truncated = true;
+  return { books: Array.from(byId.values()), term, requests, truncated };
 }
 
 async function fetchWikidata(ids: string[]) {
@@ -206,13 +214,16 @@ Deno.serve(async (req: Request) => {
     if (!value) return;
     for (const variant of titleVariants(value)) {
       const set = aliasToWorks.get(variant) ?? new Set<string>();
-      set.add(workId); aliasToWorks.set(variant, set);
+      set.add(workId);
+      aliasToWorks.set(variant, set);
     }
   };
   for (const work of workRows) {
-    addAlias(work.id, work.title); addAlias(work.id, work.original_title);
+    addAlias(work.id, work.title);
+    addAlias(work.id, work.original_title);
     for (const alt of work.alternative_titles ?? []) addAlias(work.id, alt);
-    const qid = qidByWork.get(work.id); const entity = qid ? entities[qid] : null;
+    const qid = qidByWork.get(work.id);
+    const entity = qid ? entities[qid] : null;
     if (entity) {
       for (const label of Object.values(entity.labels ?? {}) as any[]) addAlias(work.id, label?.value);
       for (const list of Object.values(entity.aliases ?? {}) as any[][]) for (const alias of list ?? []) addAlias(work.id, alias?.value);
@@ -223,63 +234,140 @@ Deno.serve(async (req: Request) => {
   const { data: existingCandidates } = await sb.from("multilingual_candidates").select("source_id,external_id,work_id,status,edition_id").eq("author_id", authorId);
   const existingCandidateByKey = new Map<string, any>();
   for (const c of existingCandidates ?? []) existingCandidateByKey.set(`${c.source_id}|${c.external_id}|${c.work_id}`, c);
+
   const { data: existingEditions, error: existingEditionsError } = await sb.from("editions").select("id,work_id,language,source_id,external_id,ingestion_status").in("work_id", workIds);
   if (existingEditionsError) return json({ error: existingEditionsError.message }, 500);
-  const readyLanguagesByWork = new Map<string, Set<string>>();
   const editionBySourceExternal = new Map<string, any>();
   for (const e of existingEditions ?? []) {
-    if (e.ingestion_status === "ready") {
-      const set = readyLanguagesByWork.get(e.work_id) ?? new Set<string>(); set.add(e.language); readyLanguagesByWork.set(e.work_id, set);
-    }
     if (e.source_id && e.external_id) editionBySourceExternal.set(`${e.source_id}|${e.external_id}`, e);
   }
 
-  const rows: CandidateRow[] = []; const now = new Date().toISOString();
-  let wikidataSitelinks = 0; let wikisourceQueuedForReview = 0;
+  const rows: CandidateRow[] = [];
+  const now = new Date().toISOString();
+  let wikidataSitelinks = 0;
+  let wikisourceQueuedForReview = 0;
+
   for (const work of workRows) {
-    const qid = qidByWork.get(work.id); const entity = qid ? entities[qid] : null;
+    const qid = qidByWork.get(work.id);
+    const entity = qid ? entities[qid] : null;
     if (!qid || !entity) continue;
-    const readyLanguages = readyLanguagesByWork.get(work.id) ?? new Set<string>();
     for (const [site, link] of Object.entries(entity.sitelinks ?? {}) as Array<[string, any]>) {
-      const language = wikilangFromSite(site); const title = typeof link?.title === "string" ? link.title.trim() : "";
+      const language = wikilangFromSite(site);
+      const title = typeof link?.title === "string" ? link.title.trim() : "";
       if (!language || !title) continue;
-      wikidataSitelinks++; if (readyLanguages.has(language)) continue;
+      wikidataSitelinks++;
       const externalId = `${language}:${title}`;
       const existingEdition = editionBySourceExternal.get(`${SOURCE_WIKISOURCE}|${externalId}`);
       const old = existingCandidateByKey.get(`${SOURCE_WIKISOURCE}|${externalId}|${work.id}`);
-      const status = existingEdition?.work_id === work.id && existingEdition?.ingestion_status === "ready" ? "ready" : (old?.status === "ready" ? "ready" : "review");
-      rows.push({ work_id: work.id, author_id: authorId, source_id: SOURCE_WIKISOURCE, external_id: externalId, language, title, work_qid: qid, status, rights_status: "unknown", jurisdiction: null, provider_metadata: { workQid: qid, wikiLanguage: language, pageTitle: title, identity: "wikidata-sitelink-exact" }, updated_at: now });
+      const existingEditionReady = existingEdition?.work_id === work.id && existingEdition?.ingestion_status === "ready";
+      const status = resolveCandidateStatus(existingEditionReady, old?.status, "review");
+      rows.push({
+        work_id: work.id,
+        author_id: authorId,
+        source_id: SOURCE_WIKISOURCE,
+        external_id: externalId,
+        language,
+        title,
+        work_qid: qid,
+        status,
+        rights_status: "unknown",
+        jurisdiction: null,
+        provider_metadata: { workQid: qid, wikiLanguage: language, pageTitle: title, identity: "wikidata-sitelink-exact" },
+        updated_at: now
+      });
       if (status === "review") wikisourceQueuedForReview++;
     }
   }
 
-  let gutenbergMatched = 0; let gutenbergAmbiguous = 0; let gutenbergAuthorRows = 0;
-  let gutendexTerms: string[] = []; let gutendexRequests = 0;
+  let gutenbergMatched = 0;
+  let gutenbergAmbiguous = 0;
+  let gutenbergAuthorRows = 0;
+  let gutendexTerm: string | null = null;
+  let gutendexRequests = 0;
+  let gutendexTruncated = false;
+
   try {
     const found = await fetchGutendexByAuthor(knownNames);
-    gutendexTerms = found.terms; gutendexRequests = found.requests; gutenbergAuthorRows = found.books.length;
+    gutendexTerm = found.term;
+    gutendexRequests = found.requests;
+    gutendexTruncated = found.truncated;
+    gutenbergAuthorRows = found.books.length;
+
     for (const book of found.books) {
-      const externalId = String(book.id); const title = (book.title ?? "").trim(); if (!externalId || !title) continue;
+      const externalId = String(book.id);
+      const title = (book.title ?? "").trim();
+      if (!externalId || !title) continue;
+
       const matchedWorkIds = new Set<string>();
-      for (const variant of titleVariants(title)) for (const id of aliasToWorks.get(variant) ?? []) matchedWorkIds.add(id);
-      if (matchedWorkIds.size !== 1) { if (matchedWorkIds.size > 1) gutenbergAmbiguous++; continue; }
+      for (const variant of titleVariants(title)) {
+        for (const id of aliasToWorks.get(variant) ?? []) matchedWorkIds.add(id);
+      }
+      if (matchedWorkIds.size !== 1) {
+        if (matchedWorkIds.size > 1) gutenbergAmbiguous++;
+        continue;
+      }
+
       const workId = Array.from(matchedWorkIds)[0];
       const language = (book.languages ?? []).find(Boolean) ?? "en";
       const existingEdition = editionBySourceExternal.get(`${SOURCE_GUTENBERG}|${externalId}`);
-      if (existingEdition && existingEdition.work_id !== workId) { gutenbergAmbiguous++; continue; }
+      if (existingEdition && existingEdition.work_id !== workId) {
+        gutenbergAmbiguous++;
+        continue;
+      }
+
       const old = existingCandidateByKey.get(`${SOURCE_GUTENBERG}|${externalId}|${workId}`);
-      const status = existingEdition?.work_id === workId && existingEdition?.ingestion_status === "ready" ? "ready" : (old?.status === "ready" ? "ready" : "discovered");
-      rows.push({ work_id: workId, author_id: authorId, source_id: SOURCE_GUTENBERG, external_id: externalId, language, title, work_qid: qidByWork.get(workId) ?? null, status, rights_status: "public-domain", jurisdiction: "US", provider_metadata: { titleMatch: "exact-normalized-alias-or-article-stripped", gutendexSearch: true }, updated_at: now });
+      const existingEditionReady = existingEdition?.work_id === workId && existingEdition?.ingestion_status === "ready";
+      const status = resolveCandidateStatus(existingEditionReady, old?.status, "discovered");
+      rows.push({
+        work_id: workId,
+        author_id: authorId,
+        source_id: SOURCE_GUTENBERG,
+        external_id: externalId,
+        language,
+        title,
+        work_qid: qidByWork.get(workId) ?? null,
+        status,
+        rights_status: "public-domain",
+        jurisdiction: "US",
+        provider_metadata: { titleMatch: "exact-normalized-alias-or-article-stripped", gutendexSearch: true },
+        updated_at: now
+      });
       gutenbergMatched++;
     }
-  } catch (error) { console.error("Gutendex multilingual discovery failed", error); }
+  } catch (error) {
+    console.error("Gutendex multilingual discovery failed", error);
+  }
 
-  const deduped = new Map<string, CandidateRow>(); for (const row of rows) deduped.set(`${row.source_id}|${row.external_id}|${row.work_id}`, row);
+  const deduped = new Map<string, CandidateRow>();
+  for (const row of rows) deduped.set(`${row.source_id}|${row.external_id}|${row.work_id}`, row);
   const finalRows = Array.from(deduped.values());
+
   if (finalRows.length) {
     const { error: upsertError } = await sb.from("multilingual_candidates").upsert(finalRows, { onConflict: "source_id,external_id,work_id" });
     if (upsertError) return json({ error: `Candidate upsert failed: ${upsertError.message}` }, 500);
   }
-  const bySource = finalRows.reduce((acc: Record<string, number>, row) => { acc[row.source_id] = (acc[row.source_id] ?? 0) + 1; return acc; }, {});
-  return json({ ok: true, authorId, authorName: author.name, works: workRows.length, worksWithQid: qids.length, wikidataSitelinks, wikisourceQueuedForReview, gutendexTerms, gutendexRequests, gutenbergAuthorRows, gutenbergMatched, gutenbergAmbiguous, storedCandidates: finalRows.length, bySource, rule: "Gutendex author search + exact identity matching; Wikisource QID sitelinks stay rights-review" });
+
+  const bySource = finalRows.reduce((acc: Record<string, number>, row) => {
+    acc[row.source_id] = (acc[row.source_id] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return json({
+    ok: true,
+    authorId,
+    authorName: author.name,
+    works: workRows.length,
+    worksWithQid: qids.length,
+    wikidataSitelinks,
+    wikisourceQueuedForReview,
+    gutendexTerm,
+    gutendexRequests,
+    gutendexTruncated,
+    gutenbergAuthorRows,
+    gutenbergMatched,
+    gutenbergAmbiguous,
+    storedCandidates: finalRows.length,
+    bySource,
+    rule: "Single best-Latin-name Gutendex search + exact identity matching at edition level; same-language translations remain eligible; Wikisource QID sitelinks stay rights-review; processing/review/skipped candidates are never reset by rediscovery"
+  });
 });
