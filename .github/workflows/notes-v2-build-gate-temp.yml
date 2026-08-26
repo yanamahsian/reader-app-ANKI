@@ -1,6 +1,7 @@
 name: Notes v2 build gate
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
 
