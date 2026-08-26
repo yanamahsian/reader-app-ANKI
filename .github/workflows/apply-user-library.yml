@@ -1,0 +1,83 @@
+name: Apply user library patch
+
+on:
+  push:
+    branches:
+      - user-library-transfer-20260826
+    paths:
+      - '.github/workflows/apply-user-library.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout transfer branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact base
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "8f9b68b5b3e82e9963a20de4208c127126d92593"
+
+      - name: Assemble uploaded patch
+        run: |
+          cat .tmp/userlib.part00 .tmp/userlib.rest00 .tmp/userlib.rest01 .tmp/userlib.rest02 .tmp/userlib.rest03 .tmp/userlib.rest04 > /tmp/userlib.b64
+          test "$(wc -c < /tmp/userlib.b64)" = "38308"
+          base64 -d /tmp/userlib.b64 > /tmp/userlib.patch.gz
+          gzip -t /tmp/userlib.patch.gz
+          gunzip -c /tmp/userlib.patch.gz > /tmp/user-library.patch
+          test "$(wc -c < /tmp/user-library.patch)" = "99464"
+
+      - name: Switch to clean main base
+        run: |
+          git checkout -B user-library-clean-20260826 origin/main
+          git clean -fdx
+
+      - name: Validate patch
+        run: git apply --check /tmp/user-library.patch
+
+      - name: Apply patch
+        run: git apply /tmp/user-library.patch
+
+      - name: Verify exact scope
+        run: |
+          git add -A
+          expected=$(printf '%s\n' \
+            'src/App.tsx' \
+            'src/api/readerProgress.ts' \
+            'src/api/userLibrary.ts' \
+            'src/app/AccountMenu.tsx' \
+            'src/auth/supabaseAuth.ts' \
+            'src/catalog/toReaderBook.ts' \
+            'src/features/book-detail/BookDetailView.tsx' \
+            'src/features/my-library/MyLibraryView.tsx' \
+            'src/features/profile/ProfileView.tsx' \
+            'src/features/reader/ReaderView.tsx' \
+            'src/features/reader/progressStore/supabaseProgressStore.ts' \
+            'src/features/shared/LibraryBookCard.tsx' \
+            'src/styles/global.css' \
+            'supabase/functions/omnia-library-catalog/index.ts' | sort)
+          actual=$(git diff --cached --name-only | sort)
+          test "$actual" = "$expected"
+          git diff --cached --check
+
+      - name: Install dependencies
+        run: npm install --no-package-lock
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit clean patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Build real user library'
+          git push --force origin HEAD:user-library-clean-20260826
