@@ -11,9 +11,11 @@ import {
   themes
 } from "../../catalog";
 import type { Book as ReaderBook } from "../reader/engine/types";
-import { pickPreferredEditionAndFile, toReaderBook, hasAnyPhysicalEdition } from "../../catalog/toReaderBook";
+import { listReadableEditions, toReaderBook, hasAnyPhysicalEdition } from "../../catalog/toReaderBook";
+import type { ReadableEdition } from "../../catalog/toReaderBook";
 import { useReaderJurisdiction } from "./readerJurisdiction";
 import { CoverFallback } from "../shared/CoverFallback";
+import { LANGUAGE_OPTIONS } from "../../catalog/languages";
 
 interface BookDetailViewProps {
   bookId: string;
@@ -32,6 +34,15 @@ function labelsFor(ids: string[], dictionary: Array<{ id: string; label: string 
   return ids
     .map(id => dictionary.find(term => term.id === id)?.label)
     .filter((label): label is string => Boolean(label));
+}
+
+// Reuses the same human-readable names as the Home/Library language
+// filters (catalog/languages.ts) rather than a third, separately
+// hand-typed list -- falls back to the raw code itself (e.g. an
+// ingested language not yet in that shared list) rather than hiding
+// the option or showing something misleading.
+function languageLabel(code: string): string {
+  return LANGUAGE_OPTIONS.find(option => option.value === code)?.label ?? code;
 }
 
 interface MetaRowProps {
@@ -121,6 +132,18 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
   const [readerJurisdiction, setReaderJurisdiction] = useReaderJurisdiction();
   const [coverFailed, setCoverFailed] = useState(false);
 
+  // The visitor's own explicit choices, when they've made one. Both
+  // start unset -- on first render (and whenever a choice no longer
+  // applies to the current book, see effectiveLanguage/
+  // effectiveEditionId below) a real default is derived fresh from
+  // this book's own genuinely readable editions rather than carried
+  // over from whatever the previous book happened to have. This also
+  // means a fresh mount of this component (e.g. navigating to a
+  // different book id) never needs an extra effect just to reset these
+  // -- an invalid selection for the new book is simply never used.
+  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
+  const [selectedEditionId, setSelectedEditionId] = useState<string | null>(null);
+
   if (!book) {
     return <NotFound onBack={onBack} />;
   }
@@ -137,12 +160,63 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
   const genreLabels = labelsFor(book.genreIds, genres);
   const themeLabels = labelsFor(book.themeIds, themes);
 
-  const resolved = pickPreferredEditionAndFile(book, undefined, readerJurisdiction ?? undefined);
+  // The real, non-decorative truth this Work can actually be read in --
+  // never book.availableLanguages, which is catalog/browse metadata
+  // only and has been proven to claim a language (e.g. `ru`) that has
+  // no genuinely readable edition behind it. Every entry here already
+  // passed the same rights/jurisdiction/format gate
+  // pickPreferredEditionAndFile itself enforces (see toReaderBook.ts) --
+  // if a language has no qualifying edition for this visitor's
+  // jurisdiction, it simply doesn't appear as an option at all, rather
+  // than appearing and then failing silently.
+  const readableEditions = listReadableEditions(book, readerJurisdiction ?? undefined);
+
+  // Preserves the Work's own edition order (never alphabetized/sorted
+  // by this view) while listing each language once -- multiple
+  // editions in the same language are NOT collapsed here, only the
+  // language list itself is deduplicated; editionsForLanguage below
+  // keeps every one of them.
+  const availableLanguages = Array.from(new Set(readableEditions.map(re => re.edition.language)));
+
+  // Default language: the visitor's own explicit pick, if it's still a
+  // real option for this book; otherwise the original language, if
+  // it's actually readable; otherwise whichever readable language
+  // happens to come first. Never invented, never a blind
+  // highest-quality-source guess across languages the way the old
+  // resolver worked.
+  const effectiveLanguage = selectedLanguage && availableLanguages.includes(selectedLanguage)
+    ? selectedLanguage
+    : (availableLanguages.includes(book.originalLanguage) ? book.originalLanguage : availableLanguages[0] ?? null);
+
+  const editionsForLanguage: ReadableEdition[] = effectiveLanguage
+    ? readableEditions.filter(re => re.edition.language === effectiveLanguage)
+    : [];
+
+  // Default edition within that language: the visitor's own pick, if
+  // it still belongs to the current language selection; otherwise the
+  // first qualifying edition in the Work's own order. A language
+  // change (handleLanguageSelect below) always clears selectedEditionId
+  // so this never carries an id from one language over into another by
+  // accident.
+  const effectiveEditionId = selectedEditionId && editionsForLanguage.some(re => re.edition.id === selectedEditionId)
+    ? selectedEditionId
+    : editionsForLanguage[0]?.edition.id ?? null;
+
+  const selectedResolved = editionsForLanguage.find(re => re.edition.id === effectiveEditionId) ?? null;
+
+  function handleLanguageSelect(language: string): void {
+    setSelectedLanguage(language);
+    // A different language means a different set of editions entirely
+    // -- never carry over an editionId that belonged to the previous
+    // language's list.
+    setSelectedEditionId(null);
+  }
+
+  function handleEditionSelect(editionId: string): void {
+    setSelectedEditionId(editionId);
+  }
 
   const showCover = Boolean(book.cover) && !coverFailed;
-  const languagesLabel = book.availableLanguages.length
-    ? book.availableLanguages.join(" · ")
-    : book.originalLanguage || null;
 
   return (
     <section className="book-detail book-detail-page">
@@ -192,12 +266,59 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
 
           <dl className="book-detail-quick-meta">
             <MetaRow label="Год публикации" value={book.publicationYear ? String(book.publicationYear) : null} />
-            <MetaRow label="Язык" value={languagesLabel} />
           </dl>
 
+          <div className="book-detail-language-select">
+
+            {availableLanguages.length > 1 && (
+              <label className="book-detail-language-field">
+                Язык текста
+                <select
+                  className="language-select"
+                  aria-label="Язык текста"
+                  value={effectiveLanguage ?? ""}
+                  onChange={event => handleLanguageSelect(event.target.value)}
+                >
+                  {availableLanguages.map(language => (
+                    <option key={language} value={language}>{languageLabel(language)}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {availableLanguages.length === 1 && (
+              <p className="book-detail-language-single">
+                Язык текста: {languageLabel(availableLanguages[0])}
+              </p>
+            )}
+
+            {editionsForLanguage.length > 1 && (
+              <label className="book-detail-language-field">
+                Перевод / издание
+                <select
+                  className="language-select"
+                  aria-label="Перевод или издание"
+                  value={effectiveEditionId ?? ""}
+                  onChange={event => handleEditionSelect(event.target.value)}
+                >
+                  {editionsForLanguage.map((re, index) => (
+                    <option key={re.edition.id} value={re.edition.id}>
+                      {re.edition.translatorName?.trim() || `Издание ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+          </div>
+
           <div className="book-detail-read">
-            {resolved ? (
-              <button className="primary-button" type="button" onClick={() => onOpenBook(toReaderBook(book, resolved))}>
+            {selectedResolved ? (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => onOpenBook(toReaderBook(book, selectedResolved))}
+              >
                 Читать
               </button>
             ) : hasAnyPhysicalEdition(book) ? (

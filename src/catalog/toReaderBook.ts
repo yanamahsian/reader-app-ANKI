@@ -186,13 +186,23 @@ function sourceQualityRank(edition: Edition): number {
 // gets back editions carrying an assertion scoped to a jurisdiction it
 // can never match (since it has none to compare against), i.e.
 // effectively no usable-rights editions at all, until a jurisdiction is
-// actually named. The current production call site (BookDetailView.tsx)
-// already does this: it reads the visitor's own stored choice via
-// useReaderJurisdiction() (readerJurisdiction.ts) and passes it as this
-// third argument, so a visitor who has picked a jurisdiction gets a
-// real resolution for it; a visitor who hasn't yet chosen one is still
-// correctly treated as unknown, never silently defaulted to "US" or
-// anywhere else.
+// actually named. BookDetailView.tsx still reads the visitor's own
+// stored choice via useReaderJurisdiction() (readerJurisdiction.ts) and
+// passes it as this third argument wherever it uses this function or
+// listReadableEditions/resolveEditionFile below, so a visitor who has
+// picked a jurisdiction gets a real resolution for it; a visitor who
+// hasn't yet chosen one is still correctly treated as unknown, never
+// silently defaulted to "US" or anywhere else.
+//
+// Multilingual UI phase note: BookDetailView's primary "Читать" flow no
+// longer calls this directly -- it now lets the visitor choose a real
+// language/edition (via listReadableEditions) and opens exactly that
+// edition (via resolveEditionFile), so two different real translations
+// in the same language are never silently collapsed into whichever one
+// SOURCE_QUALITY_RANK below happens to prefer. This function is kept,
+// unweakened, as the blind "no specific edition chosen yet" fallback
+// for any other/older call site that still needs one -- its own
+// behavior is unchanged.
 export function pickPreferredEditionAndFile(
   work: CatalogBook,
   preferredLanguage?: string,
@@ -220,6 +230,66 @@ export function pickPreferredEditionAndFile(
 
   return null;
 
+}
+
+// Multilingual UI phase addition: every genuinely readable Edition of
+// a Work, each already paired with the specific file the reader would
+// actually open for it -- the real, non-decorative source for "which
+// languages/editions can this visitor actually read", as opposed to
+// Book.availableLanguages (catalog/browse metadata only, proven to
+// drift from what's really ingested -- see syncAvailableLanguages.ts's
+// own comment on why it is deliberately NOT jurisdiction-aware).
+//
+// Reuses exactly the same two gates pickPreferredEditionAndFile already
+// enforces -- hasUsableRights (jurisdiction-scoped, never defaults to
+// "US" or anywhere else) and READER_SUPPORTED_FORMATS -- so this can
+// never surface an edition the resolver itself would refuse to open.
+// It does NOT collapse multiple editions in the same language into one
+// entry (unlike availableLanguages, which is a flat set of language
+// codes) -- every qualifying Edition is returned separately, in the
+// Work's own edition order, so a caller (BookDetailView) can offer a
+// real language selector plus, when a language has more than one
+// qualifying edition, a secondary translation/edition choice -- without
+// ever inventing data the catalog doesn't actually have.
+export interface ReadableEdition {
+  edition: Edition;
+  file: BookFile;
+}
+
+export function listReadableEditions(work: CatalogBook, jurisdiction?: string): ReadableEdition[] {
+  const result: ReadableEdition[] = [];
+  for (const edition of work.editions) {
+    if (!hasUsableRights(edition, jurisdiction)) continue;
+    for (const format of READER_SUPPORTED_FORMATS) {
+      const file = edition.files.find(candidate => candidate.format === format);
+      if (file) {
+        result.push({ edition, file });
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+// The explicit-editionId counterpart to pickPreferredEditionAndFile:
+// given a specific edition the visitor actually chose (via
+// listReadableEditions above), resolve it to the exact file the reader
+// should open -- never a different, same-language edition the blind
+// resolver might otherwise have preferred via SOURCE_QUALITY_RANK. Runs
+// the identical rights gate as every other resolution path here (no
+// bypass, no weakening of the rights model): a caller can never use
+// this to open an edition hasUsableRights would refuse. Returns null
+// when editionId doesn't belong to this work, or isn't currently
+// readable for the given jurisdiction -- the same "nothing to read yet"
+// signal pickPreferredEditionAndFile gives, so callers can fall back to
+// the same jurisdiction-prompt / unavailable UI either way.
+export function resolveEditionFile(
+  work: CatalogBook,
+  editionId: string,
+  jurisdiction?: string
+): ResolvedFile | null {
+  const match = listReadableEditions(work, jurisdiction).find(candidate => candidate.edition.id === editionId);
+  return match ?? null;
 }
 
 // The reader engine's own Book type (src/features/reader/engine/types.ts)

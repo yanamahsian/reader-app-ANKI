@@ -1996,6 +1996,46 @@ button.text-link {
   cursor: pointer;
 }
 
+.book-detail-language-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+  align-items: flex-end;
+
+  margin: 4px 0 22px;
+}
+
+.book-detail-language-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  min-width: 180px;
+
+  color: var(--home-muted);
+
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.book-detail-language-field .language-select {
+  min-height: 38px;
+  padding: 6px 0;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 16px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.book-detail-language-single {
+  margin: 0;
+
+  color: rgba(246, 237, 224, 0.86);
+  font-size: 14px;
+}
+
 .book-detail-read {
   margin: 26px 0 34px;
 }

@@ -50,6 +50,41 @@
 -- detail-fetch step (`.in("id", workIds)`) works the same either way,
 -- since PostgREST/postgrest-js accept string values for uuid/bigint
 -- columns interchangeably in `.in()` filters.
+--
+-- MULTILINGUAL UI PHASE FIX -- p_language NO LONGER TRUSTS
+-- works.original_language / works.available_languages:
+-- Both are Work-level metadata, hand-typed or best-effort-synced (see
+-- syncAvailableLanguages.ts's own comment on that file's limits), and
+-- proven to go stale in practice -- e.g. a Work whose metadata claims a
+-- `ru` edition exists when no real, readable Russian Edition was ever
+-- ingested for it (Kafka/"Превращение" was the concrete case that
+-- surfaced this). Filtering language on that metadata means "Library:
+-- язык=ru" can show a visitor a card for a book with nothing readable
+-- in Russian at all.
+--
+-- The filter below instead means exactly "this Work has at least one
+-- genuinely qualifying Edition in p_language" -- a ready Edition
+-- (ingestion_status='ready') with a ready, reader-format book_file
+-- (kind='normalized', format='anki-json', ingestion_status='ready') and
+-- a public-domain rights_assertion. This is deliberately the SAME three
+-- conditions omnia-library-catalog/index.ts already applies per-edition
+-- when it decides which editions are "qualifying" enough to return to
+-- the frontend at all (see that file's own qualifyingEditions mapping) --
+-- kept as two separate copies of the same rule for the same reason
+-- FORMAT_PRIORITY is duplicated there rather than imported (Edge
+-- Functions and this SQL file have no shared module at deploy time),
+-- not because the rule itself is meant to differ. If a Work's only
+-- qualifying edition in a language is missing any one of these three
+-- (not yet ready, no reader-format file yet, rights not yet
+-- public-domain), that language correctly does not match here either --
+-- this never widens what counts as "readable" beyond what the Edge
+-- Function itself would actually serve.
+--
+-- This does not weaken the rights model: it only ever narrows which
+-- Works match a language filter (down to ones with a real, already
+-- reader-ready, already public-domain edition), never grants a rights
+-- status a row didn't already have. A Wikisource-sourced edition still
+-- stuck in `review` still fails this check, exactly as it should.
 
 create or replace function public.library_catalog_search(
   p_query text default null,
@@ -93,8 +128,27 @@ as $$
     and (
       p_language is null
       or p_language = ''
-      or w.original_language = p_language
-      or p_language = any(coalesce(w.available_languages, array[]::text[]))
+      or exists (
+        select 1
+        from public.editions e
+        where e.work_id = w.id
+          and e.language = p_language
+          and e.ingestion_status = 'ready'
+          and exists (
+            select 1
+            from public.book_files bf
+            where bf.edition_id = e.id
+              and bf.kind = 'normalized'
+              and bf.format = 'anki-json'
+              and bf.ingestion_status = 'ready'
+          )
+          and exists (
+            select 1
+            from public.rights_assertions ra
+            where ra.edition_id = e.id
+              and ra.status = 'public-domain'
+          )
+      )
     )
   order by w.id asc
   limit greatest(p_limit, 0)
