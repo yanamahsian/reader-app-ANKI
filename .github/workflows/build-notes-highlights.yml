@@ -1,0 +1,79 @@
+name: Build notes and highlights
+
+on:
+  push:
+    branches:
+      - notes-highlights-transfer-20260826
+    paths:
+      - '.github/workflows/build-notes-highlights.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout transfer branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact base
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "66f53d1feb6d06785a334a2501a389d26aeba7bf"
+
+      - name: Preserve implementation scripts
+        run: |
+          cp .tmp/apply_notes.py /tmp/apply_notes.py
+          cp .tmp/fix_notes.py /tmp/fix_notes.py
+
+      - name: Switch to clean main base
+        run: |
+          git checkout -B notes-highlights-clean-20260826 origin/main
+          git clean -fdx
+
+      - name: Apply notes implementation
+        run: |
+          python /tmp/apply_notes.py
+          python /tmp/fix_notes.py
+
+      - name: Verify exact scope
+        run: |
+          git add -A
+          expected=$(printf '%s\n' \
+            'src/App.tsx' \
+            'src/api/annotations.ts' \
+            'src/catalog/toReaderBook.ts' \
+            'src/features/notes/NotesView.tsx' \
+            'src/features/reader/ReaderView.tsx' \
+            'src/features/reader/engine/pagination.ts' \
+            'src/features/reader/engine/readerEngine.ts' \
+            'src/features/reader/engine/selection.ts' \
+            'src/features/reader/engine/types.ts' \
+            'src/features/reader/progressStore/localStorageStore.ts' \
+            'src/features/reader/progressStore/progressStore.ts' \
+            'src/features/reader/progressStore/supabaseProgressStore.ts' \
+            'src/styles/global.css' \
+            'supabase/sql/annotations.sql' | sort)
+          actual=$(git diff --cached --name-only | sort)
+          printf '%s\n' "$actual"
+          test "$actual" = "$expected"
+          git diff --cached --check
+
+      - name: Install dependencies
+        run: npm install --no-package-lock
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit clean source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Build notes and highlights'
+          git push --force origin HEAD:notes-highlights-clean-20260826
