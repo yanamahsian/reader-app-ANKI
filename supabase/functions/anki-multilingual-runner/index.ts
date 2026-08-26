@@ -94,8 +94,9 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-omnia-run-token") ?? url.searchParams.get("token") ?? "";
   const runId = url.searchParams.get("runId") ?? "";
   const authorId = url.searchParams.get("authorId") ?? "";
+  // Runner batches must stay small (1-3 full books per HTTP request).
   const requestedLimit = Number(url.searchParams.get("limit") ?? "3");
-  const limit = Math.max(1, Math.min(8, Number.isFinite(requestedLimit) ? requestedLimit : 3));
+  const limit = Math.max(1, Math.min(3, Number.isFinite(requestedLimit) ? requestedLimit : 3));
   if ((!token && !runId) || !authorId) return json({ error: "Missing run access or authorId" }, 400);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -113,12 +114,15 @@ Deno.serve(async (req: Request) => {
     updated_at: new Date().toISOString()
   }).eq("author_id", authorId).eq("source_id", "gutenberg").eq("status", "processing").lt("processing_started_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
 
+  // Enforce the retry backoff stored in next_attempt_at.
+  const nowIso = new Date().toISOString();
   const { data: candidates, error: candidatesError } = await sb
     .from("multilingual_candidates")
     .select("id,work_id,author_id,source_id,external_id,language,title,status,attempts")
     .eq("author_id", authorId)
     .eq("source_id", "gutenberg")
     .in("status", ["discovered", "failed"])
+    .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
     .order("discovered_at", { ascending: true })
     .limit(limit);
   if (candidatesError) return json({ error: candidatesError.message }, 500);
@@ -153,7 +157,7 @@ Deno.serve(async (req: Request) => {
       const alreadyReady = (sameSourceEditions ?? []).find((edition: any) => edition.work_id === candidate.work_id && edition.ingestion_status === "ready");
       if (alreadyReady) {
         await addWorkLanguage(sb, candidate.work_id, candidate.language);
-        await sb.from("multilingual_candidates").update({ status: "ready", edition_id: alreadyReady.id, rights_status: "public-domain", jurisdiction: "US", last_error: null, processing_started_at: null, updated_at: new Date().toISOString() }).eq("id", candidate.id);
+        await sb.from("multilingual_candidates").update({ status: "ready", edition_id: alreadyReady.id, rights_status: "public-domain", jurisdiction: "US", last_error: null, processing_started_at: null, next_attempt_at: null, updated_at: new Date().toISOString() }).eq("id", candidate.id);
         results.push({ candidateId: candidate.id, status: "already_ready", workId: candidate.work_id, editionId: alreadyReady.id, language: candidate.language });
         continue;
       }
