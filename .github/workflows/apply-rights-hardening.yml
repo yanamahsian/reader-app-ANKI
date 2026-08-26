@@ -1,0 +1,73 @@
+name: Apply rights hardening
+
+on:
+  push:
+    branches:
+      - rights-hardening-transfer-20260826
+    paths:
+      - '.github/workflows/apply-rights-hardening.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout transfer branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact base
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "de8e04fc56157361cc6d1fe5d7fec6667f4e9e0d"
+
+      - name: Assemble uploaded patch
+        run: |
+          cat .tmp/rights.part0 .tmp/rights.part1 .tmp/rights.part2 > /tmp/rights.b64
+          test "$(wc -c < /tmp/rights.b64)" = "8808"
+          base64 -d /tmp/rights.b64 > /tmp/rights.patch.gz
+          gzip -t /tmp/rights.patch.gz
+          gunzip -c /tmp/rights.patch.gz > /tmp/anki_rights.patch
+          test "$(wc -c < /tmp/anki_rights.patch)" = "18451"
+          test "$(sha256sum /tmp/anki_rights.patch | awk '{print $1}')" = "c5f6a74ffc02bee9aae664d270713122555329cbad8ea3ca135cf847e39f1137"
+
+      - name: Switch to clean main base
+        run: git switch --detach origin/main
+
+      - name: Validate patch
+        run: git apply --check /tmp/anki_rights.patch
+
+      - name: Apply patch
+        run: git apply /tmp/anki_rights.patch
+
+      - name: Verify exact scope
+        run: |
+          git add -N supabase/functions/omnia-book-content/index.ts
+          expected=$(printf '%s\n' \
+            'src/catalog/toReaderBook.ts' \
+            'src/features/book-detail/BookDetailView.tsx' \
+            'supabase/functions/omnia-book-content/index.ts' \
+            'supabase/functions/omnia-library-catalog/index.ts' | sort)
+          actual=$(git diff --name-only origin/main | sort)
+          test "$actual" = "$expected"
+          git diff --check origin/main
+
+      - name: Install dependencies
+        run: npm install --no-package-lock
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit clean patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/catalog/toReaderBook.ts src/features/book-detail/BookDetailView.tsx supabase/functions/omnia-book-content/index.ts supabase/functions/omnia-library-catalog/index.ts
+          git commit -m 'Harden book content jurisdiction checks'
+          git push --force-with-lease origin HEAD:refs/heads/rights-hardening-clean-20260826
