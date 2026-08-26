@@ -24,13 +24,28 @@ jobs:
           git fetch origin main
           test "$(git rev-parse origin/main)" = "49e0ff8ae98275ce54060f6f63abbb210fc2d4f4"
 
-      - name: Assemble and apply uploaded patch
+      - name: Assemble uploaded patch
         run: |
-          cat .tmp/facet.part0 .tmp/facet.part1 .tmp/facet.part2 .tmp/facet.part3 .tmp/facet.part4 | base64 -d | gunzip > /tmp/anki_language_facets.patch
-          git apply --check /tmp/anki_language_facets.patch
-          git apply /tmp/anki_language_facets.patch
+          cat .tmp/facet.part0 .tmp/facet.part1 .tmp/facet.part2 .tmp/facet.part3 .tmp/facet.part4 > /tmp/facets.b64
+          test "$(wc -c < /tmp/facets.b64)" = "13964"
+          base64 -d /tmp/facets.b64 > /tmp/facets.patch.gz
+          gzip -t /tmp/facets.patch.gz
+          gunzip -c /tmp/facets.patch.gz > /tmp/anki_language_facets.patch
+          test "$(wc -c < /tmp/anki_language_facets.patch)" = "31438"
+
+      - name: Validate patch against main
+        run: git apply --check /tmp/anki_language_facets.patch
+
+      - name: Apply patch
+        run: git apply /tmp/anki_language_facets.patch
+
+      - name: Remove transfer-only files
+        run: |
           rm -rf .tmp
           rm .github/workflows/apply-language-facets-sync2.yml
+
+      - name: Verify exact scope
+        run: |
           expected=$(printf '%s\n' \
             'src/api/libraryCatalog.ts' \
             'src/catalog/languages.ts' \
