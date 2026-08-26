@@ -62,6 +62,19 @@
 // fetches a page and discards rows client-side to "make it fit" -- total
 // and hasMore below are read directly from that already-filtered count.
 //
+// LANGUAGE FACETS (server-driven-facets phase): every response also
+// carries `facets.languages: {code, count}[]`, sourced from the sibling
+// public.library_language_facets function (see
+// supabase/sql/library_language_facets.sql). This is the ONE source of
+// truth the frontend now uses to know which languages exist to filter
+// by -- src/catalog/languages.ts no longer decides WHICH languages are
+// offered, only how a given code is LABELED. `count` is a Work count
+// (a Work with several qualifying editions in one language still counts
+// once), matches the exact same catalog_ready + qualifying-edition rule
+// this file already applies below, and reacts to `q` + `jurisdiction`
+// but deliberately NOT to the active `language` filter -- see the RPC
+// call below for why.
+//
 // Schema note: every column name below was empirically confirmed against
 // the live project by probing PostgREST's own "column does not exist"
 // (400) vs "valid query" (200, RLS-empty []) responses. works.author_id ->
@@ -179,22 +192,47 @@ Deno.serve(async (req: Request) => {
     // and why a bound function parameter (not a hand-built filter string)
     // is what makes the search argument here safe against PostgREST
     // filter-injection.
-    const { data: pageRows, error: rpcError } = await supabase.rpc("library_catalog_search", {
-      p_query: searchQuery,
-      p_language: language || null,
-      p_limit: limit,
-      p_offset: offset,
-      p_jurisdiction: jurisdiction || null
-    });
+    //
+    // Language facets (server-driven-facets phase): fetched via the same
+    // RPC round trip window (Promise.all, not sequential) from the
+    // sibling public.library_language_facets function -- see
+    // supabase/sql/library_language_facets.sql for the full contract.
+    // Deliberately called with q + jurisdiction but WITHOUT `language`:
+    // facets answer "what languages exist for this search, in this
+    // jurisdiction", not "what languages exist within the language I
+    // already picked" -- passing the active language filter here would
+    // make every language but the selected one vanish from the list the
+    // moment a visitor picks one, which is exactly the bug this
+    // mechanism exists to avoid. See LibraryView.tsx / SearchPanel.tsx
+    // for how the frontend consumes this.
+    const [searchResult, facetsResult] = await Promise.all([
+      supabase.rpc("library_catalog_search", {
+        p_query: searchQuery,
+        p_language: language || null,
+        p_limit: limit,
+        p_offset: offset,
+        p_jurisdiction: jurisdiction || null
+      }),
+      supabase.rpc("library_language_facets", {
+        p_query: searchQuery,
+        p_jurisdiction: jurisdiction || null
+      })
+    ]);
 
-    if (rpcError) throw rpcError;
+    if (searchResult.error) throw searchResult.error;
+    if (facetsResult.error) throw facetsResult.error;
 
-    const rows = (pageRows ?? []) as Array<{ work_id: string; total_count: number | string }>;
+    const facetRows = (facetsResult.data ?? []) as Array<{ language: string; work_count: number | string }>;
+    const facets = {
+      languages: facetRows.map(row => ({ code: row.language, count: Number(row.work_count) }))
+    };
+
+    const rows = (searchResult.data ?? []) as Array<{ work_id: string; total_count: number | string }>;
     const workIds = rows.map(row => row.work_id);
     const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
 
     if (workIds.length === 0) {
-      return jsonResponse({ books: [], authors: [], total, hasMore: false });
+      return jsonResponse({ books: [], authors: [], total, hasMore: false, facets });
     }
 
     // Step 2: fetch full details for exactly these work ids -- never a
@@ -395,7 +433,8 @@ Deno.serve(async (req: Request) => {
       books: orderedBooks,
       authors,
       total,
-      hasMore: offset + workIds.length < total
+      hasMore: offset + workIds.length < total,
+      facets
     });
 
   } catch (error) {

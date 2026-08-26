@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { getBookById, getBooks, mergeLibraryPage } from "../../catalog";
 import type { Book as CatalogBook } from "../../catalog/types";
 import { searchCatalog } from "../../catalog/search";
-import { LANGUAGE_OPTIONS } from "../../catalog/languages";
-import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
+import { getLanguageLabel } from "../../catalog/languages";
+import { extractLanguageFacets, fetchLibraryCatalogPage, type LanguageFacet } from "../../api/libraryCatalog";
 import { useReaderJurisdiction } from "../book-detail/readerJurisdiction";
 import { BookGrid } from "../shared/BookGrid";
 import { LibraryBookCard } from "../shared/LibraryBookCard";
@@ -39,6 +39,17 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
   const [language, setLanguage] = useState(restoreState?.language ?? "");
   const [pagesLoaded, setPagesLoaded] = useState(restoreState?.page ?? 1);
   const [readerJurisdiction] = useReaderJurisdiction();
+
+  // Server-driven-facets phase: which languages actually have readable
+  // content for the current query + jurisdiction, per
+  // supabase/sql/library_language_facets.sql -- this is now the ONLY
+  // source of what the "Язык" dropdown offers below. Starts empty (not
+  // null) so the dropdown always renders validly with just "Все языки"
+  // until the first response arrives, per the "don't show a broken empty
+  // select" requirement; `language` itself is never reset when this
+  // updates, so a still-loading/no-longer-present facet doesn't clear
+  // what the visitor already picked.
+  const [languageFacets, setLanguageFacets] = useState<LanguageFacet[]>([]);
 
   const [books, setBooks] = useState<CatalogBook[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -145,6 +156,13 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
       setPagesLoaded(pages);
       setDataSource("server");
       setStatus(merged.length ? "success" : "empty");
+      // Facets react to the search query (and jurisdiction) but were
+      // computed server-side WITHOUT `activeLanguage` -- see
+      // omnia-library-catalog's own comment on why -- so this is safe to
+      // update from every loadFromStart response, including the ones
+      // triggered by a language change: the set of available languages
+      // itself doesn't shrink just because one was picked.
+      setLanguageFacets(extractLanguageFacets(page));
 
     } catch (error) {
 
@@ -193,6 +211,7 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
       setBooks(prev => [...prev, ...merged]);
       setHasMore(page.hasMore);
       setPagesLoaded(pages => pages + 1);
+      setLanguageFacets(extractLanguageFacets(page));
 
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
@@ -279,8 +298,9 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
           value={language}
           onChange={event => handleLanguageChange(event.target.value)}
         >
-          {LANGUAGE_OPTIONS.map(item => (
-            <option key={item.value} value={item.value}>{item.label}</option>
+          <option value="">Все языки</option>
+          {languageFacets.map(facet => (
+            <option key={facet.code} value={facet.code}>{getLanguageLabel(facet.code)}</option>
           ))}
         </select>
       </div>

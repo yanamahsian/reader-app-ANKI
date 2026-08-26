@@ -25,11 +25,27 @@ export interface LibraryCatalogParams {
   signal?: AbortSignal;
 }
 
+// Server-driven-facets phase: one entry per language that currently has
+// at least one genuinely qualifying (ready + reader-format + public-domain,
+// jurisdiction-matched) Edition -- see supabase/sql/library_language_facets.sql
+// for the exact eligibility rule, which is deliberately the SAME rule
+// LibraryCatalogPage.books' own editions were already filtered by, not a
+// looser or separate one. `count` is a Work count, not an Edition count.
+export interface LanguageFacet {
+  code: string;
+  count: number;
+}
+
 export interface LibraryCatalogPage {
   books: Book[];
   authors: Author[];
   total: number;
   hasMore: boolean;
+  // Optional (not required) so a response from a not-yet-redeployed
+  // Edge Function, or any other legacy caller of this type, still
+  // satisfies the shape -- callers should treat a missing/empty facets
+  // as "not known yet", never as "no languages exist".
+  facets?: { languages: LanguageFacet[] };
 }
 
 function isLibraryCatalogPage(data: unknown): data is LibraryCatalogPage {
@@ -40,6 +56,22 @@ function isLibraryCatalogPage(data: unknown): data is LibraryCatalogPage {
     Array.isArray(candidate.authors) &&
     typeof candidate.total === "number" &&
     typeof candidate.hasMore === "boolean"
+  );
+}
+
+// Best-effort extraction of the facets.languages array out of a raw
+// LibraryCatalogPage -- tolerant of an absent/malformed `facets` field
+// (older cached response, a network edge case) rather than throwing;
+// callers already treat an empty array as "not known yet", per
+// LibraryCatalogPage.facets' own doc comment above.
+export function extractLanguageFacets(page: LibraryCatalogPage): LanguageFacet[] {
+  const languages = page.facets?.languages;
+  if (!Array.isArray(languages)) return [];
+  return languages.filter(
+    (item): item is LanguageFacet =>
+      typeof item === "object" && item !== null &&
+      typeof (item as LanguageFacet).code === "string" &&
+      typeof (item as LanguageFacet).count === "number"
   );
 }
 
@@ -76,4 +108,32 @@ export async function fetchLibraryCatalogPage(params: LibraryCatalogParams): Pro
 
   return data;
 
+}
+
+// Single shared way to ask "which languages currently have real,
+// readable content" -- used by both LibraryView's own filter dropdown
+// and SearchPanel's, per the server-driven-facets contract: the backend
+// decides which languages exist, the frontend only decides how to label
+// them (see src/catalog/languages.ts's getLanguageLabel). Deliberately
+// reuses fetchLibraryCatalogPage itself rather than a second endpoint or
+// a parallel fetch mechanism -- facets are just a field on the same
+// response every Library/Search request already receives, so priming
+// them (e.g. before a visitor has typed anything) is just this same call
+// with limit=1 and the books/authors themselves discarded.
+//
+// Never passes `language` -- see omnia-library-catalog/index.ts's own
+// comment on why facets must be computed independently of the active
+// language filter (test case F: picking a language must not make the
+// other languages disappear from the list).
+export async function fetchLanguageFacets(
+  params: { query?: string; jurisdiction?: string; signal?: AbortSignal } = {}
+): Promise<LanguageFacet[]> {
+  const page = await fetchLibraryCatalogPage({
+    query: params.query,
+    jurisdiction: params.jurisdiction,
+    limit: 1,
+    offset: 0,
+    signal: params.signal
+  });
+  return extractLanguageFacets(page);
 }
