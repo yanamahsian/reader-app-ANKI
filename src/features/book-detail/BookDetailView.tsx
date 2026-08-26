@@ -317,7 +317,7 @@ export function BookDetailView({ bookId, onBack, onOpenBook, onOpenAuthorDetail,
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => onOpenBook(toReaderBook(book, selectedResolved))}
+                onClick={() => onOpenBook(toReaderBook(book, selectedResolved, readerJurisdiction ?? undefined))}
               >
                 Читать
               </button>

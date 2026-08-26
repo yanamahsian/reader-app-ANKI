@@ -296,7 +296,24 @@ export function resolveEditionFile(
 // stays exactly as it is — this is the one place that bridges the
 // richer catalog model to it, so the reader itself never needs to know
 // the catalog exists.
-export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile): ReaderBook {
+//
+// RIGHTS/JURISDICTION HARDENING PHASE: `jurisdiction` is a new, optional
+// third argument -- not a second, independent piece of jurisdiction
+// state. It is meant to be the exact same value BookDetailView.tsx
+// already reads via useReaderJurisdiction() and already passed to
+// listReadableEditions/resolveEditionFile a moment earlier to produce
+// `resolved` in the first place; this function only forwards it one step
+// further, into the URL the reader will actually fetch. This is the one
+// existing choke point where a resolved edition becomes a real fetch
+// URL (see appendContentJurisdiction below), so it's the natural place
+// to close the gap: omnia-book-content itself now requires a
+// jurisdiction on every request and refuses to serve without one (see
+// that function's own header comment), and every caller of THIS
+// function already has the visitor's real, current jurisdiction in
+// scope at exactly this moment -- there was never a need to bake a
+// jurisdiction into the Book/Edition model earlier, upstream, or persist
+// a second copy of it anywhere.
+export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile, jurisdiction?: string): ReaderBook {
   return {
     id: catalogBook.id,
     title: catalogBook.title,
@@ -304,7 +321,7 @@ export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile): 
     language: resolved.edition.language,
     year: catalogBook.publicationYear ?? undefined,
     cover: catalogBook.cover ?? undefined,
-    url: resolveFileUrl(resolved.file.url),
+    url: resolveFileUrl(appendContentJurisdiction(resolved.file.url, jurisdiction)),
     format: resolved.file.format
   };
 }
@@ -319,6 +336,46 @@ export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile): 
 // is ever rewritten.
 const BOOK_PROXY_ENDPOINT = "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-proxy";
 const PROXIED_HOSTNAMES = new Set(["www.gutenberg.org", "gutenberg.org"]);
+
+// RIGHTS/JURISDICTION HARDENING PHASE: omnia-book-content (both the
+// static seed URL in src/catalog/books.ts and the one
+// omnia-library-catalog constructs, see that file's own comment) has
+// always produced a bare `?editionId=...` URL, with no jurisdiction --
+// the visitor's jurisdiction was never known at catalog-formation time
+// in any way that's meaningfully more reliable than at the moment Reader
+// actually opens the book. Rather than baking a jurisdiction into every
+// URL the catalog produces (which would mean re-deriving/caching it
+// server-side, and would go stale the instant a visitor changes their
+// stored jurisdiction and reopens a book from an already-fetched catalog
+// page), this appends it here, once, right before the URL is ever
+// fetched -- the same place resolveFileUrl below already rewrites
+// Gutenberg URLs for an unrelated reason (CORS). Only touches URLs that
+// are actually this content endpoint (checked by prefix, not merely "has
+// a jurisdiction param slot") -- the Gutenberg-proxy path and the local
+// antichrist.txt seed file are untouched either way, matching
+// resolveFileUrl's own "everything else is left completely untouched"
+// rule right below. A missing/empty jurisdiction is left exactly as
+// omnia-book-content itself already treats it (see that function's own
+// "MISSING JURISDICTION" comment) -- rejected server-side, not defaulted
+// here.
+const BOOK_CONTENT_ENDPOINT = "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-content";
+
+function appendContentJurisdiction(url: string, jurisdiction: string | undefined): string {
+
+  if (!jurisdiction) return url;
+  if (!url.startsWith(BOOK_CONTENT_ENDPOINT)) return url;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+
+  parsed.searchParams.set("jurisdiction", jurisdiction);
+  return parsed.toString();
+
+}
 
 function resolveFileUrl(url: string): string {
 

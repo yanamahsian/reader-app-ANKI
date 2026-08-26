@@ -1,4 +1,8 @@
-// omnia-library-catalog — NEW Edge Function (not yet deployed).
+// omnia-library-catalog — AN.KI's internal catalog Edge Function.
+// Production, deployed as v3 (ACTIVE) as of the server-driven-language-
+// facets phase; this comment previously called it "NEW ... (not yet
+// deployed)", which stopped being true two phases ago -- corrected here
+// as pure hygiene, no behavior change.
 //
 // Reads AN.KI's own internal catalog (public.works / authors / editions /
 // book_files / rights_assertions, gated through public.work_readiness) and
@@ -94,6 +98,18 @@ const WORKS_COLUMNS = `
 const DEFAULT_LIMIT = 24;
 const MAX_LIMIT = 100;
 
+// RIGHTS/JURISDICTION HARDENING PHASE: the `?editionId=...` URL built
+// below is deliberately left exactly as it was -- it does NOT gain a
+// baked-in `jurisdiction` param here. omnia-book-content itself now
+// requires one on every request (see that function's own header
+// comment) and refuses to serve without it, but the visitor's real
+// jurisdiction is appended once, at the one place it's actually needed
+// and actually known for certain -- src/catalog/toReaderBook.ts, right
+// before Reader fetches the file -- rather than baked into every catalog
+// response here, where it would go stale the moment a visitor changes
+// their stored jurisdiction (readerJurisdiction.ts) and reopens a book
+// from an already-fetched Library/Search page. See toReaderBook.ts's own
+// comment on this same decision.
 const BOOK_CONTENT_ENDPOINT =
   "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-content";
 
