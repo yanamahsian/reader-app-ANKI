@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import type { Author } from "../../catalog/types";
 import { searchCatalog, type SearchResult } from "../../catalog/search";
 import { mergeLibraryPage } from "../../catalog";
-import { LANGUAGE_OPTIONS } from "../../catalog/languages";
-import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
+import { getLanguageLabel } from "../../catalog/languages";
+import {
+  extractLanguageFacets,
+  fetchLanguageFacets,
+  fetchLibraryCatalogPage,
+  type LanguageFacet
+} from "../../api/libraryCatalog";
+import { useReaderJurisdiction } from "../book-detail/readerJurisdiction";
 import { BookCard } from "../shared/BookCard";
 
 interface SearchPanelProps {
@@ -43,10 +49,20 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<SearchResult>(EMPTY_RESULT);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [readerJurisdiction] = useReaderJurisdiction();
+
+  // Server-driven-facets phase: reuses the exact same
+  // fetchLibraryCatalogPage-backed mechanism LibraryView.tsx uses (via
+  // the shared fetchLanguageFacets/extractLanguageFacets helpers in
+  // src/api/libraryCatalog.ts) rather than a second, separate facet
+  // system -- see that file's own comment. Starts empty so the dropdown
+  // still renders validly (just "Все языки") before the first response.
+  const [languageFacets, setLanguageFacets] = useState<LanguageFacet[]>([]);
 
   const requestIdRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const facetsAbortRef = useRef<AbortController | null>(null);
 
   // catalog/search.ts itself is completely unchanged: it has always
   // just ranked whatever is currently in catalogStore. What changed
@@ -88,6 +104,7 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
       const page = await fetchLibraryCatalogPage({
         query: trimmed,
         language: searchLanguage,
+        jurisdiction: readerJurisdiction ?? undefined,
         limit: SEARCH_SERVER_LIMIT,
         signal: controller.signal
       });
@@ -96,6 +113,12 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
 
       mergeLibraryPage(page.books, page.authors);
       showLocalResult(trimmed, searchLanguage);
+      // Facets react to the search query -- same contract LibraryView.tsx
+      // follows -- but, same as that response, are computed server-side
+      // WITHOUT `searchLanguage` (see omnia-library-catalog's own
+      // comment on why), so picking a language here never narrows this
+      // list; only what was typed does.
+      setLanguageFacets(extractLanguageFacets(page));
 
     } catch (error) {
 
@@ -168,6 +191,7 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
     requestIdRef.current += 1;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
+    facetsAbortRef.current?.abort();
     onClose();
   }
 
@@ -181,6 +205,29 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
     inputRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, prefillQuery]);
+
+  // Primes the language dropdown BEFORE anything has been typed --
+  // without this, the panel would have nothing to show in "Язык" until
+  // the visitor's first 2+ character keystroke reaches refineFromServer.
+  // Fires once per open; a prefillQuery's own runSearch (above) will
+  // overwrite this with a more specific, query-scoped set once it
+  // resolves, same contract as every other facets update in this file.
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    facetsAbortRef.current = controller;
+    fetchLanguageFacets({ jurisdiction: readerJurisdiction ?? undefined, signal: controller.signal })
+      .then(facets => {
+        if (controller.signal.aborted) return;
+        setLanguageFacets(facets);
+      })
+      .catch(error => {
+        if ((error as { name?: string }).name === "AbortError") return;
+        console.error("omnia-library-catalog facets priming failed in Search:", error);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   function handleLanguageChange(nextLanguage: string): void {
     setLanguage(nextLanguage);
@@ -232,8 +279,9 @@ export function SearchPanel({ isOpen, prefillQuery, prefillLanguage, onClose, on
             value={language}
             onChange={event => handleLanguageChange(event.target.value)}
           >
-            {LANGUAGE_OPTIONS.map(item => (
-              <option key={item.value} value={item.value}>{item.label}</option>
+            <option value="">Все языки</option>
+            {languageFacets.map(facet => (
+              <option key={facet.code} value={facet.code}>{getLanguageLabel(facet.code)}</option>
             ))}
           </select>
         </div>
