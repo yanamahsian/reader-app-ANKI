@@ -86,11 +86,14 @@
 -- status a row didn't already have. A Wikisource-sourced edition still
 -- stuck in `review` still fails this check, exactly as it should.
 
+drop function if exists public.library_catalog_search(text, text, int, int, text);
+
 create or replace function public.library_catalog_search(
   p_query text default null,
   p_language text default null,
   p_limit int default 24,
-  p_offset int default 0
+  p_offset int default 0,
+  p_jurisdiction text default null
 )
 returns table (
   work_id text,
@@ -147,6 +150,11 @@ as $$
             from public.rights_assertions ra
             where ra.edition_id = e.id
               and ra.status = 'public-domain'
+              and (
+                p_jurisdiction is null
+                or p_jurisdiction = ''
+                or ra.jurisdiction = p_jurisdiction
+              )
           )
       )
     )
@@ -162,7 +170,7 @@ $$;
 -- authenticated must never be able to call it directly, since that
 -- would hand back the exact same "browse without a policy" access the
 -- five base tables' RLS is deliberately withholding from them.
-revoke all on function public.library_catalog_search(text, text, int, int) from public;
-revoke all on function public.library_catalog_search(text, text, int, int) from anon;
-revoke all on function public.library_catalog_search(text, text, int, int) from authenticated;
-grant execute on function public.library_catalog_search(text, text, int, int) to service_role;
+revoke all on function public.library_catalog_search(text, text, int, int, text) from public;
+revoke all on function public.library_catalog_search(text, text, int, int, text) from anon;
+revoke all on function public.library_catalog_search(text, text, int, int, text) from authenticated;
+grant execute on function public.library_catalog_search(text, text, int, int, text) to service_role;

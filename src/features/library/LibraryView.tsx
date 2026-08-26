@@ -4,6 +4,7 @@ import type { Book as CatalogBook } from "../../catalog/types";
 import { searchCatalog } from "../../catalog/search";
 import { LANGUAGE_OPTIONS } from "../../catalog/languages";
 import { fetchLibraryCatalogPage } from "../../api/libraryCatalog";
+import { useReaderJurisdiction } from "../book-detail/readerJurisdiction";
 import { BookGrid } from "../shared/BookGrid";
 import { LibraryBookCard } from "../shared/LibraryBookCard";
 
@@ -37,6 +38,7 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
   const [query, setQuery] = useState(restoreState?.query ?? "");
   const [language, setLanguage] = useState(restoreState?.language ?? "");
   const [pagesLoaded, setPagesLoaded] = useState(restoreState?.page ?? 1);
+  const [readerJurisdiction] = useReaderJurisdiction();
 
   const [books, setBooks] = useState<CatalogBook[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -123,6 +125,7 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
       const page = await fetchLibraryCatalogPage({
         query: trimmedQuery,
         language: activeLanguage,
+        jurisdiction: readerJurisdiction ?? undefined,
         limit: pages * PAGE_SIZE,
         offset: 0,
         signal: controller.signal
@@ -176,6 +179,7 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
       const page = await fetchLibraryCatalogPage({
         query: query.trim(),
         language,
+        jurisdiction: readerJurisdiction ?? undefined,
         limit: PAGE_SIZE,
         offset: books.length,
         signal: controller.signal

@@ -156,6 +156,7 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const rawQuery = (url.searchParams.get("q") ?? "").trim();
   const language = (url.searchParams.get("language") ?? "").trim();
+  const jurisdiction = (url.searchParams.get("jurisdiction") ?? "").trim();
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0") || 0);
   const limit = Math.min(
     MAX_LIMIT,
@@ -182,7 +183,8 @@ Deno.serve(async (req: Request) => {
       p_query: searchQuery,
       p_language: language || null,
       p_limit: limit,
-      p_offset: offset
+      p_offset: offset,
+      p_jurisdiction: jurisdiction || null
     });
 
     if (rpcError) throw rpcError;

@@ -19,6 +19,7 @@ const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy
 export interface LibraryCatalogParams {
   query?: string;
   language?: string;
+  jurisdiction?: string;
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
@@ -52,6 +53,7 @@ export async function fetchLibraryCatalogPage(params: LibraryCatalogParams): Pro
   const url = new URL(CATALOG_ENDPOINT);
   if (params.query) url.searchParams.set("q", params.query);
   if (params.language) url.searchParams.set("language", params.language);
+  if (params.jurisdiction) url.searchParams.set("jurisdiction", params.jurisdiction);
   url.searchParams.set("limit", String(params.limit ?? 24));
   url.searchParams.set("offset", String(params.offset ?? 0));
 
