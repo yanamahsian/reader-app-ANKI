@@ -1,0 +1,344 @@
+    /<(script|style|noscript|svg|math|figure|nav|footer|header|form|button|input|select|textarea|audio|video|canvas|iframe)[^>]*>[\s\S]*?<\/\1>/gi,
+    " ",
+  );
+
+  text = text.replace(
+    /<(br|hr)\s*\/?>/gi,
+    "\n",
+  );
+
+  text = text.replace(
+    /<\/(p|div|section|article|blockquote|pre|h1|h2|h3|h4|h5|h6|li|tr|table|ul|ol|dl|dt|dd)>/gi,
+    "\n\n",
+  );
+
+  text = text.replace(
+    /<li[^>]*>/gi,
+    "\n",
+  );
+
+  text = text.replace(
+    /<[^>]+>/g,
+    " ",
+  );
+
+  text = decodeHtmlEntities(text);
+
+  return normalizeReadableWhitespace(text);
+}
+
+
+function stripHtml(
+  html: string,
+): string {
+  return decodeHtmlEntities(
+    html.replace(/<[^>]*>/g, " "),
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+function decodeHtmlEntities(
+  value: string,
+): string {
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+    ndash: "–",
+    mdash: "—",
+    hellip: "…",
+    laquo: "«",
+    raquo: "»",
+    lsquo: "‘",
+    rsquo: "’",
+    ldquo: "“",
+    rdquo: "”",
+    copy: "©",
+    reg: "®",
+    trade: "™",
+  };
+
+  return value
+    .replace(
+      /&#(\d+);/g,
+      (_match, decimal: string) => {
+        const codePoint = Number(decimal);
+
+        return Number.isFinite(codePoint)
+          ? safeCodePoint(codePoint)
+          : "";
+      },
+    )
+    .replace(
+      /&#x([0-9a-f]+);/gi,
+      (_match, hexadecimal: string) => {
+        const codePoint = Number.parseInt(
+          hexadecimal,
+          16,
+        );
+
+        return Number.isFinite(codePoint)
+          ? safeCodePoint(codePoint)
+          : "";
+      },
+    )
+    .replace(
+      /&([a-z]+);/gi,
+      (match, entityName: string) => {
+        return namedEntities[
+          entityName.toLowerCase()
+        ] ?? match;
+      },
+    );
+}
+
+
+function safeCodePoint(
+  codePoint: number,
+): string {
+  try {
+    return String.fromCodePoint(codePoint);
+  } catch {
+    return "";
+  }
+}
+
+
+function normalizeReadableWhitespace(
+  text: string,
+): string {
+  return text
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/([.!?…]) {2,}/g, "$1 ")
+    .trim();
+}
+
+
+function removeGutenbergWrapper(
+  text: string,
+): string {
+  let cleaned = text;
+
+  const startPatterns = [
+    /\*{3}\s*START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[\s\S]{0,300}?\*{3}/i,
+    /\*{3}\s*START OF THE PROJECT GUTENBERG EBOOK[\s\S]{0,300}?\*{3}/i,
+    /START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*\n/i,
+  ];
+
+  for (const pattern of startPatterns) {
+    const match = cleaned.match(pattern);
+
+    if (
+      match &&
+      typeof match.index === "number"
+    ) {
+      cleaned = cleaned.slice(
+        match.index + match[0].length,
+      );
+
+      break;
+    }
+  }
+
+  const endPatterns = [
+    /\*{3}\s*END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK/i,
+    /END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK/i,
+    /End of Project Gutenberg/i,
+  ];
+
+  for (const pattern of endPatterns) {
+    const match = cleaned.match(pattern);
+
+    if (
+      match &&
+      typeof match.index === "number"
+    ) {
+      cleaned = cleaned.slice(
+        0,
+        match.index,
+      );
+
+      break;
+    }
+  }
+
+  return normalizeReadableWhitespace(cleaned);
+}
+
+
+function looksLikeHtml(
+  text: string,
+): boolean {
+  const beginning = text.slice(0, 1200);
+
+  return /<!doctype\s+html|<html|<body|<p[\s>]|<div[\s>]/i
+    .test(beginning);
+}
+
+
+function limitBookText(
+  text: string,
+): string {
+  if (
+    text.length <= MAX_BOOK_TEXT_LENGTH
+  ) {
+    return text;
+  }
+
+  return text
+    .slice(0, MAX_BOOK_TEXT_LENGTH)
+    .trim();
+}
+
+
+function normalizeForComparison(
+  value: string,
+): string {
+  return value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+function uniqueStrings(
+  values: string[],
+): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+
+function isUsableRemoteUrl(
+  value: string,
+): boolean {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+
+    return url.protocol === "https:" ||
+      url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+
+function externalRequestHeaders(): HeadersInit {
+  return {
+    "Accept":
+      "application/json, text/html, text/plain;q=0.9, */*;q=0.8",
+    "User-Agent":
+      "AN.KI/1.0 digital reading application",
+  };
+}
+
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS,
+  );
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    ) {
+      throw new Error(
+        "External library request timed out",
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+
+async function readRequestBody(
+  req: Request,
+): Promise<JsonRecord> {
+  const contentType =
+    req.headers.get("content-type") ||
+    "";
+
+  if (
+    !contentType
+      .toLowerCase()
+      .includes("application/json")
+  ) {
+    throw new Error(
+      "Request body must be JSON",
+    );
+  }
+
+  const body = await req.json();
+
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body)
+  ) {
+    throw new Error(
+      "Invalid request body",
+    );
+  }
+
+  return body as JsonRecord;
+}
+
+
+function normalizeString(
+  value: unknown,
+): string {
+  return typeof value === "string"
+    ? value.trim()
+    : "";
+}
+
+
+function escapeRegExp(
+  value: string,
+): string {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+}
+
+
+function jsonResponse(
+  body: unknown,
+  status = 200,
+): Response {
