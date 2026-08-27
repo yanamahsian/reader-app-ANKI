@@ -1,0 +1,348 @@
+function createWikisourceId(
+  projectCode: string,
+  title: string,
+): string {
+  return `wikisource:${projectCode}:${encodeURIComponent(title)}`;
+}
+
+
+function parseWikisourceId(
+  id: string,
+): {
+  projectCode: string;
+  title: string;
+} {
+  const match = id.match(
+    /^wikisource:([a-z-]+):(.+)$/i,
+  );
+
+  if (!match) {
+    throw new Error(
+      "Invalid Wikisource book id",
+    );
+  }
+
+  const projectCode = match[1]
+    .trim()
+    .toLowerCase();
+
+  let title = "";
+
+  try {
+    title = decodeURIComponent(match[2]);
+  } catch {
+    throw new Error(
+      "Invalid Wikisource title encoding",
+    );
+  }
+
+  title = title.trim();
+
+  if (!title) {
+    throw new Error(
+      "Missing Wikisource page title",
+    );
+  }
+
+  return {
+    projectCode,
+    title,
+  };
+}
+
+
+function deduplicateBooks(
+  books: LibraryBook[],
+): LibraryBook[] {
+  const seenExactIds = new Set<string>();
+
+  const groupedByIdentity = new Map<
+    string,
+    LibraryBook
+  >();
+
+  for (const book of books) {
+    if (
+      !book.id ||
+      !book.title ||
+      seenExactIds.has(book.id)
+    ) {
+      continue;
+    }
+
+    seenExactIds.add(book.id);
+
+    const identity = createBookIdentity(book);
+
+    const existing = groupedByIdentity.get(identity);
+
+    if (!existing) {
+      groupedByIdentity.set(
+        identity,
+        book,
+      );
+
+      continue;
+    }
+
+    if (
+      shouldReplaceDuplicate(existing, book)
+    ) {
+      groupedByIdentity.set(
+        identity,
+        book,
+      );
+    }
+  }
+
+  return Array.from(groupedByIdentity.values())
+    .sort(compareBooks);
+}
+
+
+function createBookIdentity(
+  book: LibraryBook,
+): string {
+  const title = normalizeForComparison(
+    book.title,
+  );
+
+  const firstAuthor = normalizeForComparison(
+    book.authors[0] || "",
+  );
+
+  const firstLanguage =
+    normalizeLanguageCode(
+      book.languages[0] || "",
+    );
+
+  if (firstAuthor) {
+    return `${title}|${firstAuthor}|${firstLanguage}`;
+  }
+
+  return `${title}|${firstLanguage}`;
+}
+
+
+function shouldReplaceDuplicate(
+  currentBook: LibraryBook,
+  candidateBook: LibraryBook,
+): boolean {
+  const currentIsGutenberg =
+    currentBook.id.startsWith("gutenberg:");
+
+  const candidateIsGutenberg =
+    candidateBook.id.startsWith("gutenberg:");
+
+  if (
+    candidateIsGutenberg &&
+    !currentIsGutenberg
+  ) {
+    return true;
+  }
+
+  if (
+    candidateBook.authors.length >
+    currentBook.authors.length
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+
+function compareBooks(
+  firstBook: LibraryBook,
+  secondBook: LibraryBook,
+): number {
+  const firstHasAuthor =
+    firstBook.authors.length > 0
+      ? 0
+      : 1;
+
+  const secondHasAuthor =
+    secondBook.authors.length > 0
+      ? 0
+      : 1;
+
+  if (firstHasAuthor !== secondHasAuthor) {
+    return firstHasAuthor - secondHasAuthor;
+  }
+
+  return firstBook.title.localeCompare(
+    secondBook.title,
+    undefined,
+    {
+      sensitivity: "base",
+    },
+  );
+}
+
+
+function normalizeGutendexAuthors(
+  authors: GutendexPerson[] | undefined,
+): string[] {
+  if (!Array.isArray(authors)) {
+    return [];
+  }
+
+  const normalizedAuthors = authors
+    .map((author) =>
+      normalizePersonName(
+        normalizeString(author?.name),
+      )
+    )
+    .filter(Boolean);
+
+  return uniqueStrings(normalizedAuthors);
+}
+
+
+function normalizePersonName(
+  name: string,
+): string {
+  if (!name) {
+    return "";
+  }
+
+  const parts = name
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 2) {
+    return `${parts[1]} ${parts[0]}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  return name
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+function normalizeLanguages(
+  languages: unknown,
+): string[] {
+  if (!Array.isArray(languages)) {
+    return [];
+  }
+
+  return uniqueStrings(
+    languages
+      .map((language) =>
+        normalizeLanguageCode(
+          normalizeString(language),
+        )
+      )
+      .filter(Boolean),
+  );
+}
+
+
+function normalizeLanguageCode(
+  language: string,
+): string {
+  const normalized = language
+    .trim()
+    .toLowerCase();
+
+  const languageAliases: Record<string, string> = {
+    english: "en",
+    russian: "ru",
+    ukrainian: "uk",
+    german: "de",
+    french: "fr",
+    italian: "it",
+    spanish: "es",
+    portuguese: "pt",
+    polish: "pl",
+    dutch: "nl",
+    swedish: "sv",
+    norwegian: "no",
+    danish: "da",
+    finnish: "fi",
+    greek: "el",
+    latin: "la",
+    chinese: "zh",
+    japanese: "ja",
+    korean: "ko",
+    arabic: "ar",
+    turkish: "tr",
+    czech: "cs",
+    romanian: "ro",
+    hungarian: "hu",
+  };
+
+  return languageAliases[normalized] ||
+    normalized;
+}
+
+
+function cleanBookTitle(
+  title: string,
+): string {
+  return decodeHtmlEntities(title)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .trim();
+}
+
+
+function cleanPlainText(
+  text: string,
+): string {
+  return normalizeReadableWhitespace(
+    decodeHtmlEntities(text)
+      .replace(/\r\n?/g, "\n"),
+  );
+}
+
+
+function cleanWikisourceText(
+  text: string,
+): string {
+  let cleaned = text;
+
+  const unwantedPhrases = [
+    "Return to the main page",
+    "Retrieved from",
+    "Privacy policy",
+    "About Wikisource",
+    "Disclaimers",
+    "Mobile view",
+    "Скрытые категории",
+    "Материал из Викитеки",
+    "Политика конфиденциальности",
+    "Описание Викитеки",
+    "Отказ от ответственности",
+  ];
+
+  for (const phrase of unwantedPhrases) {
+    cleaned = cleaned.replace(
+      new RegExp(
+        escapeRegExp(phrase),
+        "gi",
+      ),
+      "",
+    );
+  }
+
+  return normalizeReadableWhitespace(cleaned);
+}
+
+
+function htmlToReadableText(
+  html: string,
+): string {
+  let text = html;
+
+  text = text.replace(
+    /<!--[\s\S]*?-->/g,
+    " ",
+  );
+
+  text = text.replace(
