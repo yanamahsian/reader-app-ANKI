@@ -1,17 +1,11 @@
 /* Opt-in wide column — Subscription only (see ShellPage's `wide` prop).
-   The other five account screens never pass it, so they keep the
-   760px column above untouched. */
+   The other five account screens keep the shared narrow reading column. */
 .shell-page-wide {
   max-width: 1440px;
 }
 
 /* =========================================================
    PRICING SHOWCASE (Subscription)
-
-   Its own "pricing-*" class family, not a reuse of ".plan-card" —
-   AtlasView already reuses ".plan-card" / ".plan-card-highlighted" /
-   ".subscription-plans" for its own unrelated book-connection tiles,
-   so this stays fully separate to avoid changing that screen too.
    ========================================================= */
 
 .pricing-showcase {
@@ -98,7 +92,6 @@
 
 .pricing-card-price-unit {
   color: var(--home-muted);
-
   font-size: 13px;
 }
 
@@ -111,7 +104,6 @@
   margin: 9px 0 0;
 
   color: var(--home-muted);
-
   font-size: 12px;
 }
 
@@ -119,7 +111,6 @@
   padding: 1px 7px;
 
   border: 1px solid rgba(202, 160, 88, 0.4);
-
   color: var(--home-gold);
 
   font-size: 10px;
@@ -210,10 +201,6 @@
   transition: box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
-/* Real disabled <button>s (checkout isn't wired up yet), but they must
-   still read as full premium CTAs, not washed-out form controls —
-   Safari/Firefox dim `:disabled` opacity by default via their UA
-   stylesheet, so it's reasserted explicitly here. */
 .pricing-card-cta:disabled {
   opacity: 1;
 }
@@ -251,13 +238,17 @@
   }
 }
 
-/* Glossy cherry-glass emblem, shared by every tier (PlanEmblem.tsx) */
+/* =========================================================
+   FACETED GARNET EMBLEMS
+   ========================================================= */
 
 .plan-emblem {
   width: 170px;
   height: 170px;
 
   margin: 0 auto 26px;
+
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.42));
 }
 
 .plan-emblem-glass {
@@ -266,64 +257,166 @@
   width: 100%;
   height: 100%;
 
-  border-radius: 50%;
   overflow: hidden;
 
-  background: radial-gradient(
-    circle at 50% 50%,
-    #1c0509 0%,
-    #3d0c17 32%,
-    #6e1524 56%,
-    #a9273a 76%,
-    #d94f5f 91%,
-    #f4a3ac 100%
+  clip-path: polygon(
+    23% 0,
+    77% 0,
+    100% 23%,
+    100% 77%,
+    77% 100%,
+    23% 100%,
+    0 77%,
+    0 23%
   );
 
+  background:
+    radial-gradient(circle at 36% 28%, rgba(157, 55, 80, 0.7), transparent 34%),
+    linear-gradient(145deg, #6f2137 0%, #4c1123 39%, #210710 68%, #090306 100%);
+
   box-shadow:
-    inset 0 -18px 30px rgba(0, 0, 0, 0.6),
-    inset 0 14px 22px rgba(255, 255, 255, 0.14),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
-    0 12px 32px rgba(0, 0, 0, 0.5),
-    0 0 46px rgba(178, 32, 50, 0.32);
+    inset 0 1px 0 rgba(255, 219, 226, 0.16),
+    inset 18px 0 28px rgba(132, 36, 61, 0.2),
+    inset -20px -26px 34px rgba(0, 0, 0, 0.58);
+}
+
+.plan-emblem-glass::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: 5;
+  pointer-events: none;
+
+  clip-path: inherit;
+
+  box-shadow:
+    inset 0 0 0 1px rgba(238, 155, 174, 0.12),
+    inset 0 -14px 22px rgba(0, 0, 0, 0.22);
+}
+
+.plan-emblem-facet {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.plan-emblem-facet-left {
+  inset: 0 48% 0 0;
+
+  background: linear-gradient(
+    116deg,
+    rgba(184, 74, 100, 0.24) 0%,
+    rgba(107, 27, 49, 0.06) 52%,
+    rgba(0, 0, 0, 0.2) 53%,
+    rgba(0, 0, 0, 0.42) 100%
+  );
+
+  clip-path: polygon(0 0, 100% 0, 58% 100%, 0 100%);
+}
+
+.plan-emblem-facet-right {
+  inset: 0 0 0 46%;
+
+  background: linear-gradient(
+    142deg,
+    rgba(145, 45, 68, 0.24) 0%,
+    rgba(61, 13, 27, 0.08) 41%,
+    rgba(0, 0, 0, 0.42) 42%,
+    rgba(0, 0, 0, 0.58) 100%
+  );
+
+  clip-path: polygon(35% 0, 100% 0, 100% 100%, 0 100%);
 }
 
 .plan-emblem-highlight {
   position: absolute;
-  top: 10%;
-  left: 15%;
+  z-index: 4;
 
-  width: 46%;
-  height: 30%;
+  top: 7%;
+  left: 18%;
+
+  width: 14%;
+  height: 49%;
 
   border-radius: 50%;
-  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 70%);
-  filter: blur(1px);
-  transform: rotate(-18deg);
+
+  background: linear-gradient(
+    90deg,
+    rgba(255, 229, 234, 0),
+    rgba(255, 226, 232, 0.36) 48%,
+    rgba(255, 229, 234, 0)
+  );
+
+  filter: blur(2px);
+  transform: rotate(8deg);
 }
 
 .plan-emblem-glint {
   position: absolute;
-  bottom: 15%;
-  right: 18%;
+  z-index: 6;
 
-  width: 13%;
-  height: 9%;
+  top: 11%;
+  right: 11%;
+
+  width: 7px;
+  height: 7px;
 
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 214, 222, 0.9), rgba(255, 214, 222, 0) 70%);
+
+  background: radial-gradient(
+    circle,
+    rgba(255, 245, 240, 0.92) 0%,
+    rgba(255, 220, 225, 0.55) 36%,
+    rgba(255, 220, 225, 0) 72%
+  );
+
+  box-shadow: 0 0 9px rgba(255, 206, 216, 0.36);
 }
 
-.plan-emblem-figure {
+.plan-emblem-column,
+.plan-emblem-art {
   position: absolute;
-  inset: 0;
+  z-index: 3;
 
-  width: 58%;
-  height: 58%;
-  margin: auto;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
 
-  /* Fill/stroke are set per-path in PlanEmblem.tsx (a gradient, not a
-     flat color) so the figure reads as ruby glass, not a black cutout. */
-  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5));
+  display: block;
+
+  filter:
+    saturate(0.72)
+    brightness(0.72)
+    contrast(1.06)
+    drop-shadow(0 4px 5px rgba(0, 0, 0, 0.52));
+}
+
+.plan-emblem-column {
+  width: 53%;
+  height: 66%;
+}
+
+.plan-emblem-art {
+  width: auto;
+  height: auto;
+
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+
+.plan-emblem-art-knight {
+  width: 73%;
+  max-height: 79%;
+}
+
+.plan-emblem-art-bust {
+  width: 86%;
+  max-height: 88%;
+}
+
+.plan-emblem-art-queen {
+  width: 78%;
+  max-height: 84%;
 }
 
 @media (max-width: 1100px) {
@@ -375,8 +468,7 @@
   }
 }
 
-/* Screen-reader-only utility text (e.g. context on a disabled CTA that
-   would be visual clutter if shown, but should still be announced). */
+/* Screen-reader-only utility text. */
 .sr-only {
   position: absolute;
 
