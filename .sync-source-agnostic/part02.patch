@@ -1,0 +1,210 @@
++    const q = await wikisourceQuery(wikiLanguage, params);
++    for (const page of q?.query?.pages ?? []) {
++      const qid = page?.pageprops?.wikibase_item;
++      if (!page.missing && typeof page.title === "string" && typeof qid === "string") out.push({ title: page.title, qid });
++    }
++    cont = q?.continue ?? null;
++  } while (cont && out.length < MAX_LINKED_PAGES);
++  const seen = new Set<string>();
++  return out.filter(x => { if (seen.has(x.qid)) return false; seen.add(x.qid); return true; }).slice(0, MAX_LINKED_PAGES);
++}
++
++async function confirmedLiteraryWorkQids(entities: Record<string, any>): Promise<Set<string>> {
++  const good = new Set<string>(ROOT_LITERARY_WORK_TYPES);
++  const typesByQid = new Map<string, string[]>();
++  let frontier = new Set<string>();
++  for (const [qid, entity] of Object.entries(entities)) {
++    const types = claimIds(entity, "P31");
++    typesByQid.set(qid, types);
++    types.forEach(t => frontier.add(t));
++  }
++  const seen = new Set<string>();
++  for (let depth = 0; depth < TYPE_CLOSURE_DEPTH && frontier.size; depth++) {
++    const ids = Array.from(frontier).filter(id => !seen.has(id));
++    ids.forEach(id => seen.add(id));
++    const next = new Set<string>();
++    for (let i = 0; i < ids.length; i += 40) {
++      const chunkEntities = await fetchWikidataClaims(ids.slice(i, i + 40));
++      for (const [id, entity] of Object.entries(chunkEntities)) {
++        const parents = claimIds(entity, "P279");
++        if (parents.some(p => good.has(p))) good.add(id);
++        else parents.forEach(p => next.add(p));
++      }
++    }
++    frontier = next;
++  }
++  const confirmed = new Set<string>();
++  for (const [qid, types] of typesByQid) if (types.some(t => good.has(t))) confirmed.add(qid);
++  return confirmed;
++}
++
++// Resolves QIDs for works whose QID is still unknown after the master_corpus_candidates mining
++// above, one author-language pass at a time (works sharing a wikiLanguage share the author-page
++// lookup and linked-page scan). Returns a map of workId -> {qid, reason} for high-confidence
++// single matches only, plus a list of the works it looked at but could not confidently resolve
++// (for visibility in the response -- these are exactly the ones that should surface in review).
++async function resolveFallbackQids(
++  worksNeedingQid: WorkRow[],
++  knownNames: string[]
++): Promise<{ resolved: Map<string, { qid: string; authorPage: string; matchedTitle: string }>; unresolved: Array<{ workId: string; reason: string }> }> {
++  const resolved = new Map<string, { qid: string; authorPage: string; matchedTitle: string }>();
++  const unresolved: Array<{ workId: string; reason: string }> = [];
++
++  const byLanguage = new Map<string, WorkRow[]>();
++  for (const work of worksNeedingQid) {
++    if (!work.original_language) { unresolved.push({ workId: work.id, reason: "original_language is unknown; cannot pick a Wikisource language edition to search" }); continue; }
++    const list = byLanguage.get(work.original_language) ?? [];
++    list.push(work);
++    byLanguage.set(work.original_language, list);
++  }
++
++  for (const [wikiLanguage, works] of byLanguage) {
++    let authorPage: { title: string; qid: string } | null;
++    try {
++      authorPage = await findWikisourceAuthorPage(wikiLanguage, knownNames);
++    } catch (error) {
++      const reason = `Wikisource author-page lookup failed: ${error instanceof Error ? error.message : String(error)}`;
++      for (const work of works) unresolved.push({ workId: work.id, reason });
++      continue;
++    }
++    if (!authorPage) {
++      for (const work of works) unresolved.push({ workId: work.id, reason: `No ${wikiLanguage}.wikisource.org Author-namespace page found for this author` });
++      continue;
++    }
++
++    let linked: Array<{ title: string; qid: string }>;
++    try {
++      linked = await fetchLinkedPageQids(wikiLanguage, authorPage.title);
++    } catch (error) {
++      const reason = `Wikisource linked-pages lookup failed: ${error instanceof Error ? error.message : String(error)}`;
++      for (const work of works) unresolved.push({ workId: work.id, reason });
++      continue;
++    }
++
++    let entities: Record<string, any> = {};
++    try {
++      for (let i = 0; i < linked.length; i += 40) Object.assign(entities, await fetchWikidataClaims(linked.slice(i, i + 40).map(x => x.qid)));
++    } catch (error) {
++      const reason = `Wikidata entity fetch failed: ${error instanceof Error ? error.message : String(error)}`;
++      for (const work of works) unresolved.push({ workId: work.id, reason });
++      continue;
++    }
++
++    let confirmedQids: Set<string>;
++    try {
++      confirmedQids = await confirmedLiteraryWorkQids(entities);
++    } catch (error) {
++      const reason = `Wikidata type-classification failed: ${error instanceof Error ? error.message : String(error)}`;
++      for (const work of works) unresolved.push({ workId: work.id, reason });
++      continue;
++    }
++
++    const approved = linked.filter(link => confirmedQids.has(link.qid) && confirmedAuthorship(entities[link.qid], authorPage!.qid));
++
++    for (const work of works) {
++      const variants = titleVariants(work.title);
++      addTitleVariantsFrom(variants, work.original_title);
++      for (const alt of work.alternative_titles ?? []) addTitleVariantsFrom(variants, alt);
++
++      const matches = approved.filter(link => Array.from(titleVariants(link.title)).some(v => variants.has(v)));
++      if (matches.length === 1) {
++        resolved.set(work.id, { qid: matches[0].qid, authorPage: authorPage.title, matchedTitle: matches[0].title });
++      } else if (matches.length === 0) {
++        unresolved.push({ workId: work.id, reason: `No confirmed literary-work page linked from ${wikiLanguage}.wikisource.org's "${authorPage.title}" matched this work's title` });
++      } else {
++        unresolved.push({ workId: work.id, reason: `${matches.length} confirmed literary-work pages matched this work's title -- ambiguous, left for manual review` });
++      }
++    }
++  }
++
++  return { resolved, unresolved };
++}
++
++function addTitleVariantsFrom(target: Set<string>, value: string | null | undefined) {
++  if (!value) return;
++  for (const variant of titleVariants(value)) target.add(variant);
++}
++
+ Deno.serve(async (req: Request) => {
+   if (req.method !== "GET") return json({ error: "Method not allowed" }, 405);
+   const url = new URL(req.url);
+@@ -231,6 +487,24 @@ Deno.serve(async (req: Request) => {
+     if (typeof row.work_id === "string" && typeof qid === "string" && /^Q\d+$/.test(qid) && !qidByWork.has(row.work_id)) qidByWork.set(row.work_id, qid);
+   }
+ 
++  // Fallback identity resolution for works master_corpus_candidates has no QID for yet (see
++  // resolveFallbackQids above) -- scoped to just these works, not the author's whole bibliography,
++  // so it stays cheap and keeps working even when a prior whole-author discovery pass failed.
++  const worksNeedingQid = workRows.filter(w => !qidByWork.has(w.id));
++  let fallbackResolved: Map<string, { qid: string; authorPage: string; matchedTitle: string }> = new Map();
++  let fallbackUnresolved: Array<{ workId: string; reason: string }> = [];
++  if (worksNeedingQid.length) {
++    try {
++      const fallback = await resolveFallbackQids(worksNeedingQid, knownNames);
++      fallbackResolved = fallback.resolved;
++      fallbackUnresolved = fallback.unresolved;
++      for (const [workId, match] of fallbackResolved) qidByWork.set(workId, match.qid);
++    } catch (error) {
++      console.error("Fallback identity resolution failed", error);
++      fallbackUnresolved = worksNeedingQid.map(w => ({ workId: w.id, reason: `Fallback resolution threw: ${error instanceof Error ? error.message : String(error)}` }));
++    }
++  }
++
+   const qids = Array.from(new Set(qidByWork.values()));
+   let entities: Record<string, any> = {};
+   try { entities = await fetchWikidata(qids); } catch (error) { console.error("Wikidata enrichment failed", error); }
+@@ -288,7 +562,11 @@ Deno.serve(async (req: Request) => {
+       const old = existingCandidateByKey.get(`${SOURCE_WIKISOURCE}|${externalId}|${work.id}`);
+       const existingEditionReady = existingEdition?.work_id === work.id && existingEdition?.ingestion_status === "ready";
+       const status = resolveCandidateStatus(existingEditionReady, old?.status, "review");
+-      rows.push({ work_id: work.id, author_id: authorId, source_id: SOURCE_WIKISOURCE, external_id: externalId, language, title, work_qid: qid, status, rights_status: "unknown", jurisdiction: null, provider_metadata: { workQid: qid, wikiLanguage: language, pageTitle: title, identity: "wikidata-sitelink-exact" }, updated_at: now });
++      const fallbackMatch = fallbackResolved.get(work.id);
++      const identity = fallbackMatch && fallbackMatch.qid === qid
++        ? "fallback-wikisource-author-page-linked-title-match"
++        : "wikidata-sitelink-exact";
++      rows.push({ work_id: work.id, author_id: authorId, source_id: SOURCE_WIKISOURCE, external_id: externalId, language, title, work_qid: qid, status, rights_status: "unknown", jurisdiction: null, provider_metadata: { workQid: qid, wikiLanguage: language, pageTitle: title, identity }, updated_at: now });
+       if (status === "review") wikisourceQueuedForReview++;
+     }
+   }
+@@ -356,6 +634,9 @@ Deno.serve(async (req: Request) => {
+     authorName: author.name,
+     works: workRows.length,
+     worksWithQid: qids.length,
++    fallbackIdentityAttempted: worksNeedingQid.length,
++    fallbackIdentityResolved: fallbackResolved.size,
++    fallbackIdentityUnresolved: fallbackUnresolved,
+     wikidataSitelinks,
+     wikisourceQueuedForReview,
+     gutendexTerm,
+diff --git a/supabase/functions/anki-multilingual-runner/index.ts b/supabase/functions/anki-multilingual-runner/index.ts
+index e8d3fba..971c55c 100644
+--- a/supabase/functions/anki-multilingual-runner/index.ts
++++ b/supabase/functions/anki-multilingual-runner/index.ts
+@@ -26,14 +26,35 @@ async function consumeRunAccess(sb: any, token: string, runId: string) {
+   return Boolean(changed);
+ }
+ 
+-async function addWorkLanguage(sb: any, workId: string, language: string) {
+-  const { data: work } = await sb.from("works").select("available_languages").eq("id", workId).maybeSingle();
+-  const languages = new Set<string>((work?.available_languages ?? []).filter((v: unknown): v is string => typeof v === "string"));
+-  languages.add(language);
+-  await sb.from("works").update({ available_languages: Array.from(languages) }).eq("id", workId);
++// available_languages is now a derived cache kept correct by DB triggers (see
++// supabase/sql/available_languages_source_of_truth.sql) driven off real editions/book_files/
++// rights_assertions state -- this function used to append a language to it pre-emptively, before
++// the edition was even confirmed ready, which is exactly the "stale available_languages" bug
++// class this fix removes. It now just asks the DB to recompute the real value for this work
++// instead of guessing ahead of time.
++async function syncWorkAvailableLanguages(sb: any, workId: string) {
++  await sb.rpc("sync_work_available_languages", { p_work_id: workId });
++}
++
++// Reads back whatever omnia-ingest actually asserted in rights_assertions for an edition, so the
++// multilingual_candidates row reflects reality instead of an assumed status. Prefers a
++// public-domain row (any jurisdiction) if one exists; otherwise reports the first row found, or
++// an explicit "unknown"/null pair if somehow none exists yet.
++async function readBestRights(sb: any, editionId: string): Promise<{ status: string; jurisdiction: string | null }> {
++  const { data: rows } = await sb.from("rights_assertions").select("status,jurisdiction").eq("edition_id", editionId);
++  const publicDomain = (rows ?? []).find((r: any) => r.status === "public-domain");
++  if (publicDomain) return { status: publicDomain.status, jurisdiction: publicDomain.jurisdiction ?? null };
++  const first = (rows ?? [])[0];
