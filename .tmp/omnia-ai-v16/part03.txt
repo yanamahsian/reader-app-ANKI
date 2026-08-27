@@ -1,0 +1,280 @@
+    uk: "Ukrainian",
+    de: "German",
+    fr: "French",
+    es: "Spanish",
+    it: "Italian",
+    pt: "Portuguese",
+    pl: "Polish",
+    nl: "Dutch",
+    sv: "Swedish",
+    da: "Danish",
+    fi: "Finnish",
+    hu: "Hungarian",
+    zh: "Chinese",
+    ja: "Japanese",
+    la: "Latin",
+    grc: "Ancient Greek",
+  };
+
+  return names[code.toLowerCase()] || code;
+}
+
+
+// Same OpenAI Responses API shape already used by omnia-classify-ai
+// (https://api.openai.com/v1/responses, store: false, output read via
+// output_text / output[].content[].text) -- reused here rather than a
+// second, differently-shaped provider call.
+async function callOpenAI(
+  systemPrompt: string,
+  userText: string,
+  maxOutputTokens: number,
+): Promise<string> {
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY secret");
+  }
+
+  const model = Deno.env.get("OMNIA_AI_MODEL") || DEFAULT_AI_MODEL;
+
+  const response = await fetchWithTimeout(
+    "https://api.openai.com/v1/responses",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userText },
+        ],
+        store: false,
+        max_output_tokens: maxOutputTokens,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+
+    throw new Error(
+      `OpenAI request failed: ${response.status} ${errText.slice(0, 500)}`,
+    );
+  }
+
+  const responseBody = await response.json();
+  const outputText = extractOutputText(responseBody);
+
+  if (!outputText) {
+    throw new Error("OpenAI response did not contain output text");
+  }
+
+  return outputText.trim();
+}
+
+
+// deno-lint-ignore no-explicit-any
+function extractOutputText(body: any): string | null {
+  if (typeof body?.output_text === "string" && body.output_text.length > 0) {
+    return body.output_text;
+  }
+
+  const output = Array.isArray(body?.output) ? body.output : [];
+
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+
+    for (const contentItem of content) {
+      if (
+        typeof contentItem?.text === "string" &&
+        contentItem.text.length > 0
+      ) {
+        return contentItem.text;
+      }
+    }
+  }
+
+  return null;
+}
+
+
+async function searchGutendex(
+  query: string,
+  language: string,
+): Promise<LibraryBook[]> {
+  const url = new URL(
+    "/books/",
+    GUTENDEX_BASE_URL,
+  );
+
+  url.searchParams.set("search", query);
+
+  if (language) {
+    url.searchParams.set(
+      "languages",
+      language,
+    );
+  }
+
+  const response = await fetchWithTimeout(
+    url.toString(),
+    {
+      headers: externalRequestHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Gutendex search failed with status ${response.status}`,
+    );
+  }
+
+  const data = await response.json() as GutendexResponse;
+
+  const results = Array.isArray(data.results)
+    ? data.results
+    : [];
+
+  return results
+    .filter(isReadableGutendexBook)
+    .slice(0, GUTENDEX_RESULTS_LIMIT)
+    .map((book): LibraryBook => {
+      const numericId = Number(book.id);
+
+      return {
+        id: `gutenberg:${numericId}`,
+        title: cleanBookTitle(
+          normalizeString(book.title),
+        ),
+        authors: normalizeGutendexAuthors(
+          book.authors,
+        ),
+        languages: normalizeLanguages(
+          book.languages,
+        ),
+      };
+    })
+    .filter((book) =>
+      Boolean(book.title) &&
+      book.id !== "gutenberg:NaN"
+    );
+}
+
+
+function isReadableGutendexBook(
+  book: GutendexBook,
+): boolean {
+  if (
+    typeof book.id !== "number" ||
+    !normalizeString(book.title)
+  ) {
+    return false;
+  }
+
+  const formats = book.formats || {};
+
+  return Boolean(
+    chooseGutendexTextUrl(formats),
+  );
+}
+
+
+function chooseGutendexTextUrl(
+  formats: Record<string, string>,
+): string {
+  const preferredFormatKeys = [
+    "text/html; charset=utf-8",
+    "text/html; charset=us-ascii",
+    "text/html",
+    "text/plain; charset=utf-8",
+    "text/plain; charset=us-ascii",
+    "text/plain",
+  ];
+
+  for (const formatKey of preferredFormatKeys) {
+    const candidate = normalizeString(
+      formats[formatKey],
+    );
+
+    if (isUsableRemoteUrl(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const [format, remoteUrl] of Object.entries(formats)) {
+    const normalizedFormat = format.toLowerCase();
+    const normalizedUrl = normalizeString(remoteUrl);
+
+    if (
+      (
+        normalizedFormat.startsWith("text/html") ||
+        normalizedFormat.startsWith("text/plain")
+      ) &&
+      isUsableRemoteUrl(normalizedUrl)
+    ) {
+      return normalizedUrl;
+    }
+  }
+
+  return "";
+}
+
+
+async function readGutendexBook(
+  encodedId: string,
+): Promise<ReadableBook> {
+  const rawId = encodedId.slice(
+    "gutenberg:".length,
+  );
+
+  if (!/^\d+$/.test(rawId)) {
+    throw new Error("Invalid Gutenberg book id");
+  }
+
+  const metadataResponse = await fetchWithTimeout(
+    `${GUTENDEX_BASE_URL}/books/${rawId}/`,
+    {
+      headers: externalRequestHeaders(),
+    },
+  );
+
+  if (!metadataResponse.ok) {
+    if (metadataResponse.status === 404) {
+      throw new Error("Book not found");
+    }
+
+    throw new Error(
+      `Gutendex book request failed with status ${metadataResponse.status}`,
+    );
+  }
+
+  const book = await metadataResponse
+    .json() as GutendexBook;
+
+  const textUrl = chooseGutendexTextUrl(
+    book.formats || {},
+  );
+
+  if (!textUrl) {
+    throw new Error(
+      "This book has no readable text format",
+    );
+  }
+
+  const textResponse = await fetchWithTimeout(
+    textUrl,
+    {
+      headers: externalRequestHeaders(),
+    },
+  );
+
+  if (!textResponse.ok) {
+    throw new Error(
+      `Book text request failed with status ${textResponse.status}`,
+    );
+  }
+
+  const contentType =
