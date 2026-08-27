@@ -1,0 +1,128 @@
+name: Atlas v1 integration gate
+
+on:
+  push:
+    branches: [atlas-v1-no-ai]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-build-commit:
+    if: github.event.head_commit.message == 'Add Atlas v1 integration gate'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: atlas-v1-no-ai
+
+      - name: Wire Atlas into App
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.tsx')
+          text = path.read_text()
+
+          import_anchor = 'import { MyLibraryView } from "./features/my-library/MyLibraryView";\n'
+          assert import_anchor in text
+          text = text.replace(import_anchor, import_anchor + 'import { AtlasView } from "./features/atlas/AtlasView";\n', 1)
+
+          origin_anchor = '  | { type: "library"; state: LibraryRestoreState }\n'
+          assert origin_anchor in text
+          text = text.replace(origin_anchor, origin_anchor + '  | { type: "atlas" }\n', 1)
+
+          back_anchor = '''    if (bookDetailOrigin?.type === "my-library") {
+              setMyLibraryRestoreState(bookDetailOrigin.state);
+              setView("my-library");
+              return;
+            }
+          '''
+          if back_anchor not in text:
+              back_anchor = '''    if (bookDetailOrigin?.type === "my-library") {
+      setMyLibraryRestoreState(bookDetailOrigin.state);
+      setView("my-library");
+      return;
+    }
+'''
+          assert back_anchor in text, 'Could not find My Library back branch'
+          atlas_back = back_anchor + '''
+    if (bookDetailOrigin?.type === "atlas") {
+      setView("atlas");
+      return;
+    }
+'''
+          text = text.replace(back_anchor, atlas_back, 1)
+
+          render_anchor = '''  } else if (view === "notes") {
+    content = <NotesView onBack={handleBackFromAccountShell} />;
+'''
+          assert render_anchor in text, 'Could not find notes render branch'
+          atlas_render = '''  } else if (view === "atlas") {
+    content = (
+      <AtlasView
+        onBack={handleBackFromAccountShell}
+        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
+        onRequireSignIn={handleRequireSignIn}
+      />
+    );
+''' + render_anchor
+          text = text.replace(render_anchor, atlas_render, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Typecheck and production build
+        run: npm run build
+
+      - name: Deterministic Atlas smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/atlas-smoke.ts <<'EOF'
+          import { scoreAtlasPair } from "${GITHUB_WORKSPACE}/src/features/atlas/buildAtlas.ts";
+
+          const base = {
+            originalTitle: null, alternativeTitles: [], originalLanguage: "en", availableLanguages: ["en"],
+            description: "", cover: null, editions: [], collectionIds: [], genreIds: [], themeIds: [],
+            countryId: null, centuryId: null, epochId: null, movementId: null, publicationYear: null
+          };
+          const crime = { ...base, id:"crime-and-punishment", title:"Преступление и наказание", authorId:"dostoevsky", authorName:"Достоевский", publicationYear:1866, countryId:"russian-literature", centuryId:"19", epochId:"long-nineteenth-century", movementId:"realism", genreIds:["novel"], themeIds:["morality","identity"], collectionIds:["russian-classics","great-19th-century-novels"] };
+          const anna = { ...base, id:"anna-karenina", title:"Анна Каренина", authorId:"tolstoy", authorName:"Толстой", publicationYear:1877, countryId:"russian-literature", centuryId:"19", epochId:"long-nineteenth-century", movementId:"realism", genreIds:["novel"], themeIds:["love","family"], collectionIds:["russian-classics","great-19th-century-novels"] };
+          const kafka = { ...base, id:"the-metamorphosis", title:"Превращение", authorId:"kafka", authorName:"Кафка", publicationYear:1915, countryId:"german-literature", centuryId:"20", epochId:"early-twentieth-century", movementId:"modernism", genreIds:["novella"], themeIds:["alienation","family","identity"] };
+          const unrelated = { ...base, id:"unrelated", title:"Unrelated", authorId:"other", authorName:"Other", publicationYear:1700 };
+
+          const historical = scoreAtlasPair(crime as any, anna as any);
+          const thematic = scoreAtlasPair(crime as any, kafka as any);
+          const none = scoreAtlasPair(crime as any, unrelated as any);
+
+          if (!historical || historical.score < 8) throw new Error('Expected a strong C&P ↔ Anna connection');
+          if (!thematic || !thematic.reasons.some(r => r.kind === 'theme')) throw new Error('Expected C&P ↔ Kafka theme connection');
+          if (none !== null) throw new Error('Unrelated books must not get an edge');
+          console.log('ATLAS_SMOKE_OK', { historicalScore: historical.score, historicalReasons: historical.reasons.map(r=>r.kind), thematicScore: thematic.score, thematicReasons: thematic.reasons.map(r=>r.kind) });
+          EOF
+          sed -i "s|\${GITHUB_WORKSPACE}|${GITHUB_WORKSPACE}|g" /tmp/atlas-smoke.ts
+          npx --yes tsx /tmp/atlas-smoke.ts
+
+      - name: Commit clean implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/atlas-v1-integrate.yml
+          git config user.name "AN.KI build bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Implement Atlas v1 without paid AI"
+          git push origin HEAD:atlas-v1-no-ai
