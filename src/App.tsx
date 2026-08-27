@@ -12,6 +12,7 @@ import { AppShell } from "./app/AppShell";
 import type { AccountShellView } from "./app/AccountMenu";
 import { ProfileView } from "./features/profile/ProfileView";
 import { MyLibraryView } from "./features/my-library/MyLibraryView";
+import { AtlasView } from "./features/atlas/AtlasView";
 import type { MyLibraryRestoreState } from "./features/my-library/MyLibraryView";
 import { NotesView } from "./features/notes/NotesView";
 import { SubscriptionView } from "./features/subscription/SubscriptionView";
@@ -43,6 +44,7 @@ export type BookDetailOrigin =
   | { type: "collection"; collectionId: string }
   | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin }
   | { type: "library"; state: LibraryRestoreState }
+  | { type: "atlas" }
   // USER LIBRARY PHASE (requirement #18): mirrors the "library" origin
   // above exactly, so "Моя библиотека → Book Detail → Назад" returns to
   // My Library with its selected tab restored, the same way the public
@@ -250,6 +252,11 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "atlas") {
+      setView("atlas");
+      return;
+    }
+
     setView("home");
 
   }
@@ -403,6 +410,14 @@ export function App() {
         onOpenBookDetail={handleOpenBookDetailFromMyLibrary}
         onRequireSignIn={handleRequireSignIn}
         onOpenLibrary={handleOpenLibrary}
+      />
+    );
+  } else if (view === "atlas") {
+    content = (
+      <AtlasView
+        onBack={handleBackFromAccountShell}
+        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
+        onRequireSignIn={handleRequireSignIn}
       />
     );
   } else if (view === "notes") {

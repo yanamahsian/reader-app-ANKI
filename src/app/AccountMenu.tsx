@@ -3,6 +3,7 @@ import { useAuth } from "../auth/supabaseAuth";
 export type AccountShellView =
   | "profile"
   | "my-library"
+  | "atlas"
   | "notes"
   | "subscription"
   | "settings"
@@ -63,6 +64,7 @@ export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
 
         <div className="account-menu-list">
           <button type="button" role="menuitem" onClick={() => go("my-library")}>Моя библиотека</button>
+          <button type="button" role="menuitem" onClick={() => go("atlas")}>Atlas</button>
           <button type="button" role="menuitem" onClick={() => go("notes")}>Заметки</button>
           <button type="button" role="menuitem" onClick={() => go("profile")}>Профиль</button>
           <button type="button" role="menuitem" onClick={() => go("subscription")}>Подписка</button>
