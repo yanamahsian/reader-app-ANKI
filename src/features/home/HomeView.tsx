@@ -206,7 +206,7 @@ export function HomeView({
         </section>
 
         <footer className="site-footer">
-          <div>AN.KI Atlas</div>
+          <div>AN.KI</div>
         </footer>
 
       </div>

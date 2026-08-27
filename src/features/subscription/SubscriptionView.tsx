@@ -1,94 +1,108 @@
 import { ShellPage } from "../shared/ShellPage";
+import { PlanCard, type PlanDef } from "./PlanCard";
+import "../../styles/pricing.css";
 
 interface SubscriptionViewProps {
   onBack: () => void;
 }
 
-interface PlanDef {
-  id: string;
-  name: string;
-  priceNote: string;
-  tagline: string;
-  features: string[];
-  highlighted?: boolean;
-}
-
-// Neutral placeholder plan names/prices per the spec: no final prices are
-// invented here — every card carries an explicit "цена будет определена"
-// note instead of a number. Checkout is not wired up, so every action
-// button is disabled and labelled "Скоро" rather than looking clickable.
+// Canonical tier names, prices and entitlements per
+// docs/ANKI_PRODUCT_ARCHITECTURE.md (§10-§18, §12 pricing table). Prices
+// and the four tier names are frozen there — nothing here is invented.
+// Feature lists are trimmed to the 5-8 clearest entitlements per card
+// (the full matrix lives in the architecture doc) so a card stays
+// readable rather than reproducing every row.
 const PLANS: PlanDef[] = [
   {
     id: "free",
     name: "Free",
-    priceNote: "бесплатно",
-    tagline: "Знакомство с библиотекой AN.KI",
-    features: ["Доступ к части каталога", "Базовый режим чтения", "Ограниченное число заметок"],
+    figure: "pawn",
+    price: "€0",
+    tagline: "Постоянный бесплатный доступ.",
+    isCurrent: true,
+    features: [
+      "Личная библиотека AN.KI — ограниченная подборка",
+      "Базовый Reader и прогресс чтения",
+      "Закладки",
+      "Базовые выделения и заметки",
+      "Ограниченные Translate, Explain и Reveal",
+      "Превью Atlas",
+    ],
   },
   {
-    id: "reader",
-    name: "Reader",
-    priceNote: "цена будет определена",
-    tagline: "Для тех, кто читает много и регулярно",
-    features: ["Полный доступ к каталогу", "Расширенные настройки чтения", "Синхронизация заметок"],
-    highlighted: true,
+    id: "library",
+    name: "Library",
+    figure: "knight",
+    price: "€14.90",
+    priceUnit: "/ мес.",
+    annualPrice: "€129 / год",
+    annualSavingsPct: 28,
+    tagline: "Полноценная среда для чтения AN.KI.",
+    features: [
+      "Всё из Free",
+      "Полный доступный каталог AN.KI",
+      "Полный Reader и персональная библиотека",
+      "Расширенные заметки, выделения и коллекции",
+      "Импорт личных EPUB, PDF и FB2 (где поддерживается)",
+      "Синхронизация на всех устройствах",
+      "Translate, Explain и Ask Book",
+    ],
   },
   {
-    id: "full-access",
-    name: "Full Access",
-    priceNote: "цена будет определена",
-    tagline: "Максимум возможностей AN.KI",
-    features: ["Всё из Reader", "Ранний доступ к AI-функциям", "Приоритетная поддержка"],
+    id: "atlas",
+    name: "Atlas",
+    figure: "bust",
+    price: "€24.90",
+    priceUnit: "/ мес.",
+    annualPrice: "€219 / год",
+    annualSavingsPct: 27,
+    tagline: "AN.KI запоминает и выстраивает вашу интеллектуальную историю чтения.",
+    recommended: true,
+    features: [
+      "Всё из Library",
+      "Персональный интеллектуальный граф чтения",
+      "Связи между книгами, авторами, идеями и эпохами",
+      "Тематические линии через всё прочитанное",
+      "Вопросы и поиск по собственной библиотеке",
+      "Сравнения и противоречия между авторами",
+      "Незавершённые линии мысли возвращаются сами",
+    ],
+  },
+  {
+    id: "academy",
+    name: "Academy",
+    figure: "queen",
+    price: "€39.90",
+    priceUnit: "/ мес.",
+    annualPrice: "€349 / год",
+    annualSavingsPct: 27,
+    tagline: "Прочитанное становится структурированным образованием.",
+    features: [
+      "Всё из Atlas",
+      "Структурированные образовательные маршруты",
+      "Философия, литература, история искусства, архитектура и другие дисциплины",
+      "Курируемые программы: первичные и вторичные источники",
+      "Определение пробелов и последовательности изучения",
+      "Адаптивные траектории обучения на основе Atlas",
+      "Прогресс по каждой дисциплине",
+    ],
   },
 ];
 
 export function SubscriptionView({ onBack }: SubscriptionViewProps) {
   return (
-    <ShellPage onBack={onBack} eyebrow="Аккаунт" title="Подписка" subtitle="Оплата и тарифы появятся в одном из следующих обновлений.">
+    <ShellPage
+      onBack={onBack}
+      eyebrow="Подписка"
+      title="Выберите свой уровень"
+      subtitle="Одна библиотека. Несколько уровней интеллекта."
+      wide
+    >
 
-      <section className="subscription-current">
-        <h2>Текущий план</h2>
-        <p className="settings-section-note">Free — активен по умолчанию, без учётной записи.</p>
-      </section>
-
-      <section className="subscription-plans">
+      <section className="pricing-showcase">
         {PLANS.map((plan) => (
-          <article
-            key={plan.id}
-            className={plan.highlighted ? "plan-card plan-card-highlighted" : "plan-card"}
-          >
-            <h3 className="plan-card-name">{plan.name}</h3>
-            <p className="plan-card-price">{plan.priceNote}</p>
-            <p className="plan-card-tagline">{plan.tagline}</p>
-            <ul className="plan-card-features">
-              {plan.features.map((feature) => (
-                <li key={feature}>{feature}</li>
-              ))}
-            </ul>
-            <button type="button" className="primary-button" disabled>
-              Скоро
-            </button>
-          </article>
+          <PlanCard key={plan.id} plan={plan} />
         ))}
-      </section>
-
-      <section className="subscription-blocks">
-        <div className="subscription-block">
-          <h2>AI-функции</h2>
-          <p className="settings-section-note">Подсказки, разбор текста и умные заметки — в разработке.</p>
-        </div>
-        <div className="subscription-block">
-          <h2>Чтение</h2>
-          <p className="settings-section-note">Расширенные темы и вёрстка для режима чтения.</p>
-        </div>
-        <div className="subscription-block">
-          <h2>Заметки</h2>
-          <p className="settings-section-note">Синхронизация и экспорт заметок между устройствами.</p>
-        </div>
-        <div className="subscription-block">
-          <h2>Управление подпиской</h2>
-          <p className="settings-section-note">Смена плана и отмена — появятся вместе с оплатой.</p>
-        </div>
       </section>
 
     </ShellPage>

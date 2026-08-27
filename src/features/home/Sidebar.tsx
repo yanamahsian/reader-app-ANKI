@@ -24,10 +24,8 @@ export function Sidebar({ isOpen, onClose, onOpenSearch, onOpenCollections }: Si
           ×
         </button>
 
-        <a className="brand-lockup" href="#hero" aria-label="AN.KI Atlas — главная">
+        <a className="brand-lockup" href="#hero" aria-label="AN.KI — главная">
           <span className="brand">AN.KI</span>
-          <span className="brand-rule" aria-hidden="true" />
-          <span className="brand-subtitle">ATLAS</span>
         </a>
 
         <nav className="site-nav">
@@ -44,7 +42,7 @@ export function Sidebar({ isOpen, onClose, onOpenSearch, onOpenCollections }: Si
 
         <div className="sidebar-bottom">
           <p>Вне времени.<br />Вне границ. Читай.</p>
-          <span>AN.KI Atlas · 2026</span>
+          <span>AN.KI · 2026</span>
         </div>
 
       </aside>

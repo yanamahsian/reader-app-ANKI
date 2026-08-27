@@ -13,7 +13,7 @@ interface HeroProps {
 export function Hero({ onOpenSearch, onOpenLibrary }: HeroProps) {
 
   return (
-    <section id="hero" className="hero" aria-label="AN.KI Atlas">
+    <section id="hero" className="hero" aria-label="AN.KI">
 
       <div className="hero-topline">
         <span>Цифровая библиотека</span>
@@ -21,7 +21,7 @@ export function Hero({ onOpenSearch, onOpenLibrary }: HeroProps) {
 
       <div className="hero-content">
 
-        <p className="eyebrow">AN.KI ATLAS</p>
+        <p className="eyebrow">AN.KI</p>
 
         <h1>
           Вся мировая литература.<br />

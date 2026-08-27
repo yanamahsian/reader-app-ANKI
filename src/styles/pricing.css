@@ -1,0 +1,392 @@
+/* Opt-in wide column — Subscription only (see ShellPage's `wide` prop).
+   The other five account screens never pass it, so they keep the
+   760px column above untouched. */
+.shell-page-wide {
+  max-width: 1440px;
+}
+
+/* =========================================================
+   PRICING SHOWCASE (Subscription)
+
+   Its own "pricing-*" class family, not a reuse of ".plan-card" —
+   AtlasView already reuses ".plan-card" / ".plan-card-highlighted" /
+   ".subscription-plans" for its own unrelated book-connection tiles,
+   so this stays fully separate to avoid changing that screen too.
+   ========================================================= */
+
+.pricing-showcase {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 22px;
+}
+
+.pricing-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+
+  padding: 48px 30px 38px;
+
+  border: 1px solid var(--home-border);
+  background:
+    linear-gradient(165deg, rgba(74, 21, 29, 0.22), rgba(23, 16, 13, 0.6) 55%),
+    rgba(16, 11, 9, 0.72);
+
+  text-align: center;
+
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.pricing-card-recommended {
+  border-color: var(--home-gold);
+  background:
+    linear-gradient(165deg, rgba(74, 21, 29, 0.42), rgba(23, 16, 13, 0.62) 60%),
+    rgba(16, 11, 9, 0.72);
+  box-shadow: 0 0 0 1px rgba(202, 160, 88, 0.28), 0 26px 60px rgba(74, 21, 29, 0.35);
+}
+
+@media (min-width: 1101px) {
+  .pricing-card-recommended {
+    transform: translateY(-14px);
+    padding-top: 54px;
+    padding-bottom: 46px;
+  }
+}
+
+.pricing-badge {
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+
+  padding: 6px 16px;
+
+  border: 1px solid var(--home-gold);
+  background: #100b09;
+  color: var(--home-gold);
+
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pricing-card-name {
+  margin: 10px 0 22px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: 34px;
+}
+
+.pricing-card-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
+}
+
+.pricing-card-price-amount {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 600;
+  font-size: 56px;
+  line-height: 1;
+  color: var(--home-text);
+}
+
+.pricing-card-price-unit {
+  color: var(--home-muted);
+
+  font-size: 13px;
+}
+
+.pricing-card-annual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  margin: 9px 0 0;
+
+  color: var(--home-muted);
+
+  font-size: 12px;
+}
+
+.pricing-card-annual-save {
+  padding: 1px 7px;
+
+  border: 1px solid rgba(202, 160, 88, 0.4);
+
+  color: var(--home-gold);
+
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pricing-card-tagline {
+  margin: 18px 0 0;
+
+  min-height: 44px;
+
+  color: var(--home-muted);
+
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pricing-card-divider {
+  display: block;
+  width: 44px;
+  height: 1px;
+
+  margin: 28px auto;
+
+  background: var(--home-border);
+}
+
+.pricing-card-features {
+  flex: 1;
+
+  margin: 0 0 30px;
+  padding: 0;
+  list-style: none;
+
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+
+  text-align: left;
+
+  color: rgba(246, 237, 224, 0.82);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pricing-card-features li {
+  position: relative;
+  padding-left: 18px;
+}
+
+.pricing-card-features li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+
+  color: var(--home-gold);
+}
+
+.pricing-card-features li:first-child {
+  color: var(--home-text);
+  font-weight: 600;
+}
+
+.pricing-card-cta {
+  min-height: 52px;
+
+  border: 1px solid rgba(202, 160, 88, 0.64);
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+
+  background: linear-gradient(180deg, #6c232e 0%, #4a151d 52%, #380d15 100%);
+  color: #f9ecd9;
+  opacity: 1;
+
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -14px 18px rgba(0, 0, 0, 0.32),
+    0 10px 26px rgba(74, 21, 29, 0.4);
+
+  cursor: not-allowed;
+
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+/* Real disabled <button>s (checkout isn't wired up yet), but they must
+   still read as full premium CTAs, not washed-out form controls —
+   Safari/Firefox dim `:disabled` opacity by default via their UA
+   stylesheet, so it's reasserted explicitly here. */
+.pricing-card-cta:disabled {
+  opacity: 1;
+}
+
+.pricing-card-recommended .pricing-card-cta {
+  border-color: var(--home-gold);
+  background: linear-gradient(180deg, #832a37 0%, #5b1b25 52%, #430f17 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -14px 20px rgba(0, 0, 0, 0.3),
+    0 14px 32px rgba(93, 20, 32, 0.55);
+}
+
+.pricing-card-cta-current {
+  background: linear-gradient(180deg, rgba(30, 21, 17, 0.9), rgba(16, 11, 9, 0.92));
+  border-color: var(--home-border);
+  color: var(--home-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pricing-card:hover {
+    border-color: rgba(202, 160, 88, 0.55);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4);
+  }
+
+  .pricing-card-recommended:hover {
+    box-shadow: 0 0 0 1px rgba(202, 160, 88, 0.4), 0 30px 66px rgba(74, 21, 29, 0.45);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pricing-card {
+    transition: none;
+  }
+}
+
+/* Glossy cherry-glass emblem, shared by every tier (PlanEmblem.tsx) */
+
+.plan-emblem {
+  width: 170px;
+  height: 170px;
+
+  margin: 0 auto 26px;
+}
+
+.plan-emblem-glass {
+  position: relative;
+
+  width: 100%;
+  height: 100%;
+
+  border-radius: 50%;
+  overflow: hidden;
+
+  background: radial-gradient(
+    circle at 50% 50%,
+    #1c0509 0%,
+    #3d0c17 32%,
+    #6e1524 56%,
+    #a9273a 76%,
+    #d94f5f 91%,
+    #f4a3ac 100%
+  );
+
+  box-shadow:
+    inset 0 -18px 30px rgba(0, 0, 0, 0.6),
+    inset 0 14px 22px rgba(255, 255, 255, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    0 0 46px rgba(178, 32, 50, 0.32);
+}
+
+.plan-emblem-highlight {
+  position: absolute;
+  top: 10%;
+  left: 15%;
+
+  width: 46%;
+  height: 30%;
+
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 70%);
+  filter: blur(1px);
+  transform: rotate(-18deg);
+}
+
+.plan-emblem-glint {
+  position: absolute;
+  bottom: 15%;
+  right: 18%;
+
+  width: 13%;
+  height: 9%;
+
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 214, 222, 0.9), rgba(255, 214, 222, 0) 70%);
+}
+
+.plan-emblem-figure {
+  position: absolute;
+  inset: 0;
+
+  width: 58%;
+  height: 58%;
+  margin: auto;
+
+  /* Fill/stroke are set per-path in PlanEmblem.tsx (a gradient, not a
+     flat color) so the figure reads as ruby glass, not a black cutout. */
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5));
+}
+
+@media (max-width: 1100px) {
+  .pricing-showcase {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  .pricing-card-recommended {
+    transform: none;
+  }
+
+  .plan-emblem {
+    width: 132px;
+    height: 132px;
+  }
+
+  .pricing-card-price-amount {
+    font-size: 48px;
+  }
+}
+
+@media (max-width: 640px) {
+  .pricing-showcase {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .pricing-card {
+    padding: 40px 24px 34px;
+  }
+
+  .plan-emblem {
+    width: 104px;
+    height: 104px;
+    margin-bottom: 24px;
+  }
+
+  .pricing-card-name {
+    font-size: 32px;
+  }
+
+  .pricing-card-price-amount {
+    font-size: 44px;
+  }
+
+  .pricing-card-features {
+    font-size: 14px;
+  }
+}
+
+/* Screen-reader-only utility text (e.g. context on a disabled CTA that
+   would be visual clutter if shown, but should still be announced). */
+.sr-only {
+  position: absolute;
+
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

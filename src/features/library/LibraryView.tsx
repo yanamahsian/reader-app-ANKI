@@ -272,7 +272,7 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
         <button className="text-link" type="button" onClick={onBack}>
           ← Назад
         </button>
-        <p className="eyebrow" style={{ marginTop: 24 }}>AN.KI Atlas</p>
+        <p className="eyebrow" style={{ marginTop: 24 }}>AN.KI</p>
         <h1>Библиотека</h1>
         <p className="collections-subtitle">
           Полный каталог AN.KI — ищите по названию или автору, либо просто листайте.

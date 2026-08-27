@@ -49,7 +49,7 @@ export function CollectionsView({ onOpenBookDetail, onBack, initialCollectionId 
         <button className="text-link" type="button" onClick={onBack}>
           ← Библиотека
         </button>
-        <p className="eyebrow" style={{ marginTop: 24 }}>AN.KI Atlas</p>
+        <p className="eyebrow" style={{ marginTop: 24 }}>AN.KI</p>
         <h1>Подборки</h1>
         <p className="collections-subtitle">
           Кураторские маршруты по книгам, которые стоит читать вместе — от эпохи к эпохе, от идеи к идее.

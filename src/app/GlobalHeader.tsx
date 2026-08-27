@@ -31,7 +31,7 @@ export function GlobalHeader({
     <header className="global-header">
 
       <button className="global-header-brand" type="button" onClick={onNavigateHome}>
-        AN.KI <span>Atlas</span>
+        AN.KI
       </button>
 
       <nav className="global-header-nav" aria-label="Основная навигация">
