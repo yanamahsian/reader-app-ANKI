@@ -1,0 +1,214 @@
+From fbeeb79e67e44595de57a85cc5d70a26394dfc4c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 27 Aug 2026 07:44:40 +0000
+Subject: [PATCH] Source-agnostic ingestion: Wikisource support, derived
+ available_languages, integrity checks
+
+Fixes AN.KI's original-language ingestion gap (regression case: anna-karenina had
+en/fi/nl editions but no ru original despite original_language=ru, while
+available_languages falsely listed ru).
+
+- omnia-ingest: dispatches on sourceId (gutenberg | wikisource) instead of
+  rejecting everything but Gutenberg. New ingestFromWikisource() fetches the full
+  work from the correct language Wikisource, normalizes to anki-json, requires an
+  explicit workId (never creates a new Work), and asserts source/jurisdiction-
+  specific rights (DE life+70, US published>=96y) instead of copying Gutenberg's
+  public-domain/US. Gutenberg path is behavior-preserved.
+- anki-multilingual-runner: source-agnostic candidate selection/processing
+  (was hardcoded to source_id="gutenberg", starving every Wikisource candidate);
+  reads back the real rights status per edition instead of asserting one.
+- anki-multilingual-discover: fallback identity resolution for works with no
+  master_corpus_candidates QID -- resolves via the author's Wikisource page +
+  linked-page Wikidata classification, high-confidence single match only,
+  ambiguous/failed lookups surface in fallbackIdentityUnresolved for review.
+- available_languages_source_of_truth.sql: available_languages becomes a derived
+  cache (compute_qualifying_languages / sync_work_available_languages) kept in
+  sync by triggers on editions/book_files/rights_assertions, with a one-time
+  repair of previously-stale rows.
+- integrity_check_violations.sql: permanent check for missing_original_ready,
+  stale_cached_language, ready_candidate_without_edition,
+  ready_edition_without_usable_file, edition_attached_to_wrong_work.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FSqASA6sZBk2ZomqYTBYDs
+---
+ .../anki-multilingual-discover/index.ts       | 291 +++++++++-
+ .../anki-multilingual-runner/index.ts         |  65 ++-
+ supabase/functions/omnia-ingest/index.ts      | 549 +++++++++++++-----
+ .../available_languages_source_of_truth.sql   | 125 ++++
+ supabase/sql/integrity_check_violations.sql   | 122 ++++
+ 5 files changed, 982 insertions(+), 170 deletions(-)
+ create mode 100644 supabase/sql/available_languages_source_of_truth.sql
+ create mode 100644 supabase/sql/integrity_check_violations.sql
+
+diff --git a/supabase/functions/anki-multilingual-discover/index.ts b/supabase/functions/anki-multilingual-discover/index.ts
+index 5eb92ef..2adedb9 100644
+--- a/supabase/functions/anki-multilingual-discover/index.ts
++++ b/supabase/functions/anki-multilingual-discover/index.ts
+@@ -61,9 +61,31 @@ async function consumeRunAccess(sb: any, token: string, runId: string) {
+   return Boolean(changed);
+ }
+ 
++// Built from character codes rather than a \uXXXX literal in the regex source -- deploy
++// tooling in this environment has been observed to silently decode \uXXXX escape sequences
++// into their literal Unicode character during transport, corrupting the regex. This
++// constructs the same [U+0300-U+036F] combining-marks range without that literal text ever
++// appearing in the source.
++const COMBINING_MARKS_PATTERN = new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, "g");
++
++// Built from character codes rather than literal Latin-Extended/Cyrillic/CJK/Hiragana/Katakana
++// characters in the regex source -- a hand-transcribed multi-script literal in a very long
++// single-line deploy payload was observed to drift by a few code points in transit (the CJK
++// range's upper bound landed as U+9FEF instead of the intended U+9FAF on one deploy of this
++// exact file). Constructing every range from numeric code points removes that transcription
++// risk entirely, the same way NON_BREAKING_SPACE/COMBINING_MARKS_PATTERN already do above.
++const LATIN_EXTENDED_PATTERN = new RegExp(`[A-Za-z${String.fromCharCode(0x00c0)}-${String.fromCharCode(0x017e)}]`, "u");
++const NON_LATIN_AUTHOR_NAME_PATTERN = new RegExp(
++  `[${String.fromCharCode(0x0410)}-${String.fromCharCode(0x042f)}${String.fromCharCode(0x0430)}-${String.fromCharCode(0x044f)}${String.fromCharCode(0x0401)}${String.fromCharCode(0x0451)}${String.fromCharCode(0x4e00)}-${String.fromCharCode(0x9faf)}${String.fromCharCode(0x3041)}-${String.fromCharCode(0x309f)}${String.fromCharCode(0x30a0)}-${String.fromCharCode(0x30ff)}]`,
++  "u"
++);
++
++const CYRILLIC_YO_LOWER = String.fromCharCode(0x0451);
++const CYRILLIC_YE_LOWER = String.fromCharCode(0x0435);
++
+ function normalize(value: string) {
+-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+-    .replaceAll("ё", "е").replaceAll("&", " and ")
++  return value.normalize("NFD").replace(COMBINING_MARKS_PATTERN, "").toLowerCase()
++    .split(CYRILLIC_YO_LOWER).join(CYRILLIC_YE_LOWER).replaceAll("&", " and ")
+     .replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+ }
+ 
+@@ -102,11 +124,13 @@ function titleVariants(value: string) {
+   };
+   push(raw);
+   push(raw.replace(/\s*\([^)]*\)\s*$/u, ""));
+-  const colon = raw.split(/[:—–]/u)[0]?.trim();
++  const colon = raw.split(TITLE_DASH_SPLIT_PATTERN)[0]?.trim();
+   if (colon && colon.length >= 4) push(colon);
+   return variants;
+ }
+ 
++const TITLE_DASH_SPLIT_PATTERN = new RegExp(`[:${String.fromCharCode(0x2014)}${String.fromCharCode(0x2013)}]`, "u");
++
+ function wikilangFromSite(site: string): string | null {
+   const match = site.match(/^([a-z]{2,3})wikisource$/);
+   return match ? match[1] : null;
+@@ -122,7 +146,7 @@ function resolveCandidateStatus(existingEditionReady: boolean, oldStatus: string
+ function bestLatinSearchTerm(names: string[]): string | null {
+   const candidates = names
+     .map(name => name.trim())
+-    .filter(name => /[A-Za-zÀ-ž]/u.test(name) && !/[А-Яа-яЁё一-龯ぁ-ゟ゠-ヿ]/u.test(name))
++    .filter(name => LATIN_EXTENDED_PATTERN.test(name) && !NON_LATIN_AUTHOR_NAME_PATTERN.test(name))
+     .filter(name => nameTokens(name).length >= 2)
+     .sort((a, b) => nameTokens(a).length - nameTokens(b).length || a.length - b.length);
+   return candidates[0] ?? null;
+@@ -197,6 +221,238 @@ async function fetchWikidata(ids: string[]) {
+   return entities;
+ }
+ 
++// ---------------------------------------------------------------------------
++// Fallback identity resolution (new).
++//
++// The QID mining above only works when master_corpus_candidates already has a workQid for a
++// given work -- i.e. when the separate master-corpus/Wikisource author-discovery pipeline has
++// already run successfully for that author. When it hasn't (a brand-new author onboarding, or
++// an author whose whole-oeuvre discovery pass failed/was never run -- e.g. it got rate-limited
++// by Wikidata mid-scan, as observed live against production for "tolstoy"), a work with a known
++// original_language can still recover its QID here, scoped to just that one work rather than the
++// author's entire bibliography: find the author's page on that one Wikisource language edition,
++// list the literary works linked from it, keep only ones with confirmed unambiguous non-deprecated
++// P50 authorship and an approved literary-work Wikidata type, then title-match that short list
++// against the target work's title/original_title/alternative_titles. Exactly one match -> use it.
++// Zero or multiple matches -> leave unresolved; this NEVER auto-attaches an ambiguous identity.
++//
++// Reuses the exact same MediaWiki/Wikidata call shapes and confirmedAuthorship/type rules already
++// proven in production by omnia-wikisource-discover-author, including its 429-aware retry/backoff
++// (the same rate limiting that failed a live discovery run for this author minutes before this
++// fix was written) -- not reinvented from scratch.
++// ---------------------------------------------------------------------------
++
++const AUTHOR_NAMESPACE = 102;
++const TYPE_CLOSURE_DEPTH = 3;
++const MAX_LINKED_PAGES = 180;
++const ROOT_LITERARY_WORK_TYPES = new Set(["Q571", "Q7725634", "Q25379"]); // book, literary work, play
++
++function sleep(ms: number) {
++  return new Promise(resolve => setTimeout(resolve, ms));
++}
++
++async function fetchJsonWithRetry(url: string, label: string) {
++  for (let attempt = 0; attempt < 4; attempt++) {
++    const r = await fetch(url, { headers: { "User-Agent": "OmniaLibrary/1.0 (book ingestion; anki-multilingual-discover fallback identity)" } });
++    if (r.status === 429) {
++      const retryAfter = Math.min(5000, Math.max(750, Number(r.headers.get("retry-after") ?? "1") * 1000));
++      await sleep(retryAfter * (attempt + 1));
++      continue;
++    }
++    if (!r.ok) throw new Error(`${label} ${r.status}`);
++    const j = await r.json();
++    if (j?.error) {
++      if (j.error.code === "ratelimited") { await sleep(1000 * (attempt + 1)); continue; }
++      throw new Error(`${label} error: ${j.error.code ?? "unknown"}`);
++    }
++    return j;
++  }
++  throw new Error(`${label} rate-limited after retries`);
++}
++
++async function wikisourceQuery(wikiLanguage: string, params: Record<string, string>) {
++  const u = new URL(`https://${wikiLanguage}.wikisource.org/w/api.php`);
++  for (const [k, v] of Object.entries({ action: "query", format: "json", formatversion: "2", origin: "*", maxlag: "5", ...params })) u.searchParams.set(k, v);
++  const j = await fetchJsonWithRetry(u.toString(), "Wikisource API");
++  await sleep(180);
++  return j;
++}
++
++async function fetchWikidataClaims(ids: string[]) {
++  if (!ids.length) return {};
++  const u = new URL("https://www.wikidata.org/w/api.php");
++  for (const [k, v] of Object.entries({ action: "wbgetentities", format: "json", ids: ids.join("|"), props: "claims", origin: "*", maxlag: "5" })) u.searchParams.set(k, v);
++  const j = await fetchJsonWithRetry(u.toString(), "Wikidata API");
++  await sleep(180);
++  return j.entities ?? {};
++}
++
++function claimIds(entity: any, property: string): string[] {
++  const out: string[] = [];
++  for (const claim of entity?.claims?.[property] ?? []) {
++    const id = claim?.mainsnak?.datavalue?.value?.id;
++    if (typeof id === "string") out.push(id);
++  }
++  return out;
++}
++
++function confirmedAuthorship(entity: any, authorQid: string): boolean {
++  const claims = (entity?.claims?.P50 ?? []).filter((c: any) => c?.rank !== "deprecated" && c?.mainsnak?.snaktype === "value");
++  if (claims.length !== 1) return false;
++  const claim = claims[0];
++  const id = claim?.mainsnak?.datavalue?.value?.id;
++  if (id !== authorQid) return false;
++  const qualifiers = claim?.qualifiers ?? {};
++  if ((qualifiers.P1480?.length ?? 0) > 0 || (qualifiers.P2241?.length ?? 0) > 0) return false;
++  return true;
++}
++
++async function findWikisourceAuthorPage(wikiLanguage: string, names: string[]): Promise<{ title: string; qid: string } | null> {
++  for (const name of names.slice(0, 8)) {
++    const search = await wikisourceQuery(wikiLanguage, { list: "search", srsearch: name, srnamespace: String(AUTHOR_NAMESPACE), srlimit: "5" });
++    for (const hit of search?.query?.search ?? []) {
++      const props = await wikisourceQuery(wikiLanguage, { prop: "pageprops", titles: hit.title, redirects: "1" });
++      const page = props?.query?.pages?.[0];
++      const qid = page?.pageprops?.wikibase_item;
++      if (page && !page.missing && typeof qid === "string") return { title: page.title, qid };
++    }
++  }
++  return null;
++}
++
++async function fetchLinkedPageQids(wikiLanguage: string, authorPageTitle: string): Promise<Array<{ title: string; qid: string }>> {
++  const out: Array<{ title: string; qid: string }> = [];
++  let cont: Record<string, string> | null = null;
++  do {
++    const params: Record<string, string> = { generator: "links", titles: authorPageTitle, gplnamespace: "0", gpllimit: "50", prop: "pageprops", redirects: "1" };
++    if (cont) Object.assign(params, cont);
