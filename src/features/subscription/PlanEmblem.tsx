@@ -1,3 +1,5 @@
+import "../../styles/pricing-emblems.css";
+
 export type PlanEmblemFigure = "pawn" | "knight" | "bust" | "queen";
 
 interface PlanEmblemProps {
