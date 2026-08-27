@@ -24,7 +24,10 @@ interface ShellPageProps {
 export function ShellPage({ onBack, backLabel, eyebrow, title, subtitle, children, wide }: ShellPageProps) {
 
   return (
-    <section className={wide ? "shell-page shell-page-wide" : "shell-page"}>
+    <section
+      className={wide ? "shell-page shell-page-wide" : "shell-page"}
+      style={wide ? { width: "100%", maxWidth: 1440 } : undefined}
+    >
 
       <button className="text-link" type="button" onClick={onBack}>
         {backLabel ?? "← Назад"}

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { ShellPage } from "../shared/ShellPage";
 import { PlanCard, type PlanDef } from "./PlanCard";
 import "../../styles/pricing.css";
@@ -90,6 +91,14 @@ const PLANS: PlanDef[] = [
 ];
 
 export function SubscriptionView({ onBack }: SubscriptionViewProps) {
+  // Account-shell navigation does not use a router, so the browser keeps
+  // the previous page's scroll position when switching views. Pricing is
+  // a top-level showcase and must always open from its heading rather
+  // than half-way through the cards under the fixed global header.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   return (
     <ShellPage
       onBack={onBack}
