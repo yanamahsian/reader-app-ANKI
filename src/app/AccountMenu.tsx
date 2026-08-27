@@ -20,6 +20,13 @@ interface AccountMenuProps {
 // so it doesn't compete with it.
 export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
 
+  // USER LIBRARY PHASE: this used to be a hardcoded `const
+  // isAuthenticated = false` with a comment saying a real integration
+  // would only need to "flip this one flag ... and feed it a real user
+  // object" -- useAuth() (src/auth/supabaseAuth.ts) is exactly that real
+  // integration now. Every item below stays reachable either way, same
+  // as before -- MyLibraryView/ProfileView still render their own
+  // honest state internally rather than being hidden here.
   const { isAuthenticated, user } = useAuth();
 
   if (!isOpen) return null;
