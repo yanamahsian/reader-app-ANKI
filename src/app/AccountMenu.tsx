@@ -3,6 +3,7 @@ import { useAuth } from "../auth/supabaseAuth";
 export type AccountShellView =
   | "profile"
   | "my-library"
+  | "atlas"
   | "notes"
   | "subscription"
   | "settings"
@@ -19,13 +20,6 @@ interface AccountMenuProps {
 // so it doesn't compete with it.
 export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
 
-  // USER LIBRARY PHASE: this used to be a hardcoded `const
-  // isAuthenticated = false` with a comment saying a real integration
-  // would only need to "flip this one flag ... and feed it a real user
-  // object" -- useAuth() (src/auth/supabaseAuth.ts) is exactly that real
-  // integration now. Every item below stays reachable either way, same
-  // as before -- MyLibraryView/ProfileView still render their own
-  // honest state internally rather than being hidden here.
   const { isAuthenticated, user } = useAuth();
 
   if (!isOpen) return null;
@@ -63,6 +57,7 @@ export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
 
         <div className="account-menu-list">
           <button type="button" role="menuitem" onClick={() => go("my-library")}>Моя библиотека</button>
+          <button type="button" role="menuitem" onClick={() => go("atlas")}>Atlas</button>
           <button type="button" role="menuitem" onClick={() => go("notes")}>Заметки</button>
           <button type="button" role="menuitem" onClick={() => go("profile")}>Профиль</button>
           <button type="button" role="menuitem" onClick={() => go("subscription")}>Подписка</button>
