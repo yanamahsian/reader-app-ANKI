@@ -1,99 +1,63 @@
-/* Standalone subscription sculptures.
-   Loaded after pricing.css by PlanEmblem.tsx so these overrides intentionally
-   remove the legacy faceted crystal container while keeping responsive sizing. */
+/* Standalone subscription sculptures — no crystal, badge, medallion or frame. */
 
 .plan-emblem {
-  width: clamp(190px, 15vw, 290px);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: clamp(210px, 17vw, 320px);
   height: auto;
   aspect-ratio: 1 / 1;
-  margin-bottom: clamp(24px, 1.8vw, 36px);
+  margin: 0 auto clamp(24px, 2vw, 38px);
+
   filter: none;
-}
-
-/* The wrapper remains in the markup only as a positioning surface.
-   It must no longer read as a badge, crystal, medallion or frame. */
-.plan-emblem-glass {
-  width: 100%;
-  height: 100%;
   overflow: visible;
-  clip-path: none;
   background: transparent;
-  box-shadow: none;
 }
 
-.plan-emblem-glass::after,
-.plan-emblem-facet,
-.plan-emblem-highlight,
-.plan-emblem-glint {
-  display: none;
-}
-
+/* Neutralise legacy absolute positioning from pricing.css. */
 .plan-emblem-column,
 .plan-emblem-art {
-  filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.34));
-}
+  position: static;
+  inset: auto;
+  transform: none;
+  display: block;
 
-.plan-emblem-column {
-  width: 72%;
-  height: 82%;
-}
-
-.plan-emblem-art {
-  width: auto;
-  height: 104%;
   max-width: none;
   max-height: none;
   object-fit: contain;
+
+  filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.34));
+}
+
+.plan-emblem-column {
+  width: 66%;
+  height: 82%;
 }
 
 .plan-emblem-art-knight {
-  height: 105%;
   width: auto;
+  height: 100%;
 }
 
 .plan-emblem-art-bust {
-  height: 112%;
   width: auto;
+  height: 112%;
 }
 
 .plan-emblem-art-queen {
-  height: 108%;
   width: auto;
+  height: 104%;
 }
 
 @media (max-width: 1100px) {
   .plan-emblem {
-    width: clamp(150px, 22vw, 220px);
-    height: auto;
+    width: clamp(170px, 24vw, 240px);
   }
 
   .plan-emblem-art-knight {
-    height: 103%;
-  }
-
-  .plan-emblem-art-bust {
-    height: 110%;
-  }
-
-  .plan-emblem-art-queen {
-    height: 106%;
-  }
-}
-
-@media (max-width: 640px) {
-  .plan-emblem {
-    width: clamp(112px, 34vw, 160px);
-    height: auto;
-    margin-bottom: 24px;
-  }
-
-  .plan-emblem-column {
-    width: 70%;
-    height: 80%;
-  }
-
-  .plan-emblem-art-knight {
-    height: 102%;
+    height: 98%;
   }
 
   .plan-emblem-art-bust {
@@ -101,6 +65,30 @@
   }
 
   .plan-emblem-art-queen {
-    height: 104%;
+    height: 102%;
+  }
+}
+
+@media (max-width: 640px) {
+  .plan-emblem {
+    width: clamp(128px, 38vw, 176px);
+    margin-bottom: 26px;
+  }
+
+  .plan-emblem-column {
+    width: 64%;
+    height: 80%;
+  }
+
+  .plan-emblem-art-knight {
+    height: 98%;
+  }
+
+  .plan-emblem-art-bust {
+    height: 106%;
+  }
+
+  .plan-emblem-art-queen {
+    height: 100%;
   }
 }
