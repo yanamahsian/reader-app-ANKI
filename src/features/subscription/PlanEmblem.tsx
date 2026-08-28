@@ -57,23 +57,16 @@ export function PlanEmblem({ figure }: PlanEmblemProps) {
 
   return (
     <div className={`plan-emblem plan-emblem-${figure}`} aria-hidden="true">
-      <div className="plan-emblem-glass">
-        <span className="plan-emblem-facet plan-emblem-facet-left" />
-        <span className="plan-emblem-facet plan-emblem-facet-right" />
-        <span className="plan-emblem-highlight" />
-        <span className="plan-emblem-glint" />
-
-        {figure === "pawn" ? (
-          <FreeColumn />
-        ) : (
-          <img
-            className={`plan-emblem-art plan-emblem-art-${figure}`}
-            src={artSrc}
-            alt=""
-            draggable={false}
-          />
-        )}
-      </div>
+      {figure === "pawn" ? (
+        <FreeColumn />
+      ) : (
+        <img
+          className={`plan-emblem-art plan-emblem-art-${figure}`}
+          src={artSrc}
+          alt=""
+          draggable={false}
+        />
+      )}
     </div>
   );
 }
