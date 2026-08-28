@@ -21,10 +21,6 @@ import { SupportView } from "./features/support/SupportView";
 import { loadRemoteCatalog } from "./catalog";
 import type { Book } from "./features/reader/engine/types";
 
-// The six account-shell screens (see App() below and the six view
-// components under src/features/*) share the AccountShellView union
-// already defined next to AccountMenu -- reused here rather than
-// redeclared, so the two can never drift apart.
 type View =
   | "home"
   | "reader"
@@ -45,10 +41,6 @@ export type BookDetailOrigin =
   | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin }
   | { type: "library"; state: LibraryRestoreState }
   | { type: "atlas" }
-  // USER LIBRARY PHASE (requirement #18): mirrors the "library" origin
-  // above exactly, so "Моя библиотека → Book Detail → Назад" returns to
-  // My Library with its selected tab restored, the same way the public
-  // Library already restores its query/language/page.
   | { type: "my-library"; state: MyLibraryRestoreState };
 
 const TEST_EPUB_BOOK: Book = {
@@ -58,43 +50,115 @@ const TEST_EPUB_BOOK: Book = {
   format: "epub"
 };
 
+const NAVIGATION_SESSION_KEY = "anki-navigation-state-v1";
+
+interface NavigationSessionState {
+  view: View;
+  currentBook: Book | null;
+  selectedBookId: string | null;
+  bookDetailOrigin: BookDetailOrigin | null;
+  bookDetailInitialEdition: { editionId: string; language: string } | null;
+  selectedAuthorId: string | null;
+  authorDetailOrigin: AuthorDetailOrigin | null;
+  restoreSearch: { query: string; language: string } | null;
+  collectionsInitialId: string | null;
+  libraryRestoreState: LibraryRestoreState | null;
+  myLibraryRestoreState: MyLibraryRestoreState | null;
+  isSearchOpen: boolean;
+  searchPrefill: string | null;
+  searchPrefillLanguage: string;
+}
+
+const VALID_VIEWS: readonly View[] = [
+  "home",
+  "reader",
+  "collections",
+  "book-detail",
+  "author",
+  "library",
+  "profile",
+  "my-library",
+  "atlas",
+  "notes",
+  "subscription",
+  "settings",
+  "support"
+];
+
+function readNavigationSession(): Partial<NavigationSessionState> {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const raw = window.sessionStorage.getItem(NAVIGATION_SESSION_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw) as Partial<NavigationSessionState>;
+    if (!parsed.view || !VALID_VIEWS.includes(parsed.view)) return {};
+
+    if (parsed.view === "reader" && !parsed.currentBook) {
+      return { ...parsed, view: "home" };
+    }
+
+    if (parsed.view === "book-detail" && !parsed.selectedBookId) {
+      return { ...parsed, view: "home" };
+    }
+
+    if (parsed.view === "author" && !parsed.selectedAuthorId) {
+      return { ...parsed, view: "home" };
+    }
+
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
 export function App() {
 
-  const [view, setView] = useState<View>("home");
-  const [currentBook, setCurrentBook] = useState<Book | null>(null);
+  const [initialNavigation] = useState(() => readNavigationSession());
 
-  const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
-  const [bookDetailOrigin, setBookDetailOrigin] = useState<BookDetailOrigin | null>(null);
-  // USER LIBRARY PHASE (requirement #9): seeds BookDetailView's
-  // language/edition selection when arriving from a saved Work in My
-  // Library -- see MyLibraryView's own comment and BookDetailView's
-  // initialEdition prop comment for why this never bypasses the
-  // Reader's rights gate. Reset to null on every handleOpenBookDetail
-  // call that doesn't explicitly supply one, so it never bleeds into
-  // an unrelated later navigation.
+  const [view, setView] = useState<View>(initialNavigation.view ?? "home");
+  const [currentBook, setCurrentBook] = useState<Book | null>(initialNavigation.currentBook ?? null);
+
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(initialNavigation.selectedBookId ?? null);
+  const [bookDetailOrigin, setBookDetailOrigin] = useState<BookDetailOrigin | null>(
+    initialNavigation.bookDetailOrigin ?? null
+  );
   const [bookDetailInitialEdition, setBookDetailInitialEdition] =
-    useState<{ editionId: string; language: string } | null>(null);
+    useState<{ editionId: string; language: string } | null>(
+      initialNavigation.bookDetailInitialEdition ?? null
+    );
 
-  const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
-  const [authorDetailOrigin, setAuthorDetailOrigin] = useState<AuthorDetailOrigin | null>(null);
+  const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(
+    initialNavigation.selectedAuthorId ?? null
+  );
+  const [authorDetailOrigin, setAuthorDetailOrigin] = useState<AuthorDetailOrigin | null>(
+    initialNavigation.authorDetailOrigin ?? null
+  );
 
-  const [restoreSearch, setRestoreSearch] = useState<{ query: string; language: string } | null>(null);
-  const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(null);
+  const [restoreSearch, setRestoreSearch] = useState<{ query: string; language: string } | null>(
+    initialNavigation.restoreSearch ?? null
+  );
+  const [collectionsInitialId, setCollectionsInitialId] = useState<string | null>(
+    initialNavigation.collectionsInitialId ?? null
+  );
 
-  const [libraryRestoreState, setLibraryRestoreState] = useState<LibraryRestoreState | null>(null);
-  const [myLibraryRestoreState, setMyLibraryRestoreState] = useState<MyLibraryRestoreState | null>(null);
+  const [libraryRestoreState, setLibraryRestoreState] = useState<LibraryRestoreState | null>(
+    initialNavigation.libraryRestoreState ?? null
+  );
+  const [myLibraryRestoreState, setMyLibraryRestoreState] = useState<MyLibraryRestoreState | null>(
+    initialNavigation.myLibraryRestoreState ?? null
+  );
 
   const [, setCatalogVersion] = useState(0);
 
-  // Search panel state used to live inside HomeView, which owned the
-  // only <SearchPanel/> instance. It's lifted up here so that
-  // GlobalHeader's persistent "Поиск" button/icon (visible on every
-  // non-Reader screen, not just Home) can open the exact same panel.
-  // SearchPanel itself is unchanged -- it's a self-contained fixed
-  // overlay -- only who controls it moved.
-  const [isSearchOpen, setSearchOpen] = useState(false);
-  const [searchPrefill, setSearchPrefill] = useState<string | null>(null);
-  const [searchPrefillLanguage, setSearchPrefillLanguage] = useState("");
+  const [isSearchOpen, setSearchOpen] = useState(initialNavigation.isSearchOpen ?? false);
+  const [searchPrefill, setSearchPrefill] = useState<string | null>(
+    initialNavigation.searchPrefill ?? null
+  );
+  const [searchPrefillLanguage, setSearchPrefillLanguage] = useState(
+    initialNavigation.searchPrefillLanguage ?? ""
+  );
 
   const [isAccountMenuOpen, setAccountMenuOpen] = useState(false);
 
@@ -113,13 +177,47 @@ export function App() {
     }
   }, []);
 
-  // Mirrors HomeView's old mount-time effect (it used to run once,
-  // synchronously, every time HomeView itself was freshly mounted --
-  // i.e. every time `view` became "home"). restoreSearch is set by
-  // handleBackFromBookDetail/handleBackFromAuthorDetail's "search"
-  // origin branches just before switching back to "home", so re-running
-  // this whenever `view` changes to "home" reopens the panel with the
-  // same query/language exactly as before.
+  useEffect(() => {
+    const navigationState: NavigationSessionState = {
+      view,
+      currentBook,
+      selectedBookId,
+      bookDetailOrigin,
+      bookDetailInitialEdition,
+      selectedAuthorId,
+      authorDetailOrigin,
+      restoreSearch,
+      collectionsInitialId,
+      libraryRestoreState,
+      myLibraryRestoreState,
+      isSearchOpen,
+      searchPrefill,
+      searchPrefillLanguage
+    };
+
+    try {
+      window.sessionStorage.setItem(NAVIGATION_SESSION_KEY, JSON.stringify(navigationState));
+    } catch {
+      // Navigation persistence is a convenience only; never break the app
+      // if storage is unavailable or blocked by the browser.
+    }
+  }, [
+    view,
+    currentBook,
+    selectedBookId,
+    bookDetailOrigin,
+    bookDetailInitialEdition,
+    selectedAuthorId,
+    authorDetailOrigin,
+    restoreSearch,
+    collectionsInitialId,
+    libraryRestoreState,
+    myLibraryRestoreState,
+    isSearchOpen,
+    searchPrefill,
+    searchPrefillLanguage
+  ]);
+
   useEffect(() => {
     if (view === "home" && restoreSearch) {
       openSearch(restoreSearch.query, restoreSearch.language);
@@ -150,10 +248,6 @@ export function App() {
     setView(accountView);
   }
 
-  // "Back" from any of the six account shells always lands on Home --
-  // acceptable for this visual pass since none of them are reachable
-  // from a deep navigation chain (they only open from GlobalHeader's
-  // account menu, which is available everywhere).
   function handleBackFromAccountShell(): void {
     setView("home");
   }
@@ -191,14 +285,6 @@ export function App() {
     }
   }
 
-  // collectionId is optional: called with none from the generic
-  // "Подборки"/"Смотреть всё" entry points (opens the full grid, as
-  // before), or with a specific id from a HomeView teaser card —
-  // jumps straight to that collection, reusing the same
-  // collectionsInitialId mechanism already used when returning here
-  // from Book Detail. Needed so that, once there are dozens of
-  // collections, clicking a named card on the home page doesn't dump
-  // the visitor into the undifferentiated full list.
   function handleOpenCollections(collectionId?: string): void {
     setCollectionsInitialId(collectionId ?? null);
     setView("collections");
@@ -261,13 +347,6 @@ export function App() {
 
   }
 
-  // collectionId is optional from HomeView (no id -> generic entry
-  // point); Library has no such teaser entry point, so this is always
-  // a fresh, from-scratch open — libraryRestoreState is reset to null,
-  // matching how handleOpenCollections() with no id resets
-  // collectionsInitialId. Returning here from Book Detail / the reader
-  // goes through handleBackFromBookDetail / handleExitReader instead,
-  // which restore the exact prior state.
   function handleOpenLibrary(): void {
     setLibraryRestoreState(null);
     setView("library");
@@ -281,13 +360,6 @@ export function App() {
     handleOpenBookDetail(bookId, { type: "library", state });
   }
 
-  // USER LIBRARY PHASE: My Library is reached only via the account
-  // menu (handleAccountNavigate -> setView("my-library") already
-  // handles that), so there is no separate "open fresh" entry point to
-  // mirror handleOpenLibrary's reset-on-open behavior for -- the tab
-  // itself simply keeps whatever it was last set to. Returning here
-  // from Book Detail goes through handleBackFromBookDetail above, which
-  // restores the exact prior tab.
   function handleOpenBookDetailFromMyLibrary(
     bookId: string,
     state: MyLibraryRestoreState,
@@ -296,10 +368,6 @@ export function App() {
     handleOpenBookDetail(bookId, { type: "my-library", state }, initialEdition);
   }
 
-  // Both AccountMenu's guest buttons and BookDetailView's own
-  // "Добавить в библиотеку" (when signed out) land here -- Profile is
-  // this app's one real auth home (requirement #4: reuse the existing
-  // flow, never a second one).
   function handleRequireSignIn(): void {
     setView("profile");
   }
