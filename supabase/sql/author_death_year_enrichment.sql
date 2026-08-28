@@ -102,12 +102,27 @@
 -- small batches (1-2 authors per call) during development for exactly
 -- that reason, not because of any bug in the function itself.
 
+-- AUTOMATED TRANSLATOR ENRICHMENT v1 -- diacritic-fold fix:
+-- _author_enrich_name_tokens previously stripped only '.' and ',' before
+-- tokenizing. Two spellings of the same real name that differ ONLY by
+-- diacritics (e.g. authors.name = 'Niccolo Machiavelli' vs Wikidata's
+-- label 'Niccolò Machiavelli') therefore produced different token sets
+-- and the identity gate correctly-but-unnecessarily refused the match.
+-- unaccent() is a deterministic, fixed Unicode transliteration table --
+-- NOT fuzzy/Levenshtein matching -- applied before tokenizing so both
+-- sides of a comparison are diacritic-folded before the exact token-set
+-- equality check in _author_enrich_names_match runs. That equality check
+-- itself is unchanged: still exact set equality, still requires every
+-- token to match, still refuses partial/fuzzy matches. Names with no
+-- diacritics are unaffected (unaccent is a no-op on plain ASCII).
+create extension if not exists unaccent with schema public;
+
 create or replace function public._author_enrich_name_tokens(p_name text)
 returns text[]
 language sql immutable
 as $$
   select coalesce(array_agg(x order by x), array[]::text[])
-  from unnest(string_to_array(regexp_replace(lower(btrim(p_name)), '[.,]', ' ', 'g'), ' ')) as x
+  from unnest(string_to_array(regexp_replace(lower(public.unaccent(btrim(p_name))), '[.,]', ' ', 'g'), ' ')) as x
   where x <> '';
 $$;
 
