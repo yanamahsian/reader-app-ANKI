@@ -1,38 +1,63 @@
-/* Final responsive emblem sizing and generated artwork placement.
-   Loaded after pricing.css by PlanEmblem.tsx so these values win over legacy fixed sizes. */
+/* Standalone subscription sculptures.
+   Loaded after pricing.css by PlanEmblem.tsx so these overrides intentionally
+   remove the legacy faceted crystal container while keeping responsive sizing. */
 
 .plan-emblem {
-  width: clamp(170px, 13.5vw, 250px);
+  width: clamp(190px, 15vw, 290px);
   height: auto;
   aspect-ratio: 1 / 1;
-  margin-bottom: clamp(24px, 1.8vw, 34px);
+  margin-bottom: clamp(24px, 1.8vw, 36px);
+  filter: none;
+}
+
+/* The wrapper remains in the markup only as a positioning surface.
+   It must no longer read as a badge, crystal, medallion or frame. */
+.plan-emblem-glass {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.plan-emblem-glass::after,
+.plan-emblem-facet,
+.plan-emblem-highlight,
+.plan-emblem-glint {
+  display: none;
+}
+
+.plan-emblem-column,
+.plan-emblem-art {
+  filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.34));
 }
 
 .plan-emblem-column {
-  width: 54%;
-  height: 68%;
+  width: 72%;
+  height: 82%;
 }
 
 .plan-emblem-art {
   width: auto;
-  height: 92%;
+  height: 104%;
   max-width: none;
   max-height: none;
   object-fit: contain;
 }
 
 .plan-emblem-art-knight {
-  height: 90%;
+  height: 105%;
   width: auto;
 }
 
 .plan-emblem-art-bust {
-  height: 94%;
+  height: 112%;
   width: auto;
 }
 
 .plan-emblem-art-queen {
-  height: 92%;
+  height: 108%;
   width: auto;
 }
 
@@ -41,24 +66,41 @@
     width: clamp(150px, 22vw, 220px);
     height: auto;
   }
+
+  .plan-emblem-art-knight {
+    height: 103%;
+  }
+
+  .plan-emblem-art-bust {
+    height: 110%;
+  }
+
+  .plan-emblem-art-queen {
+    height: 106%;
+  }
 }
 
 @media (max-width: 640px) {
   .plan-emblem {
-    width: clamp(112px, 32vw, 160px);
+    width: clamp(112px, 34vw, 160px);
     height: auto;
     margin-bottom: 24px;
   }
 
+  .plan-emblem-column {
+    width: 70%;
+    height: 80%;
+  }
+
   .plan-emblem-art-knight {
-    height: 91%;
+    height: 102%;
   }
 
   .plan-emblem-art-bust {
-    height: 95%;
+    height: 108%;
   }
 
   .plan-emblem-art-queen {
-    height: 93%;
+    height: 104%;
   }
 }
