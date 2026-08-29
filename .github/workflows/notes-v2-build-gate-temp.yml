@@ -59,10 +59,10 @@ jobs:
           ])
           actual = sorted(subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines())
           if actual != expected:
-              raise SystemExit(f'scope mismatch\nactual={actual}\nexpected={expected}')
+            raise SystemExit(f'scope mismatch\nactual={actual}\nexpected={expected}')
           forbidden = {'src/features/reader/progressStore/progressStore.ts','src/features/reader/progressStore/localStorageStore.ts'}
           if forbidden.intersection(actual):
-              raise SystemExit('ProgressStore/localStorageStore changed unexpectedly')
+            raise SystemExit('ProgressStore/localStorageStore changed unexpectedly')
           print('scope OK: 13 files')
           PY
           git diff --cached --check
@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           rm -rf /tmp/notes-overlap-test
-          npx tsc --target ES2021 --module commonjs --moduleResolution node --types node --skipLibCheck --outDir /tmp/notes-overlap-test src/features/reader/engine/highlightAnchor.ts src/features/reader/engine/highlightAnchor.overlap.test.ts
+          npx tsc --target ES2021 --module commonjs --moduleResolution node --types node --esModuleInterop --skipLibCheck --outDir /tmp/notes-overlap-test src/features/reader/engine/highlightAnchor.ts src/features/reader/engine/highlightAnchor.overlap.test.ts
           node /tmp/notes-overlap-test/highlightAnchor.overlap.test.js
 
       - name: Build
