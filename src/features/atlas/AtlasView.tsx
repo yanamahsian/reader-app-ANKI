@@ -19,6 +19,7 @@ import { GuestNotice } from "../shared/GuestNotice";
 import { ShellPage } from "../shared/ShellPage";
 import { buildAtlasConnections, type AtlasConnection } from "./buildAtlas";
 import { AtlasQuestionsSection } from "./AtlasQuestionsSection";
+import { AtlasContradictionsSection } from "./AtlasContradictionsSection";
 
 interface AtlasViewProps {
   onBack: () => void;
@@ -501,6 +502,12 @@ export function AtlasView({
           </section>
 
           <AtlasQuestionsSection
+            annotationCount={atlas.annotations.length}
+            annotationById={annotationById}
+            onOpenAnnotationInReader={resolveAndOpenMemory}
+          />
+
+          <AtlasContradictionsSection
             annotationCount={atlas.annotations.length}
             annotationById={annotationById}
             onOpenAnnotationInReader={resolveAndOpenMemory}
