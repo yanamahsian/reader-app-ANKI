@@ -18,6 +18,7 @@ import { useReaderJurisdiction } from "../book-detail/readerJurisdiction";
 import { GuestNotice } from "../shared/GuestNotice";
 import { ShellPage } from "../shared/ShellPage";
 import { buildAtlasConnections, type AtlasConnection } from "./buildAtlas";
+import { AtlasQuestionsSection } from "./AtlasQuestionsSection";
 
 interface AtlasViewProps {
   onBack: () => void;
@@ -149,22 +150,29 @@ export function AtlasView({
   const memoryWorkCount = new Set(atlas.annotations.map(annotation => annotation.workId)).size;
   const recentMemory = atlas.annotations.slice(0, 12);
 
-  function handleOpenMemory(annotation: Annotation): void {
+  // Shared exact-reopen gate: the same jurisdiction-aware check
+  // (resolveEditionFile -> toReaderBook) used by every Atlas surface that
+  // reopens a saved fragment. Returns whether the Edition was actually
+  // openable so a caller with its own layout (e.g. AtlasQuestionsSection's
+  // evidence cards) can show its own unavailable state, without a second
+  // Reader-opening mechanism anywhere in Atlas.
+  function resolveAndOpenMemory(annotation: Annotation): boolean {
     const book = getBookById(annotation.workId);
     const resolved = book
       ? resolveEditionFile(book, annotation.editionId, readerJurisdiction ?? undefined)
       : null;
 
-    if (!book || !resolved) {
-      setUnavailableId(annotation.id);
-      return;
-    }
+    if (!book || !resolved) return false;
 
-    setUnavailableId(null);
     onOpenAnnotationInReader(
       toReaderBook(book, resolved, readerJurisdiction ?? undefined),
       { pageIndex: annotation.pageIndex, annotationId: annotation.id }
     );
+    return true;
+  }
+
+  function handleOpenMemory(annotation: Annotation): void {
+    setUnavailableId(resolveAndOpenMemory(annotation) ? null : annotation.id);
   }
 
   function resetThreadComposer(): void {
@@ -491,6 +499,12 @@ export function AtlasView({
               })}
             </div>
           </section>
+
+          <AtlasQuestionsSection
+            annotationCount={atlas.annotations.length}
+            annotationById={annotationById}
+            onOpenAnnotationInReader={resolveAndOpenMemory}
+          />
 
           {recentMemory.length > 0 && (
             <section className="notes-group" aria-label="Личная память чтения">
