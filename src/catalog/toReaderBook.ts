@@ -327,9 +327,16 @@ export function resolveEditionFile(
 // relied on this being Work-scoped specifically (NotesView.tsx, the only
 // other reader of Fragment/Bookmark.bookId, is still an unimplemented
 // shell) -- readerEngine.ts itself has zero changes for this.
+// NOTES + HIGHLIGHTS PHASE: `workId` is new -- see Book.workId's own
+// comment (types.ts) for why the reader engine needs the Work id
+// alongside the Edition id now. catalogBook.id is genuinely the Work id
+// (it always has been -- `id` above was only ever changed to the Edition
+// id for THIS returned object, in the User Library phase; catalogBook
+// itself was never touched).
 export function toReaderBook(catalogBook: CatalogBook, resolved: ResolvedFile, jurisdiction?: string): ReaderBook {
   return {
     id: resolved.edition.id,
+    workId: catalogBook.id,
     title: catalogBook.title,
     author: catalogBook.authorName,
     language: resolved.edition.language,

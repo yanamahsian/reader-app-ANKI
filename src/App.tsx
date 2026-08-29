@@ -14,6 +14,7 @@ import { ProfileView } from "./features/profile/ProfileView";
 import { MyLibraryView } from "./features/my-library/MyLibraryView";
 import type { MyLibraryRestoreState } from "./features/my-library/MyLibraryView";
 import { NotesView } from "./features/notes/NotesView";
+import type { ReaderNavigationTarget } from "./features/reader/ReaderView";
 import { SubscriptionView } from "./features/subscription/SubscriptionView";
 import { SettingsView } from "./features/settings/SettingsView";
 import { SupportView } from "./features/support/SupportView";
@@ -47,7 +48,13 @@ export type BookDetailOrigin =
   // above exactly, so "Моя библиотека → Book Detail → Назад" returns to
   // My Library with its selected tab restored, the same way the public
   // Library already restores its query/language/page.
-  | { type: "my-library"; state: MyLibraryRestoreState };
+  | { type: "my-library"; state: MyLibraryRestoreState }
+  // NOTES + HIGHLIGHTS PHASE: mirrors "my-library" above -- "Заметки →
+  // Открыть книгу → Назад" returns to the Notes screen, the same way My
+  // Library already restores itself. No restore-state payload is needed
+  // (Notes has no tab/scroll position to preserve the way My Library
+  // does), so this is just a marker.
+  | { type: "notes" };
 
 const TEST_EPUB_BOOK: Book = {
   id: "phase3-test-epub",
@@ -72,6 +79,16 @@ export function App() {
   // an unrelated later navigation.
   const [bookDetailInitialEdition, setBookDetailInitialEdition] =
     useState<{ editionId: string; language: string } | null>(null);
+
+  // NOTES + HIGHLIGHTS PHASE: set only by handleOpenAnnotationInReader
+  // (Notes -> "open this exact quote"), consumed once by ReaderView/
+  // readerEngine.ts to open on the annotation's position instead of the
+  // ordinary saved reading position -- see ReaderView.tsx's own comment.
+  // handleOpenBook (the ordinary "Читать" path) always clears this, so it
+  // never bleeds into an unrelated later read of the same or a different
+  // book.
+  const [readerNavigationTarget, setReaderNavigationTarget] =
+    useState<ReaderNavigationTarget | null>(null);
 
   const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
   const [authorDetailOrigin, setAuthorDetailOrigin] = useState<AuthorDetailOrigin | null>(null);
@@ -178,6 +195,21 @@ export function App() {
 
   function handleOpenBook(book: Book): void {
     setCurrentBook(book);
+    // NOTES + HIGHLIGHTS PHASE: an ordinary "Читать" open always reads at
+    // the visitor's real saved position -- never a leftover navigation
+    // target from some earlier "open this exact quote" click.
+    setReaderNavigationTarget(null);
+    setView("reader");
+  }
+
+  // NOTES + HIGHLIGHTS PHASE: the "open this exact quote" flow --
+  // NotesView has already done the rights/jurisdiction check itself
+  // (resolveEditionFile, the same gate every other Reader-opening path
+  // uses -- see that view's own comment) before ever calling this, so by
+  // the time this runs, `book` is already confirmed genuinely readable.
+  function handleOpenAnnotationInReader(book: Book, target: ReaderNavigationTarget): void {
+    setReaderNavigationTarget(target);
+    setCurrentBook(book);
     setView("reader");
   }
 
@@ -250,6 +282,11 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "notes") {
+      setView("notes");
+      return;
+    }
+
     setView("home");
 
   }
@@ -287,6 +324,12 @@ export function App() {
     initialEdition: { editionId: string; language: string } | null
   ): void {
     handleOpenBookDetail(bookId, { type: "my-library", state }, initialEdition);
+  }
+
+  // NOTES + HIGHLIGHTS PHASE: "Открыть книгу" on a Notes screen entry --
+  // mirrors handleOpenBookDetailFromLibrary/FromMyLibrary exactly.
+  function handleOpenBookDetailFromNotes(bookId: string): void {
+    handleOpenBookDetail(bookId, { type: "notes" });
   }
 
   // Both AccountMenu's guest buttons and BookDetailView's own
@@ -344,7 +387,13 @@ export function App() {
   }
 
   if (view === "reader" && currentBook) {
-    return <ReaderView book={currentBook} onExit={handleExitReader} />;
+    return (
+      <ReaderView
+        book={currentBook}
+        onExit={handleExitReader}
+        navigationTarget={readerNavigationTarget}
+      />
+    );
   }
 
   let content: ReactNode;
@@ -406,7 +455,15 @@ export function App() {
       />
     );
   } else if (view === "notes") {
-    content = <NotesView onBack={handleBackFromAccountShell} />;
+    content = (
+      <NotesView
+        onBack={handleBackFromAccountShell}
+        onOpenBookDetail={handleOpenBookDetailFromNotes}
+        onOpenAnnotationInReader={handleOpenAnnotationInReader}
+        onRequireSignIn={handleRequireSignIn}
+        onOpenLibrary={handleOpenLibrary}
+      />
+    );
   } else if (view === "subscription") {
     content = <SubscriptionView onBack={handleBackFromAccountShell} />;
   } else if (view === "settings") {
