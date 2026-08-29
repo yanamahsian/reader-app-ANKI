@@ -2,6 +2,8 @@ name: Notes v2 build gate
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: write
@@ -66,7 +68,9 @@ jobs:
           git diff --cached --check
 
       - name: Install dependencies
-        run: npm install --no-package-lock
+        run: |
+          npm install --no-package-lock
+          npm install --no-save --no-package-lock @types/node
 
       - name: Typecheck
         run: npx tsc --noEmit
