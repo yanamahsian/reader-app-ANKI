@@ -23,37 +23,33 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           p = Path('src/App.tsx')
           s = p.read_text()
-          old = '''  function handleOpenAnnotationInReader(book: Book, target: ReaderNavigationTarget): void {
-            setReaderNavigationTarget(target);
-            setCurrentBook(book);
-            setView("reader");
-          }
-          '''
-          new = '''  function handleOpenAnnotationInReader(
-            book: Book,
-            target: ReaderNavigationTarget,
-            origin: "notes" | "atlas" = "notes"
-          ): void {
-            // Reading Memory deep-links should have a deterministic exit path too:
-            // Reader -> Book Detail -> the surface that opened the saved fragment.
-            setSelectedBookId(book.workId ?? null);
-            setBookDetailOrigin(book.workId ? { type: origin } : null);
-            setReaderNavigationTarget(target);
-            setCurrentBook(book);
-            setView("reader");
-          }
-          '''
-          if old not in s:
-              raise SystemExit('Reading Memory handler shape changed; refusing blind patch')
-          s = s.replace(old, new, 1)
+
+          pattern = r'  function handleOpenAnnotationInReader\(book: Book, target: ReaderNavigationTarget\): void \{\n    setReaderNavigationTarget\(target\);\n    setCurrentBook\(book\);\n    setView\("reader"\);\n  \}'
+          replacement = '''  function handleOpenAnnotationInReader(
+              book: Book,
+              target: ReaderNavigationTarget,
+              origin: "notes" | "atlas" = "notes"
+            ): void {
+              // Reading Memory deep-links should have a deterministic exit path too:
+              // Reader -> Book Detail -> the surface that opened the saved fragment.
+              setSelectedBookId(book.workId ?? null);
+              setBookDetailOrigin(book.workId ? { type: origin } : null);
+              setReaderNavigationTarget(target);
+              setCurrentBook(book);
+              setView("reader");
+            }'''
+          s, count = re.subn(pattern, replacement, s, count=1)
+          if count != 1:
+              raise SystemExit(f'Reading Memory handler patch count={count}')
 
           needle = '        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}\n        onRequireSignIn={handleRequireSignIn}'
-          replacement = '        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}\n        onOpenAnnotationInReader={(book, target) => handleOpenAnnotationInReader(book, target, "atlas")}\n        onRequireSignIn={handleRequireSignIn}'
+          replacement_prop = '        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}\n        onOpenAnnotationInReader={(book, target) => handleOpenAnnotationInReader(book, target, "atlas")}\n        onRequireSignIn={handleRequireSignIn}'
           if needle not in s:
               raise SystemExit('Atlas invocation shape changed; refusing blind patch')
-          s = s.replace(needle, replacement, 1)
+          s = s.replace(needle, replacement_prop, 1)
           p.write_text(s)
           PY
           git diff --check
