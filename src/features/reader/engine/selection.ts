@@ -6,6 +6,12 @@ export interface SelectionHandlers {
 
 export interface SelectionController {
   getSelectedText(): string;
+  // NOTES + HIGHLIGHTS PHASE: a cloned snapshot of the Range behind the
+  // current/last selection -- cloned (not the live Range from
+  // window.getSelection()) so it stays valid after the selection itself
+  // is cleared (e.g. by hideToolbar()'s caller before runSave() reads
+  // it). Null before any selection has ever been made in this session.
+  getSelectedRange(): Range | null;
   destroy(): void;
 }
 
@@ -19,6 +25,7 @@ export function createSelectionController(
 ): SelectionController {
 
   let selectedText = "";
+  let selectedRange: Range | null = null;
 
   const toolbar = document.createElement("div");
   toolbar.className = "selection-toolbar";
@@ -71,6 +78,7 @@ export function createSelectionController(
     }
 
     selectedText = text;
+    selectedRange = selection.getRangeAt(0).cloneRange();
     showToolbar(selection.getRangeAt(0));
 
   }
@@ -99,6 +107,7 @@ export function createSelectionController(
 
   return {
     getSelectedText: () => selectedText,
+    getSelectedRange: () => selectedRange,
     destroy
   };
 
