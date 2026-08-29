@@ -1,7 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../auth/supabaseAuth";
 import { fetchAndMergeWorksByIds, listLibrary, type LibraryEntry } from "../../api/userLibrary";
 import { listAnnotationsForUser, type Annotation } from "../../api/annotations";
+import {
+  createThoughtThread,
+  deleteThoughtThread,
+  listThoughtThreads,
+  replaceThoughtThread,
+  type ThoughtThread
+} from "../../api/thoughtThreads";
 import { getBookById } from "../../catalog";
 import type { Book } from "../../catalog";
 import type { Book as ReaderBook } from "../reader/engine/types";
@@ -22,6 +29,7 @@ interface AtlasViewProps {
 interface AtlasState {
   entries: LibraryEntry[];
   annotations: Annotation[];
+  threads: ThoughtThread[];
   activeBooks: Book[];
   connections: AtlasConnection[];
 }
@@ -29,6 +37,7 @@ interface AtlasState {
 const EMPTY_ATLAS: AtlasState = {
   entries: [],
   annotations: [],
+  threads: [],
   activeBooks: [],
   connections: []
 };
@@ -39,6 +48,11 @@ function formatDate(iso: string): string {
   } catch {
     return "";
   }
+}
+
+function normalizeOptional(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
 }
 
 export function AtlasView({
@@ -53,6 +67,16 @@ export function AtlasView({
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unavailableId, setUnavailableId] = useState<string | null>(null);
+
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  const [isThreadComposerOpen, setThreadComposerOpen] = useState(false);
+  const [threadTitle, setThreadTitle] = useState("");
+  const [threadQuestion, setThreadQuestion] = useState("");
+  const [threadSynthesis, setThreadSynthesis] = useState("");
+  const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
+  const [isSavingThread, setSavingThread] = useState(false);
+  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+  const [threadError, setThreadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,12 +95,12 @@ export function AtlasView({
       setError(null);
 
       try {
-        // ATLAS MEMORY BRIDGE v1: Reader-created memory is now a first-class
-        // Atlas input. Library status and annotations are fetched independently
-        // and merged by Work id; no AI or semantic inference is involved here.
-        const [entries, annotations] = await Promise.all([
+        // Reading Memory and explicit Thought Threads are independent personal inputs.
+        // Automatic Atlas connections remain metadata-only in buildAtlasConnections().
+        const [entries, annotations, threads] = await Promise.all([
           listLibrary(),
-          listAnnotationsForUser()
+          listAnnotationsForUser(),
+          listThoughtThreads()
         ]);
 
         const activeEntries = entries.filter(entry => entry.status === "reading" || entry.status === "finished");
@@ -95,6 +119,7 @@ export function AtlasView({
         setAtlas({
           entries,
           annotations,
+          threads,
           activeBooks,
           connections: buildAtlasConnections(activeBooks)
         });
@@ -112,6 +137,11 @@ export function AtlasView({
       cancelled = true;
     };
   }, [isAuthenticated]);
+
+  const annotationById = useMemo(
+    () => new Map(atlas.annotations.map(annotation => [annotation.id, annotation])),
+    [atlas.annotations]
+  );
 
   const readingCount = atlas.entries.filter(entry => entry.status === "reading").length;
   const finishedCount = atlas.entries.filter(entry => entry.status === "finished").length;
@@ -137,6 +167,103 @@ export function AtlasView({
     );
   }
 
+  function resetThreadComposer(): void {
+    setEditingThreadId(null);
+    setThreadComposerOpen(false);
+    setThreadTitle("");
+    setThreadQuestion("");
+    setThreadSynthesis("");
+    setSelectedAnnotationIds([]);
+    setThreadError(null);
+  }
+
+  function openCreateThread(): void {
+    setEditingThreadId(null);
+    setThreadTitle("");
+    setThreadQuestion("");
+    setThreadSynthesis("");
+    setSelectedAnnotationIds([]);
+    setThreadError(null);
+    setThreadComposerOpen(true);
+  }
+
+  function openEditThread(thread: ThoughtThread): void {
+    setEditingThreadId(thread.id);
+    setThreadTitle(thread.title);
+    setThreadQuestion(thread.question ?? "");
+    setThreadSynthesis(thread.synthesisNote ?? "");
+    setSelectedAnnotationIds(thread.annotationIds.filter(id => annotationById.has(id)));
+    setThreadError(null);
+    setThreadComposerOpen(true);
+  }
+
+  function toggleAnnotation(id: string): void {
+    setSelectedAnnotationIds(current =>
+      current.includes(id) ? current.filter(candidate => candidate !== id) : [...current, id]
+    );
+  }
+
+  async function refreshThreads(): Promise<void> {
+    const threads = await listThoughtThreads();
+    setAtlas(current => ({ ...current, threads }));
+  }
+
+  async function handleSaveThread(): Promise<void> {
+    const title = threadTitle.trim();
+    if (!title) {
+      setThreadError("Введите название нити.");
+      return;
+    }
+
+    if (!editingThreadId && new Set(selectedAnnotationIds).size < 2) {
+      setThreadError("Для первой нити выберите минимум два сохранённых фрагмента.");
+      return;
+    }
+
+    setSavingThread(true);
+    setThreadError(null);
+
+    const input = {
+      title,
+      question: normalizeOptional(threadQuestion),
+      synthesisNote: normalizeOptional(threadSynthesis),
+      annotationIds: Array.from(new Set(selectedAnnotationIds))
+    };
+
+    try {
+      if (editingThreadId) {
+        await replaceThoughtThread(editingThreadId, input);
+      } else {
+        await createThoughtThread(input);
+      }
+      // Success is shown only after a confirmed server write and a fresh RLS-backed read.
+      await refreshThreads();
+      resetThreadComposer();
+    } catch (saveError) {
+      console.error("Thought Thread save failed:", saveError);
+      setThreadError("Не удалось сохранить нить мысли.");
+    } finally {
+      setSavingThread(false);
+    }
+  }
+
+  async function handleDeleteThread(thread: ThoughtThread): Promise<void> {
+    if (!window.confirm(`Удалить нить «${thread.title}»? Сохранённые цитаты и заметки останутся.`)) return;
+
+    setDeletingThreadId(thread.id);
+    setThreadError(null);
+    try {
+      await deleteThoughtThread(thread.id);
+      await refreshThreads();
+      if (editingThreadId === thread.id) resetThreadComposer();
+    } catch (deleteError) {
+      console.error("Thought Thread delete failed:", deleteError);
+      setThreadError("Не удалось удалить нить мысли.");
+    } finally {
+      setDeletingThreadId(null);
+    }
+  }
+
   return (
     <ShellPage
       onBack={onBack}
@@ -160,7 +287,7 @@ export function AtlasView({
           <section className="subscription-current">
             <h2>Atlas уже помнит то, что вы заметили</h2>
             <p className="settings-section-note">
-              Atlas использует вашу библиотеку, выделения и заметки как реальные сигналы чтения. Связи между книгами пока строятся только из проверяемых данных AN.KI — авторов, тем, направлений, эпох, жанров, литературных традиций, подборок и времени публикации. AI здесь ничего не придумывает.
+              Atlas использует вашу библиотеку, выделения и заметки как реальные сигналы чтения. Автоматические связи между книгами по-прежнему строятся только из проверяемых данных AN.KI. Нити мысли ниже существуют только потому, что вы сами связали конкретные фрагменты.
             </p>
           </section>
 
@@ -174,12 +301,194 @@ export function AtlasView({
               <p className="settings-section-note">сохранённых фрагментов и мыслей</p>
             </div>
             <div className="subscription-block">
-              <h2>{memoryWorkCount}</h2>
-              <p className="settings-section-note">книг с личной памятью</p>
+              <h2>{atlas.threads.length}</h2>
+              <p className="settings-section-note">нитей мысли создано</p>
             </div>
             <div className="subscription-block">
               <h2>{atlas.connections.length}</h2>
               <p className="settings-section-note">проверяемых связей найдено</p>
+            </div>
+          </section>
+
+          <section className="notes-group" aria-label="Нити мысли">
+            <header className="notes-group-header">
+              <div>
+                <p className="eyebrow">Thought Threads</p>
+                <h2 className="notes-group-title">Нити мысли</h2>
+                <p className="notes-group-author">
+                  Связывайте сохранённые фрагменты из разных книг в одну проблему, вопрос или собственную мыслительную линию.
+                </p>
+              </div>
+              {atlas.annotations.length >= 2 && !isThreadComposerOpen && (
+                <button type="button" className="primary-button" onClick={openCreateThread}>
+                  Создать нить
+                </button>
+              )}
+            </header>
+
+            {threadError && <p className="notes-card-error">{threadError}</p>}
+
+            {atlas.annotations.length === 0 && (
+              <GuestNotice message="Сначала сохраните несколько фрагментов во время чтения — из них можно будет собрать первую нить мысли." />
+            )}
+
+            {atlas.annotations.length === 1 && (
+              <GuestNotice message="У вас уже есть один сохранённый фрагмент. Для создания первой нити нужен ещё хотя бы один." />
+            )}
+
+            {isThreadComposerOpen && (
+              <article className="notes-card">
+                <p className="eyebrow">{editingThreadId ? "Редактирование нити" : "Новая нить"}</p>
+
+                <input
+                  type="text"
+                  className="notes-search-input"
+                  value={threadTitle}
+                  maxLength={200}
+                  placeholder="Название нити — например, «Свобода и ответственность»"
+                  aria-label="Название нити мысли"
+                  onChange={event => setThreadTitle(event.target.value)}
+                />
+
+                <textarea
+                  className="annotation-note-input"
+                  value={threadQuestion}
+                  placeholder="Вопрос, который проходит через эти фрагменты (необязательно)"
+                  aria-label="Вопрос нити мысли"
+                  onChange={event => setThreadQuestion(event.target.value)}
+                />
+
+                <textarea
+                  className="annotation-note-input"
+                  value={threadSynthesis}
+                  placeholder="Ваша итоговая или промежуточная мысль об этой нити (необязательно)"
+                  aria-label="Итоговая мысль нити"
+                  onChange={event => setThreadSynthesis(event.target.value)}
+                />
+
+                <p className="settings-section-note">
+                  Выбрано фрагментов: {selectedAnnotationIds.length}
+                  {!editingThreadId ? " · для создания нужно минимум 2" : ""}
+                </p>
+
+                <div className="notes-group-items">
+                  {atlas.annotations.map(annotation => {
+                    const book = getBookById(annotation.workId);
+                    const checked = selectedAnnotationIds.includes(annotation.id);
+                    return (
+                      <label key={annotation.id} className="notes-card">
+                        <div className="notes-card-actions">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleAnnotation(annotation.id)}
+                            aria-label={`Добавить фрагмент из ${book?.title ?? "книги"}`}
+                          />
+                          <strong>{book?.title ?? "Книга больше не найдена"}</strong>
+                          {book?.authorName ? <span>· {book.authorName}</span> : null}
+                        </div>
+                        <blockquote className="notes-card-quote">{annotation.quoteText}</blockquote>
+                        {annotation.noteText && <p className="notes-card-note">{annotation.noteText}</p>}
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="notes-card-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={isSavingThread}
+                    onClick={() => void handleSaveThread()}
+                  >
+                    {isSavingThread ? "Сохранение…" : editingThreadId ? "Сохранить изменения" : "Создать нить"}
+                  </button>
+                  <button type="button" className="text-link" disabled={isSavingThread} onClick={resetThreadComposer}>
+                    Отмена
+                  </button>
+                </div>
+              </article>
+            )}
+
+            {!isThreadComposerOpen && atlas.threads.length === 0 && atlas.annotations.length >= 2 && (
+              <p className="settings-section-note">
+                Пока ни одной нити нет. Выберите несколько сохранённых фрагментов и свяжите их собственной формулировкой.
+              </p>
+            )}
+
+            <div className="notes-group-items">
+              {atlas.threads.map(thread => {
+                const items = thread.annotationIds
+                  .map(id => annotationById.get(id))
+                  .filter((annotation): annotation is Annotation => Boolean(annotation));
+                const workCount = new Set(items.map(item => item.workId)).size;
+
+                return (
+                  <article key={thread.id} className="notes-card">
+                    <p className="eyebrow">Нить мысли</p>
+                    <h3 className="plan-card-name">{thread.title}</h3>
+                    {thread.question && (
+                      <p className="settings-section-note"><strong>Вопрос:</strong> {thread.question}</p>
+                    )}
+                    {thread.synthesisNote && <p className="notes-card-note">{thread.synthesisNote}</p>}
+                    <p className="settings-section-note">
+                      {items.length} сохранённых фрагментов · {workCount} книг
+                    </p>
+
+                    {items.length <= 1 && (
+                      <p className="settings-section-note">
+                        Часть исходной памяти этой нити могла быть удалена. Сама нить и ваша итоговая мысль сохранены.
+                      </p>
+                    )}
+
+                    <div className="notes-group-items">
+                      {items.map(annotation => {
+                        const book = getBookById(annotation.workId);
+                        return (
+                          <div key={`${thread.id}-${annotation.id}`} className="notes-card">
+                            <p className="notes-card-edition">
+                              {book?.title ?? "Книга больше не найдена"}
+                              {book?.authorName ? ` · ${book.authorName}` : ""}
+                            </p>
+                            <blockquote className="notes-card-quote">{annotation.quoteText}</blockquote>
+                            {annotation.noteText && <p className="notes-card-note">{annotation.noteText}</p>}
+                            <div className="notes-card-actions">
+                              {book && (
+                                <button type="button" className="text-link" onClick={() => onOpenBookDetail(annotation.workId)}>
+                                  Открыть книгу
+                                </button>
+                              )}
+                              <button type="button" className="text-link" onClick={() => handleOpenMemory(annotation)}>
+                                Вернуться к фрагменту
+                              </button>
+                            </div>
+                            {unavailableId === annotation.id && (
+                              <p className="book-detail-unavailable">
+                                Это издание сейчас недоступно в вашей юрисдикции.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="notes-card-actions">
+                      <button type="button" className="text-link" onClick={() => openEditThread(thread)}>
+                        Изменить нить
+                      </button>
+                      <button
+                        type="button"
+                        className="text-link"
+                        disabled={deletingThreadId === thread.id}
+                        onClick={() => void handleDeleteThread(thread)}
+                      >
+                        {deletingThreadId === thread.id ? "Удаление…" : "Удалить нить"}
+                      </button>
+                    </div>
+                    <p className="notes-card-date">{formatDate(thread.updatedAt)}</p>
+                  </article>
+                );
+              })}
             </div>
           </section>
 
@@ -234,11 +543,11 @@ export function AtlasView({
           )}
 
           {atlas.activeBooks.length < 2 ? (
-            <GuestNotice message="Для первой связи нужны хотя бы две книги из вашей реальной истории чтения." />
+            <GuestNotice message="Для первой автоматической связи нужны хотя бы две книги из вашей реальной истории чтения." />
           ) : atlas.connections.length === 0 ? (
-            <GuestNotice message="Книги уже в Atlas, но по текущим проверяемым метаданным между ними пока нет достаточно сильной связи." />
+            <GuestNotice message="Книги уже в Atlas, но по текущим проверяемым метаданным между ними пока нет достаточно сильной автоматической связи." />
           ) : (
-            <section className="subscription-plans" aria-label="Связи между книгами">
+            <section className="subscription-plans" aria-label="Автоматические связи между книгами">
               {atlas.connections.map(connection => (
                 <article
                   key={connection.id}
@@ -273,13 +582,13 @@ export function AtlasView({
           <section className="subscription-current">
             <h2>Что добавит AI позже</h2>
             <p className="settings-section-note">
-              Следующий интеллектуальный слой будет искать смысловые связи между уже существующими сигналами: общие идеи в сохранённых фрагментах, противоречия, повторяющиеся вопросы и развитие темы между книгами. AI будет связывать накопленную память, а не заменять её.
+              Следующий интеллектуальный слой сможет предлагать смысловые связи между уже существующими сигналами: общие идеи в сохранённых фрагментах, противоречия, повторяющиеся вопросы и развитие темы между книгами. Но созданные вами нити останутся явными пользовательскими связями, а не догадкой AI.
             </p>
           </section>
 
           {(readingCount > 0 || finishedCount > 0) && (
             <p className="settings-section-note">
-              Сейчас в библиотеке: читаете — {readingCount}, завершено — {finishedCount}.
+              Сейчас в библиотеке: читаете — {readingCount}, завершено — {finishedCount}. Книг с личной памятью — {memoryWorkCount}.
             </p>
           )}
         </>
