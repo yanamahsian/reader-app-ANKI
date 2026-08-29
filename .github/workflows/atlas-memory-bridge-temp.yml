@@ -2,14 +2,15 @@ name: Atlas Memory Bridge validation
 
 on:
   push:
-    branches: [atlas-memory-bridge-v1-20260829]
+    branches:
+      - atlas-memory-bridge-v1-20260829
 
 permissions:
   contents: write
 
 jobs:
   validate:
-    if: github.actor != 'github-actions[bot]'
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,40 +26,40 @@ jobs:
           p = Path('src/App.tsx')
           s = p.read_text()
           old = '''  function handleOpenAnnotationInReader(book: Book, target: ReaderNavigationTarget): void {
-    setReaderNavigationTarget(target);
-    setCurrentBook(book);
-    setView("reader");
-  }
-'''
+              setReaderNavigationTarget(target);
+              setCurrentBook(book);
+              setView("reader");
+            }
+          '''
           new = '''  function handleOpenAnnotationInReader(
-    book: Book,
-    target: ReaderNavigationTarget,
-    origin: "notes" | "atlas" = "notes"
-  ): void {
-    // Reading Memory deep-links should have a deterministic exit path too:
-    // Reader -> Book Detail -> the surface that opened the saved fragment.
-    setSelectedBookId(book.workId ?? null);
-    setBookDetailOrigin(book.workId ? { type: origin } : null);
-    setReaderNavigationTarget(target);
-    setCurrentBook(book);
-    setView("reader");
-  }
-'''
+              book: Book,
+              target: ReaderNavigationTarget,
+              origin: "notes" | "atlas" = "notes"
+            ): void {
+              // Reading Memory deep-links should have a deterministic exit path too:
+              // Reader -> Book Detail -> the surface that opened the saved fragment.
+              setSelectedBookId(book.workId ?? null);
+              setBookDetailOrigin(book.workId ? { type: origin } : null);
+              setReaderNavigationTarget(target);
+              setCurrentBook(book);
+              setView("reader");
+            }
+          '''
           if old not in s:
               raise SystemExit('Reading Memory handler shape changed; refusing blind patch')
           s = s.replace(old, new, 1)
 
           old_atlas = '''      <AtlasView
-        onBack={handleBackFromAccountShell}
-        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
-        onRequireSignIn={handleRequireSignIn}
-      />'''
+                onBack={handleBackFromAccountShell}
+                onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
+                onRequireSignIn={handleRequireSignIn}
+              />'''
           new_atlas = '''      <AtlasView
-        onBack={handleBackFromAccountShell}
-        onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
-        onOpenAnnotationInReader={(book, target) => handleOpenAnnotationInReader(book, target, "atlas")}
-        onRequireSignIn={handleRequireSignIn}
-      />'''
+                onBack={handleBackFromAccountShell}
+                onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
+                onOpenAnnotationInReader={(book, target) => handleOpenAnnotationInReader(book, target, "atlas")}
+                onRequireSignIn={handleRequireSignIn}
+              />'''
           if old_atlas not in s:
               raise SystemExit('Atlas invocation shape changed; refusing blind patch')
           s = s.replace(old_atlas, new_atlas, 1)
