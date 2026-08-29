@@ -9,6 +9,10 @@
 -- annotations belong to the exact text/translation while Notes can still group by Work.
 -- start_offset/end_offset are nullable in the current live schema for compatibility with
 -- earlier saved-fragment rows; new Reader saves provide both offsets.
+--
+-- annotations_id_user_id_key is intentionally redundant with the globally unique primary
+-- key on id. Thought Threads v1 uses it as the composite ownership anchor for a relation
+-- foreign key, so a client can never pair its own user_id with another user's annotation.
 
 create table public.annotations (
   id uuid primary key default gen_random_uuid(),
@@ -27,7 +31,8 @@ create table public.annotations (
   book_title text,
   author text,
   constraint annotations_page_index_check check (page_index >= 0),
-  constraint annotations_offsets_check check (start_offset >= 0 and end_offset > start_offset)
+  constraint annotations_offsets_check check (start_offset >= 0 and end_offset > start_offset),
+  constraint annotations_id_user_id_key unique (id, user_id)
 );
 
 alter table public.annotations enable row level security;
