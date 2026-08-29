@@ -1,11 +1,12 @@
--- Project Runeberg ingestion support — applied to production 2026-08-29.
+-- Curated external literary providers — applied to production 2026-08-29.
 --
--- The Edge Function source lives at:
+-- Edge Function sources:
 --   supabase/functions/omnia-runeberg-ingest-one/index.ts
+--   supabase/functions/omnia-internet-archive-ingest-one/index.ts
 --
--- This migration adds `runeberg` to the existing bounded master-corpus dispatcher;
--- it does not create a parallel ingestion pipeline. Existing identity, normalization,
--- rights and readiness layers remain canonical.
+-- Both providers feed the existing bounded master-corpus dispatcher. They do not
+-- create a parallel rights/readiness path: normalized files, deterministic DE rights,
+-- and work_readiness remain canonical.
 
 create or replace function public.master_corpus_autonomous_tick()
 returns jsonb
@@ -52,7 +53,7 @@ begin
       with chosen as(
         select c.id from public.master_corpus_candidates c join public.master_corpus_authors m on m.id=c.master_author_id
         where m.status='ingesting' and m.canonical_author_id is not null and (c.status='discovered' or (c.status='failed' and c.attempts<3 and coalesce(c.next_attempt_at,now())<=now()))
-        order by case c.source_id when 'gutenberg' then 0 when 'wikisource' then 1 when 'runeberg' then 2 when 'aozora' then 3 else 4 end, m.priority asc,c.master_author_id,c.ordinal asc for update of c skip locked limit v_slots
+        order by case c.source_id when 'gutenberg' then 0 when 'wikisource' then 1 when 'runeberg' then 2 when 'internet-archive' then 3 when 'aozora' then 4 else 5 end, m.priority asc,c.master_author_id,c.ordinal asc for update of c skip locked limit v_slots
       ),claimed as(
         update public.master_corpus_candidates c set status='processing',attempts=c.attempts+1,processing_started_at=now(),next_attempt_at=now()+interval '10 minutes',last_error=null,updated_at=now()
         from chosen where c.id=chosen.id returning c.id,c.external_id,c.source_id,c.master_author_id
@@ -65,6 +66,8 @@ begin
           v_request_id:=net.http_get(url:='https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-wikisource-ingest-one',params:=jsonb_build_object('authorId',r.canonical_author_id,'externalId',r.external_id),headers:=jsonb_build_object('x-omnia-run-token',v_token),timeout_milliseconds:=120000);
         elsif r.source_id='runeberg' then
           v_request_id:=net.http_get(url:='https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-runeberg-ingest-one',params:=jsonb_build_object('authorId',r.canonical_author_id,'externalId',r.external_id),headers:=jsonb_build_object('x-omnia-run-token',v_token),timeout_milliseconds:=120000);
+        elsif r.source_id='internet-archive' then
+          v_request_id:=net.http_get(url:='https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-internet-archive-ingest-one',params:=jsonb_build_object('authorId',r.canonical_author_id,'externalId',r.external_id),headers:=jsonb_build_object('x-omnia-run-token',v_token),timeout_milliseconds:=120000);
         elsif r.source_id='aozora' then
           v_request_id:=net.http_get(url:='https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-aozora-ingest-one',params:=jsonb_build_object('authorId',r.canonical_author_id,'externalId',r.external_id),headers:=jsonb_build_object('x-omnia-run-token',v_token),timeout_milliseconds:=120000);
         else raise exception 'Unsupported autonomous source: %',r.source_id; end if;
@@ -82,9 +85,9 @@ begin
   select count(*) into v_processing from public.master_corpus_candidates c join public.master_corpus_authors m on m.id=c.master_author_id where c.status='processing' and m.status='ingesting';
   select count(*) into v_pending from public.master_corpus_candidates c join public.master_corpus_authors m on m.id=c.master_author_id where m.status='ingesting' and (c.status in('discovered','processing') or (c.status='failed' and c.attempts<3));
   insert into public.master_corpus_cron_runs(stale_reset,discovered_author_id,dispatched,active_processing,pending_candidates,note)
-  values(v_stale_reset,v_discover_author,v_dispatched,v_processing,v_pending,case when v_discover_author is null then null else 'Gutenberg + Wikisource discovery; Aozora catalog is synced separately' end);
+  values(v_stale_reset,v_discover_author,v_dispatched,v_processing,v_pending,case when v_discover_author is null then null else 'Gutenberg + Wikisource discovery; Runeberg/Internet Archive are curated candidate providers; Aozora catalog is synced separately' end);
   delete from public.master_corpus_cron_runs where ran_at<now()-interval '14 days';
-  return jsonb_build_object('ok',true,'staleReset',v_stale_reset,'discoveryAuthorId',v_discover_author,'dispatched',v_dispatched,'activeProcessing',v_processing,'pendingCandidates',v_pending,'maxConcurrency',10,'providers',jsonb_build_array('gutenberg','wikisource','runeberg','aozora'));
+  return jsonb_build_object('ok',true,'staleReset',v_stale_reset,'discoveryAuthorId',v_discover_author,'dispatched',v_dispatched,'activeProcessing',v_processing,'pendingCandidates',v_pending,'maxConcurrency',10,'providers',jsonb_build_array('gutenberg','wikisource','runeberg','internet-archive','aozora'));
 end;$function$;
 
 -- First production Runeberg candidate. The source page explicitly states that the
