@@ -15,6 +15,7 @@ import { MyLibraryView } from "./features/my-library/MyLibraryView";
 import { AtlasView } from "./features/atlas/AtlasView";
 import type { MyLibraryRestoreState } from "./features/my-library/MyLibraryView";
 import { NotesView } from "./features/notes/NotesView";
+import type { ReaderNavigationTarget } from "./features/reader/ReaderView";
 import { SubscriptionView } from "./features/subscription/SubscriptionView";
 import { SettingsView } from "./features/settings/SettingsView";
 import { SupportView } from "./features/support/SupportView";
@@ -41,7 +42,8 @@ export type BookDetailOrigin =
   | { type: "author"; authorId: string; returnOrigin: AuthorDetailOrigin }
   | { type: "library"; state: LibraryRestoreState }
   | { type: "atlas" }
-  | { type: "my-library"; state: MyLibraryRestoreState };
+  | { type: "my-library"; state: MyLibraryRestoreState }
+  | { type: "notes" };
 
 const TEST_EPUB_BOOK: Book = {
   id: "phase3-test-epub",
@@ -128,6 +130,12 @@ export function App() {
     useState<{ editionId: string; language: string } | null>(
       initialNavigation.bookDetailInitialEdition ?? null
     );
+
+  // Reading Memory: used only when Notes asks Reader to reopen an exact saved fragment.
+  // It is intentionally not persisted in sessionStorage: after a refresh Reader falls back
+  // to the ordinary saved reading position rather than replaying a one-shot deep link.
+  const [readerNavigationTarget, setReaderNavigationTarget] =
+    useState<ReaderNavigationTarget | null>(null);
 
   const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(
     initialNavigation.selectedAuthorId ?? null
@@ -274,6 +282,13 @@ export function App() {
 
   function handleOpenBook(book: Book): void {
     setCurrentBook(book);
+    setReaderNavigationTarget(null);
+    setView("reader");
+  }
+
+  function handleOpenAnnotationInReader(book: Book, target: ReaderNavigationTarget): void {
+    setReaderNavigationTarget(target);
+    setCurrentBook(book);
     setView("reader");
   }
 
@@ -338,6 +353,11 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "notes") {
+      setView("notes");
+      return;
+    }
+
     if (bookDetailOrigin?.type === "atlas") {
       setView("atlas");
       return;
@@ -366,6 +386,10 @@ export function App() {
     initialEdition: { editionId: string; language: string } | null
   ): void {
     handleOpenBookDetail(bookId, { type: "my-library", state }, initialEdition);
+  }
+
+  function handleOpenBookDetailFromNotes(bookId: string): void {
+    handleOpenBookDetail(bookId, { type: "notes" });
   }
 
   function handleRequireSignIn(): void {
@@ -419,7 +443,13 @@ export function App() {
   }
 
   if (view === "reader" && currentBook) {
-    return <ReaderView book={currentBook} onExit={handleExitReader} />;
+    return (
+      <ReaderView
+        book={currentBook}
+        onExit={handleExitReader}
+        navigationTarget={readerNavigationTarget}
+      />
+    );
   }
 
   let content: ReactNode;
@@ -489,7 +519,15 @@ export function App() {
       />
     );
   } else if (view === "notes") {
-    content = <NotesView onBack={handleBackFromAccountShell} />;
+    content = (
+      <NotesView
+        onBack={handleBackFromAccountShell}
+        onOpenBookDetail={handleOpenBookDetailFromNotes}
+        onOpenAnnotationInReader={handleOpenAnnotationInReader}
+        onRequireSignIn={handleRequireSignIn}
+        onOpenLibrary={handleOpenLibrary}
+      />
+    );
   } else if (view === "subscription") {
     content = <SubscriptionView onBack={handleBackFromAccountShell} />;
   } else if (view === "settings") {

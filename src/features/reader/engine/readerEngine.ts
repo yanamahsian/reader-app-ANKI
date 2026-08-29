@@ -1,9 +1,11 @@
 import type { Book, Fragment, Bookmark } from "./types";
 import type { ProgressStore } from "../progressStore/progressStore";
+import type { AnnotationStore, Annotation } from "../annotationStore";
 import { createSelectionController, type SelectionController } from "./selection";
 import { translateText, explainText } from "../../../api/ai";
 import { detectLoader } from "./formats/detect";
 import type { LoadedDocument } from "./formats/types";
+import { computeAnchorFromRange, formatPageWithHighlights } from "./highlightAnchor";
 
 const THEMES = ["dark", "default", "purple", "red"] as const;
 type Theme = (typeof THEMES)[number];
@@ -18,11 +20,27 @@ const THEME_KEY = "anki_theme";
 export interface ReaderEngineOptions {
   container: HTMLElement;
   progressStore: ProgressStore;
+  // NOTES + HIGHLIGHTS PHASE: null for a guest, or for the rare Book with
+  // no workId (see Book.workId's own comment) -- runSave() falls back to
+  // the pre-existing Fragment mechanism unchanged in that case, and no
+  // highlight is ever rendered back into the page. Non-null only for a
+  // signed-in visitor opening a real catalog Edition.
+  annotationStore: AnnotationStore | null;
   onExit: () => void;
 }
 
+// NOTES + HIGHLIGHTS PHASE: lets a caller (ReaderView, when navigating
+// here from the Notes screen) open the book at a specific annotation's
+// position instead of the ordinary saved reading position -- a ONE-TIME
+// navigation target, not a new persisted position (see open()'s own
+// comment on suppressNextProgressSave for how that's enforced).
+export interface OpenOptions {
+  initialPageOverride?: number;
+  focusAnnotationId?: string;
+}
+
 export interface ReaderEngine {
-  open(book: Book): Promise<void>;
+  open(book: Book, options?: OpenOptions): Promise<void>;
   destroy(): void;
 }
 
@@ -65,13 +83,40 @@ function flattenDocument(doc: LoadedDocument): FlatPage[] {
 
 export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
-  const { container, progressStore, onExit } = options;
+  const { container, progressStore, annotationStore, onExit } = options;
 
   let currentBook: Book | null = null;
   let loadedDocument: LoadedDocument | null = null;
   let pages: FlatPage[] = [];
   let currentPage = 0;
   let bookmarks: Bookmark[] = [];
+  // NOTES + HIGHLIGHTS PHASE: every annotation for the CURRENTLY OPEN
+  // edition only (loaded once in open(), see that function's own
+  // comment) -- never every annotation this visitor has, matching the
+  // spec's own "Reader loads only the selected Edition's annotations"
+  // performance requirement.
+  let annotations: Annotation[] = [];
+  // Set true by open() when it was given an initialPageOverride (a
+  // Notes -> Reader navigation) -- consumed exactly once by the very
+  // next renderPage() so that opening on an old quote's page does NOT
+  // silently overwrite reader_progress; the moment the visitor actually
+  // turns a page (or jumps via TOC/bookmarks/slider), renderPage() saves
+  // position normally again, same as before this phase.
+  let suppressNextProgressSave = false;
+  // The one annotation id a Notes -> Reader navigation asked to land on
+  // (if any) -- consumed once, by the first renderPage() whose highlight
+  // actually makes it into the DOM, to scroll/flash it into view.
+  let pendingFocusAnnotationId: string | null = null;
+  // The annotation a just-opened note editor (inside the action sheet)
+  // is currently bound to -- see openNoteSheet/wireNoteEditor below. A
+  // mutable slot rather than a value baked into the click handler's
+  // closure, so a rollback (annotation create() failing) can clear it
+  // without touching/duplicating the click listener itself. CLIENT UUID:
+  // since runSaveAnnotation generates this annotation's id itself and
+  // reuses it unchanged whether the create() call is still in flight,
+  // succeeds, or fails, this never needs rebinding from a temporary id to
+  // a server-assigned one -- it is set exactly once, in openNoteSheet().
+  let activeNoteAnnotationId: string | null = null;
   let fontSize = Number(localStorage.getItem(FONT_KEY)) || DEFAULT_FONT_SIZE;
   let theme: Theme = (localStorage.getItem(THEME_KEY) as Theme) || "dark";
 
@@ -348,6 +393,7 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   function closeActionSheet(): void {
     actionSheet.classList.add("hidden");
     sheetBackdrop.classList.add("hidden");
+    activeNoteAnnotationId = null;
   }
 
   function loadingTemplate(): string {
@@ -427,6 +473,19 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     const text = selection.getSelectedText();
     if (!text.trim() || !currentBook) return;
 
+    // NOTES + HIGHLIGHTS PHASE: a signed-in visitor opening a real
+    // catalog Edition gets the new, richer, Supabase-backed annotation
+    // (stable offset anchor, optional note, visual highlight, editable
+    // later from the Notes screen). Everyone else -- a guest, or the
+    // rare Book with no workId (see Book.workId's own comment) -- keeps
+    // the EXACT pre-existing Fragment/localStorage behavior below,
+    // completely untouched, per the spec's own instruction to preserve
+    // whatever guest mechanism already existed.
+    if (annotationStore && currentBook.workId) {
+      void runSaveAnnotation(text);
+      return;
+    }
+
     const fragment: Fragment = {
       id: crypto.randomUUID(),
       bookId: currentBook.id,
@@ -443,6 +502,173 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     if (!actionSheet.classList.contains("hidden")) {
       updateActionSheet(`<div class="sheet-error" style="color:var(--reader-gold)">Фрагмент сохранён.</div>`);
     }
+
+  }
+
+  // NOTES + HIGHLIGHTS PHASE: optimistic-insert-with-rollback, same
+  // posture as src/features/book-detail/BookDetailView.tsx's own
+  // handleAddToLibrary -- the highlight appears (rendered into the page,
+  // plus the note-editor sheet) the instant the visitor clicks
+  // "Сохранить", not after a network round trip; a failed create()
+  // removes it again and says so, never leaving a false-success mark on
+  // the page.
+  async function runSaveAnnotation(text: string): Promise<void> {
+
+    if (!annotationStore || !currentBook || !currentBook.workId) return;
+
+    // Captured into locals right away -- currentBook is a shared,
+    // reassignable closure variable (open() can point it at a different
+    // book while this async function is suspended at the await below),
+    // so this function must never read currentBook.* again after this
+    // point.
+    const workId = currentBook.workId;
+    const editionId = currentBook.id;
+
+    const page = pages[currentPage];
+    const range = selection.getSelectedRange();
+    const anchor = range ? computeAnchorFromRange(viewer, page.rawText, range) : null;
+
+    if (!anchor) {
+      // The selection couldn't be safely mapped onto this page's raw
+      // text (see highlightAnchor.ts's own comment on when that
+      // happens) -- refuse rather than save a highlight that could
+      // never be accurately re-rendered.
+      notify("Не удалось сохранить это выделение");
+      return;
+    }
+
+    const contextBefore = page.rawText.slice(Math.max(0, anchor.startOffset - 40), anchor.startOffset);
+    const contextAfter = page.rawText.slice(anchor.endOffset, anchor.endOffset + 40);
+
+    // CLIENT UUID: generated once, right here, and reused unchanged as
+    // this annotation's real id -- both in the optimistic entry below AND
+    // in the POST body annotationStore.create() sends (see
+    // src/api/annotations.ts's own CreateAnnotationInput.id comment on
+    // why this is safe under RLS). Because the id never changes between
+    // the optimistic and confirmed states, activeNoteAnnotationId is set
+    // once, in openNoteSheet(id, ...), and never needs rebinding from a
+    // temporary "optimistic-*" placeholder to a server-assigned id.
+    const id = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+
+    const optimistic: Annotation = {
+      id,
+      userId: "",
+      workId,
+      editionId,
+      quoteText: text,
+      noteText: null,
+      pageIndex: currentPage,
+      startOffset: anchor.startOffset,
+      endOffset: anchor.endOffset,
+      contextBefore,
+      contextAfter,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    annotations = [...annotations, optimistic];
+    renderPage(currentPage);
+    openNoteSheet(id, "Выделение сохранено.");
+
+    try {
+
+      const real = await annotationStore.create({
+        id,
+        quoteText: text,
+        pageIndex: currentPage,
+        startOffset: anchor.startOffset,
+        endOffset: anchor.endOffset,
+        contextBefore,
+        contextAfter
+      });
+
+      annotations = annotations.map(item => (item.id === id ? real : item));
+      renderPage(currentPage);
+
+    } catch (error) {
+
+      console.error("annotation create failed:", error);
+      annotations = annotations.filter(item => item.id !== id);
+      renderPage(currentPage);
+
+      if (activeNoteAnnotationId === id) {
+        activeNoteAnnotationId = null;
+        if (!actionSheet.classList.contains("hidden")) {
+          updateActionSheet(`<div class="sheet-error">Не удалось сохранить выделение.</div>`);
+        }
+      } else {
+        notify("Не удалось сохранить выделение");
+      }
+
+    }
+
+  }
+
+  // The compact note-editor shown inside the existing action sheet right
+  // after a highlight is saved -- deliberately reuses that sheet
+  // component (per the spec's own "не большой floating toolbar, а
+  // компактное существующее действие" guidance) rather than a new UI
+  // surface. Empty/blank input clears the note (see updateAnnotationNote's
+  // own comment on note_text: null).
+  function noteEditorHtml(): string {
+    return `
+      <div class="annotation-note-editor">
+        <p class="annotation-note-hint">Заметка (необязательно)</p>
+        <textarea class="annotation-note-input" placeholder="Добавьте комментарий к этому фрагменту…"></textarea>
+        <div class="annotation-note-actions">
+          <button type="button" class="text-link annotation-note-save">Сохранить заметку</button>
+        </div>
+        <p class="annotation-note-status" aria-live="polite"></p>
+      </div>
+    `;
+  }
+
+  function openNoteSheet(annotationId: string, statusMessage: string): void {
+
+    activeNoteAnnotationId = annotationId;
+
+    sheetTitle.textContent = "Сохранено";
+    selectedTextBox.textContent = selection.getSelectedText();
+    actionResult.innerHTML = noteEditorHtml();
+    sheetBackdrop.classList.remove("hidden");
+    actionSheet.classList.remove("hidden");
+
+    wireNoteEditor();
+
+    const status = actionResult.querySelector<HTMLElement>(".annotation-note-status");
+    if (status) status.textContent = statusMessage;
+
+  }
+
+  function wireNoteEditor(): void {
+
+    const textarea = actionResult.querySelector<HTMLTextAreaElement>(".annotation-note-input");
+    const saveBtn = actionResult.querySelector<HTMLButtonElement>(".annotation-note-save");
+    const status = actionResult.querySelector<HTMLElement>(".annotation-note-status");
+    if (!textarea || !saveBtn || !status) return;
+
+    saveBtn.addEventListener("click", async () => {
+
+      const id = activeNoteAnnotationId;
+      if (!id || !annotationStore) return;
+
+      const value = textarea.value.trim();
+      saveBtn.disabled = true;
+      status.textContent = "Сохранение…";
+
+      try {
+        const updated = await annotationStore.updateNote(id, value.length ? value : null);
+        annotations = annotations.map(item => (item.id === id ? updated : item));
+        status.textContent = "Заметка сохранена.";
+      } catch (error) {
+        console.error("annotation note save failed:", error);
+        status.textContent = "Не удалось сохранить заметку.";
+      } finally {
+        saveBtn.disabled = false;
+      }
+
+    });
 
   }
 
@@ -656,7 +882,22 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
     currentPage = Math.max(0, Math.min(index, pages.length - 1));
     const page = pages[currentPage];
-    viewer.innerHTML = page.html;
+
+    // NOTES + HIGHLIGHTS PHASE: re-render with any saved highlights for
+    // THIS page overlaid -- degrades to the exact original page.html
+    // whenever there's nothing to highlight (guest, no annotationStore,
+    // or simply no annotation on this particular page), so nothing about
+    // the non-highlighted rendering path changes.
+    const pageAnnotations = annotationStore
+      ? annotations.filter(item => item.pageIndex === currentPage)
+      : [];
+
+    viewer.innerHTML = pageAnnotations.length
+      ? formatPageWithHighlights(
+          page.rawText,
+          pageAnnotations.map(item => ({ id: item.id, startOffset: item.startOffset, endOffset: item.endOffset }))
+        )
+      : page.html;
 
     const percent = Math.round(((currentPage + 1) / pages.length) * 100);
 
@@ -686,7 +927,38 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     updateBookmarkButton();
 
     if (currentBook) {
-      progressStore.savePosition(currentBook.id, currentPage);
+      // NOTES + HIGHLIGHTS PHASE: a Notes -> Reader navigation's very
+      // first render is a TEMPORARY look at an old quote's position, not
+      // a real "the visitor is now reading here" -- see open()'s own
+      // comment. Every render after that one (any real page turn, TOC
+      // jump, bookmark jump, slider drag) saves position exactly as
+      // before this phase.
+      if (suppressNextProgressSave) {
+        suppressNextProgressSave = false;
+      } else {
+        progressStore.savePosition(currentBook.id, currentPage);
+      }
+    }
+
+    // NOTES + HIGHLIGHTS PHASE: scroll the one annotation a Notes ->
+    // Reader navigation asked to land on into view, once, now that its
+    // <mark> is actually in the DOM (pageAnnotations above already
+    // includes it whenever this page is the right one). Selector uses the
+    // CSS attribute-LIST match (~=) against data-annotation-ids, since
+    // formatPageWithHighlights() (see highlightAnchor.ts) tags a segment
+    // with every annotation id covering it -- this id's own segment is
+    // found the same way whether it's on its own, partially overlaps
+    // another annotation, is fully nested inside one, or shares its exact
+    // range with another.
+    if (pendingFocusAnnotationId) {
+      const targetId = pendingFocusAnnotationId;
+      pendingFocusAnnotationId = null;
+      const target = viewer.querySelector(`[data-annotation-ids~="${targetId}"]`);
+      if (target) {
+        target.scrollIntoView({ block: "center" });
+        target.classList.add("reader-highlight-focus");
+        setTimeout(() => target.classList.remove("reader-highlight-focus"), 1800);
+      }
     }
 
   }
@@ -818,7 +1090,7 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
      Public API
      ------------------------------------------------------------------ */
 
-  async function open(book: Book): Promise<void> {
+  async function open(book: Book, openOptions?: OpenOptions): Promise<void> {
 
     currentBook = book;
 
@@ -854,8 +1126,34 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
     bookmarks = progressStore.getBookmarks(book.id);
 
+    // NOTES + HIGHLIGHTS PHASE: loaded once, here, for THIS edition only
+    // -- never a book-open blocker: a failed fetch (network error, etc.)
+    // still opens the book, just with no highlights rendered, rather
+    // than refusing to open at all over a non-essential overlay.
+    if (annotationStore) {
+      try {
+        annotations = await annotationStore.list();
+      } catch (error) {
+        console.error("annotationStore.list() failed:", error);
+        annotations = [];
+      }
+    } else {
+      annotations = [];
+    }
+
     const savedPosition = progressStore.getPosition(book.id);
-    currentPage = savedPosition !== null ? Math.min(savedPosition, pages.length - 1) : 0;
+
+    if (openOptions?.initialPageOverride !== undefined) {
+      // Notes -> Reader navigation: open on the annotation's page
+      // instead of the ordinary saved position, WITHOUT treating that as
+      // a real visit to this page (see renderPage()'s own
+      // suppressNextProgressSave handling right below).
+      currentPage = Math.max(0, Math.min(openOptions.initialPageOverride, pages.length - 1));
+      suppressNextProgressSave = true;
+      pendingFocusAnnotationId = openOptions.focusAnnotationId ?? null;
+    } else {
+      currentPage = savedPosition !== null ? Math.min(savedPosition, pages.length - 1) : 0;
+    }
 
     renderPage(currentPage);
 

@@ -4,6 +4,15 @@
 
 export interface Book {
   id: string;
+  // NOTES + HIGHLIGHTS PHASE: the catalog Work id, as distinct from
+  // `id` above (the Edition id -- see toReaderBook.ts's own comment on
+  // why Book.id became the Edition id). Optional and additive: every
+  // existing caller that builds a Book directly (e.g. App.tsx's dev-only
+  // TEST_EPUB_BOOK) simply omits it, which readerEngine.ts/ReaderView.tsx
+  // treat as "no real Work behind this book" -- real annotation saving is
+  // quietly unavailable for that one case (falls back to the pre-existing
+  // guest Fragment mechanism), nothing else changes.
+  workId?: string;
   title: string;
   author?: string;
   language?: string;

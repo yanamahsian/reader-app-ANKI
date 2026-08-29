@@ -1398,6 +1398,29 @@ button.text-link {
   color: var(--reader-text);
 }
 
+/* NOTES + HIGHLIGHTS PHASE: saved highlights -- deliberately subtle (a
+   thin warm underline-wash, not a bright marker-yellow block) so the
+   page stays quiet with several highlights on it; uses the SAME
+   --reader-gold-soft token as the live text-selection background above,
+   just at lower opacity, so a highlight reads as "the same aesthetic,
+   permanent" rather than a second, competing visual language. Never
+   changes the reader's own palette variables. */
+mark.reader-highlight {
+  background: color-mix(in srgb, var(--reader-gold-soft) 45%, transparent);
+  color: inherit;
+
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* Notes -> Reader navigation: a brief, one-time emphasis on the specific
+   highlight the visitor came here to see, distinct from every other
+   highlight already on the page. */
+mark.reader-highlight.reader-highlight-focus {
+  background: var(--reader-gold-soft);
+  transition: background 1.6s ease-out;
+}
+
 .tap-zone {
   position: fixed;
   top: 0;
@@ -1565,6 +1588,56 @@ button.text-link {
 
   font-family: "Cormorant Garamond", serif;
   font-size: 17px;
+}
+
+/* NOTES + HIGHLIGHTS PHASE: the compact "add a note" control -- reused
+   both inside the reader's own action sheet (right after a highlight is
+   saved) and, in plain React form, on the Notes screen's own inline
+   edit. Deliberately just a textarea + one small link-style button, the
+   smallest addition that fits the sheet's existing vocabulary rather
+   than a new modal/toolbar. */
+.annotation-note-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.annotation-note-hint {
+  margin: 0;
+
+  color: var(--reader-meta, var(--home-muted));
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.annotation-note-input {
+  min-height: 72px;
+  padding: 10px 12px;
+
+  border: 1px solid var(--reader-border, var(--home-border));
+  border-radius: 10px;
+
+  background: rgba(255, 255, 255, 0.025);
+  color: inherit;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 16px;
+  line-height: 1.5;
+
+  resize: vertical;
+}
+
+.annotation-note-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.annotation-note-status {
+  margin: 0;
+
+  color: var(--reader-meta, var(--home-muted));
+  font-size: 12px;
 }
 /* =========================================================
    MOBILE
@@ -2912,6 +2985,128 @@ button.text-link {
   color: rgba(220, 120, 110, 0.9);
   font-size: 14px;
   text-align: center;
+}
+
+/* NOTES + HIGHLIGHTS PHASE: the Notes screen -- a personal reading card
+   catalog, so this stays close to the same quiet, text-first vocabulary
+   as My Library's tabs and Profile's form (no boxed SaaS-style panels,
+   no shadowed cards). */
+.notes-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  margin-bottom: 22px;
+}
+
+.notes-search-input,
+.notes-book-select {
+  padding: 10px 12px;
+
+  border: 1px solid var(--home-border);
+  border-radius: 8px;
+
+  background: transparent;
+  color: inherit;
+
+  font-size: 14px;
+}
+
+.notes-search-input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.notes-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.notes-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+
+  border-bottom: 1px solid var(--home-border);
+}
+
+.notes-group-title {
+  margin: 0 0 2px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 21px;
+}
+
+.notes-group-author {
+  margin: 0;
+
+  color: var(--home-muted);
+  font-size: 13px;
+}
+
+.notes-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.notes-card {
+  padding-left: 16px;
+
+  border-left: 2px solid var(--home-gold);
+}
+
+.notes-card-edition {
+  margin: 0 0 6px;
+
+  color: var(--home-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.notes-card-quote {
+  margin: 0 0 8px;
+
+  font-family: "Cormorant Garamond", serif;
+  font-size: 18px;
+  font-style: italic;
+  line-height: 1.6;
+}
+
+.notes-card-note {
+  margin: 0 0 10px;
+
+  color: var(--home-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.notes-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+
+  margin-bottom: 6px;
+}
+
+.notes-card-error {
+  margin: 6px 0 0;
+
+  color: rgba(220, 120, 110, 0.9);
+  font-size: 13px;
+}
+
+.notes-card-date {
+  margin: 8px 0 0;
+
+  color: var(--home-muted);
+  font-size: 11px;
 }
 
 /* USER LIBRARY PHASE: Profile's real sign-in/sign-up form. */
