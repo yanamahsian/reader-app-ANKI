@@ -1,19 +1,18 @@
--- THOUGHT THREADS v1 — explicit user-created intellectual links between saved annotations.
+-- THOUGHT THREADS v1 — current production mirror + final v1 hardening.
 --
--- A Thought Thread is not an automatic Atlas connection and not a tag/folder. The user
--- explicitly chooses saved annotations from their own Reading Memory and gives the group
--- a title, optional guiding question, and optional synthesis note.
+-- A Thought Thread is an explicit user-created intellectual link between existing Reading
+-- Memory annotations. It is not an automatic Atlas connection, tag, folder, AI category,
+-- or recommendation.
 --
 -- Deletion semantics:
---   * deleting a thread deletes only thought_thread_items (ON DELETE CASCADE), never annotations;
---   * deleting an annotation removes only the corresponding relation item;
---   * a thread is intentionally allowed to remain with 0/1 surviving items so its title,
---     question and synthesis are not destroyed when source memory is later deleted.
+--   * deleting a thread deletes only relation rows, never annotations;
+--   * deleting an annotation removes only its relation rows;
+--   * a thread may remain with 0/1 surviving items so its title/question/synthesis survive.
 --
 -- Security invariant:
--- thought_thread_items carries user_id and has composite foreign keys to BOTH the thread
--- and the annotation. Therefore an authenticated user cannot link somebody else's annotation
--- into their own thread even by bypassing the frontend and calling PostgREST directly.
+-- thought_thread_items carries user_id. RLS checks auth.uid(), and the final v1 schema also
+-- uses composite ownership foreign keys so a client cannot pair its own user_id/thread with
+-- another user's annotation even by bypassing the frontend.
 
 create table public.thought_threads (
   id uuid primary key default gen_random_uuid(),
@@ -23,23 +22,23 @@ create table public.thought_threads (
   synthesis_note text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint thought_threads_title_check check (char_length(btrim(title)) between 1 and 200),
+  constraint thought_threads_title_not_blank check (btrim(title) <> ''),
   constraint thought_threads_id_user_id_key unique (id, user_id)
 );
 
--- Existing annotations.id is already globally unique as the primary key. This additional
--- composite uniqueness is solely the relational anchor that lets thought_thread_items prove
--- annotation ownership with a foreign key, rather than trusting client-supplied user_id.
+-- annotations.id is already globally unique. This composite key exists solely to make
+-- ownership enforceable by a relation foreign key.
 alter table public.annotations
   add constraint annotations_id_user_id_key unique (id, user_id);
 
 create table public.thought_thread_items (
-  thread_id uuid not null,
-  annotation_id uuid not null,
-  user_id uuid not null,
+  id uuid primary key default gen_random_uuid(),
+  thread_id uuid not null references public.thought_threads(id) on delete cascade,
+  annotation_id uuid not null references public.annotations(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
   position integer not null default 0,
   created_at timestamptz not null default now(),
-  primary key (thread_id, annotation_id),
+  constraint thought_thread_items_unique_pair unique (thread_id, annotation_id),
   constraint thought_thread_items_position_check check (position >= 0),
   constraint thought_thread_items_thread_owner_fk
     foreign key (thread_id, user_id)
@@ -51,12 +50,11 @@ create table public.thought_thread_items (
     on delete cascade
 );
 
-create index thought_threads_user_updated_idx
-  on public.thought_threads(user_id, updated_at desc);
-create index thought_thread_items_user_idx
-  on public.thought_thread_items(user_id);
-create index thought_thread_items_annotation_idx
-  on public.thought_thread_items(annotation_id);
+create index thought_threads_user_id_idx on public.thought_threads(user_id);
+create index thought_threads_user_id_updated_at_idx on public.thought_threads(user_id, updated_at desc);
+create index thought_thread_items_thread_id_idx on public.thought_thread_items(thread_id);
+create index thought_thread_items_annotation_id_idx on public.thought_thread_items(annotation_id);
+create index thought_thread_items_user_id_idx on public.thought_thread_items(user_id);
 
 alter table public.thought_threads enable row level security;
 alter table public.thought_thread_items enable row level security;
@@ -73,7 +71,17 @@ create policy thought_threads_delete_own on public.thought_threads
 create policy thought_thread_items_select_own on public.thought_thread_items
   for select using (auth.uid() = user_id);
 create policy thought_thread_items_insert_own on public.thought_thread_items
-  for insert with check (auth.uid() = user_id);
+  for insert with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.thought_threads t
+      where t.id = thread_id and t.user_id = auth.uid()
+    )
+    and exists (
+      select 1 from public.annotations a
+      where a.id = annotation_id and a.user_id = auth.uid()
+    )
+  );
 create policy thought_thread_items_update_own on public.thought_thread_items
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy thought_thread_items_delete_own on public.thought_thread_items
@@ -82,9 +90,8 @@ create policy thought_thread_items_delete_own on public.thought_thread_items
 grant select, insert, update, delete on public.thought_threads to authenticated;
 grant select, insert, update, delete on public.thought_thread_items to authenticated;
 
--- Atomic creation: the UI requires >=2 annotations and the database verifies that every
--- supplied annotation belongs to auth.uid() before creating anything. Duplicate ids are
--- collapsed while preserving their first position.
+-- Atomic creation: >=2 distinct annotations are required only at creation time. Every supplied
+-- annotation is verified against auth.uid() before either the Thread or relation rows exist.
 create or replace function public.create_thought_thread(
   p_title text,
   p_question text,
@@ -152,8 +159,8 @@ begin
 end;
 $$;
 
--- Atomic edit/reorder. Unlike creation, replacement may contain 0/1 items because a Thread
--- is allowed to survive after source annotations disappear or the user removes relations.
+-- Atomic metadata + membership replacement. 0/1 items are deliberately legal here so deleting
+-- source memory never forces deletion of the user's synthesis.
 create or replace function public.replace_thought_thread(
   p_thread_id uuid,
   p_title text,
