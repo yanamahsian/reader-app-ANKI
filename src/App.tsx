@@ -286,7 +286,15 @@ export function App() {
     setView("reader");
   }
 
-  function handleOpenAnnotationInReader(book: Book, target: ReaderNavigationTarget): void {
+  function handleOpenAnnotationInReader(
+    book: Book,
+    target: ReaderNavigationTarget,
+    origin: "notes" | "atlas" = "notes"
+  ): void {
+    // Reading Memory deep-links should have a deterministic exit path too:
+    // Reader -> Book Detail -> the surface that opened the saved fragment.
+    setSelectedBookId(book.workId ?? null);
+    setBookDetailOrigin(book.workId ? { type: origin } : null);
     setReaderNavigationTarget(target);
     setCurrentBook(book);
     setView("reader");
@@ -515,6 +523,7 @@ export function App() {
       <AtlasView
         onBack={handleBackFromAccountShell}
         onOpenBookDetail={bookId => handleOpenBookDetail(bookId, { type: "atlas" })}
+        onOpenAnnotationInReader={(book, target) => handleOpenAnnotationInReader(book, target, "atlas")}
         onRequireSignIn={handleRequireSignIn}
       />
     );
