@@ -3,12 +3,25 @@ import type { Book } from "./engine/types";
 import { createReaderEngine, type ReaderEngine } from "./engine/readerEngine";
 import { createLocalStorageStore } from "./progressStore/localStorageStore";
 import { createSupabaseProgressStore } from "./progressStore/supabaseProgressStore";
+import { createSupabaseAnnotationStore } from "./annotationStore";
 import { getSession } from "../../auth/supabaseAuth";
 import { fetchProgress } from "../../api/readerProgress";
+
+// NOTES + HIGHLIGHTS PHASE: set only when arriving here from the Notes
+// screen ("open this exact quote") -- App.tsx clears/omits it for every
+// ordinary "Читать" open, so this never lingers across an unrelated later
+// visit to Reader. pageIndex is the reader's own global flat page index
+// (the same one Bookmark.pageIndex/reader_progress.page already use --
+// see the annotations migration's own comment on why that's stable).
+export interface ReaderNavigationTarget {
+  pageIndex: number;
+  annotationId: string;
+}
 
 interface ReaderViewProps {
   book: Book;
   onExit: () => void;
+  navigationTarget?: ReaderNavigationTarget | null;
 }
 
 // Thin React wrapper. All reader behaviour — pagination, selection,
@@ -16,7 +29,7 @@ interface ReaderViewProps {
 // vanilla TypeScript module. This component only mounts a container
 // for it and calls its public API (open/destroy); React never reaches
 // into the engine's internal DOM.
-export function ReaderView({ book, onExit }: ReaderViewProps) {
+export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ReaderEngine | null>(null);
@@ -44,6 +57,15 @@ export function ReaderView({ book, onExit }: ReaderViewProps) {
         ? createSupabaseProgressStore(book.id, await fetchProgress(book.id))
         : createLocalStorageStore();
 
+      // NOTES + HIGHLIGHTS PHASE: real, Supabase-backed annotations only
+      // for a signed-in visitor opening a real catalog Edition (book.workId
+      // present -- see Book.workId's own comment on when it's absent).
+      // Everyone else gets null, and readerEngine.ts's own runSave() falls
+      // back to the pre-existing guest Fragment mechanism unchanged.
+      const annotationStore = session && book.workId
+        ? createSupabaseAnnotationStore(session.user.id, book.workId, book.id)
+        : null;
+
       // The visitor could have navigated away (book changed, or this
       // view unmounted) while fetchProgress() above was in flight --
       // don't build/open an engine for a book that's no longer current.
@@ -52,12 +74,23 @@ export function ReaderView({ book, onExit }: ReaderViewProps) {
       const engine = createReaderEngine({
         container,
         progressStore,
+        annotationStore,
         onExit
       });
 
       engineRef.current = engine;
 
-      engine.open(book).catch(error => {
+      // NOTES + HIGHLIGHTS PHASE: navigationTarget (set only when arriving
+      // from Notes -> "open this exact quote") opens on the annotation's
+      // own page instead of the ordinary saved position -- readerEngine.ts's
+      // own open()/renderPage() make sure this does NOT overwrite
+      // reader_progress just because an old quote was opened (see their
+      // own comments on suppressNextProgressSave).
+      const openOptions = navigationTarget
+        ? { initialPageOverride: navigationTarget.pageIndex, focusAnnotationId: navigationTarget.annotationId }
+        : undefined;
+
+      engine.open(book, openOptions).catch(error => {
         console.error(error);
         alert("Не удалось открыть книгу.");
       });
