@@ -1,0 +1,32 @@
+name: Restore preexisting temp files (temporary)
+
+on:
+  push:
+    branches:
+      - integrate-atlas-contradictions-exact
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore base files and clean workflow
+        shell: bash
+        run: |
+          git checkout 4cfed72ba33617c74eac3c32c2c3ef4762e3d881 -- .tmp/notes_v2_1.b85 .tmp/notes_v2_2.b85
+          rm -f .github/workflows/restore-preexisting-temp.yml
+          git add -A
+          git diff --cached --check
+      - name: Commit restoration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Restore preexisting staging files"
+          git push origin HEAD:integrate-atlas-contradictions-exact
