@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .gate/0011.patch.gz.b64 | gzip -d > /tmp/0011.patch
+          cat .gate/0011.part00 .gate/0011.part01 .gate/0011.part02 .gate/0011.part03 .gate/0011.part04 .gate/0011.part05 | base64 -d | gzip -d > /tmp/0011.patch
           echo 'c657fe6fc4ebca5e9cfb0a1c5e7ca57beb37612a8ecba408d1916cba4e304092  /tmp/0011.patch' | sha256sum -c -
 
       - name: Apply to exact production baseline
@@ -57,7 +57,7 @@ jobs:
           git diff --name-only 293bf2b513c324e8541541b8531756b0a3141420..HEAD | sort > /tmp/actual-files
           sort /tmp/expected-files > /tmp/expected-sorted
           diff -u /tmp/expected-sorted /tmp/actual-files
-          ! grep -R "SUPABASE_SERVICE_ROLE_KEY" src || true
+          ! grep -R "SUPABASE_SERVICE_ROLE_KEY" src
           grep -q "getOpenAIConfig" supabase/functions/omnia-ai/index.ts
           grep -q "consumeAiAllowance" supabase/functions/omnia-ai/index.ts
           grep -q "consume_ai_allowance" supabase/sql/ai_entitlements_foundation_v1.sql
