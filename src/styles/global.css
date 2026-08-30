@@ -3741,3 +3741,19 @@ mark.reader-highlight.reader-highlight-focus {
   color: var(--reader-meta);
   font-size: 14px;
 }
+
+/* =========================================================
+   HOME PRODUCT INTEGRATION v1
+   HomePersonalSection.tsx's own layout, on top of the existing
+   .editorial-section/.section-heading rhythm HomeView already uses for
+   Collections/Authors/Academy (no new section-level styling needed
+   there) and the existing .notes-card/.notes-card-actions/.book-grid
+   system Atlas and My Library already established (no new card styling
+   needed there either). This block is only the one small spacing rule
+   those don't already provide: separation between the Continue Reading
+   grid/empty-state and the compact Atlas/Memory signal card below it.
+   ========================================================= */
+
+.home-personal-signal {
+  margin-top: 40px;
+}

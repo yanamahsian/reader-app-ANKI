@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Hero } from "./Hero";
+import { HomePersonalSection } from "./HomePersonalSection";
 import { getAuthors, getBooksByCollection, getCollectionById } from "../../catalog";
 import type { Author } from "../../catalog/types";
 import { CollectionCard } from "../collections/CollectionCard";
@@ -12,6 +13,14 @@ interface HomeViewProps {
   // Opens the app-wide search panel (now owned by App.tsx / rendered
   // once alongside AppShell) with no prefill — see App.tsx's openSearch.
   onOpenSearch: () => void;
+  // HOME PRODUCT INTEGRATION v1: forwarded straight to HomePersonalSection,
+  // which self-gates every one of these on isAuthenticated -- HomeView
+  // itself stays a plain page-composition layer, not a second place that
+  // knows about auth state or personal data.
+  onOpenBookDetailFromHome: (bookId: string, initialEdition: { editionId: string; language: string } | null) => void;
+  onOpenMyLibrary: () => void;
+  onOpenAtlas: () => void;
+  onOpenNotes: () => void;
 }
 
 function authorYearsLabel(author: Author): string | null {
@@ -115,7 +124,11 @@ export function HomeView({
   onOpenCollections,
   onOpenAuthorDetail,
   onOpenLibrary,
-  onOpenSearch
+  onOpenSearch,
+  onOpenBookDetailFromHome,
+  onOpenMyLibrary,
+  onOpenAtlas,
+  onOpenNotes
 }: HomeViewProps) {
 
   const curatedAuthors = getCuratedHomeAuthors();
@@ -127,6 +140,14 @@ export function HomeView({
       <div className="home-main">
 
         <Hero onOpenSearch={onOpenSearch} onOpenLibrary={onOpenLibrary} />
+
+        <HomePersonalSection
+          onOpenBookDetail={onOpenBookDetailFromHome}
+          onOpenLibrary={onOpenLibrary}
+          onOpenMyLibrary={onOpenMyLibrary}
+          onOpenAtlas={onOpenAtlas}
+          onOpenNotes={onOpenNotes}
+        />
 
         <section id="collections" className="editorial-section">
 
@@ -189,8 +210,16 @@ export function HomeView({
                 первоисточники, контекст и интеллектуальные
                 связи между текстами.
               </p>
-              <button className="primary-button" type="button">
-                Посмотреть академии
+              {/* HOME PRODUCT INTEGRATION v1 (spec section 20): this button had
+                  no route behind it at all -- a control that looks
+                  clickable but silently does nothing reads as broken.
+                  Academies are not built this pass, so the honest state is
+                  an explicitly disabled control (same convention as
+                  Subscription's/Support's/Settings' own "Скоро" controls),
+                  not a fake destination. The teaser section itself stays --
+                  it remains part of the future product architecture. */}
+              <button className="primary-button" type="button" disabled>
+                Academy — скоро
               </button>
             </div>
 

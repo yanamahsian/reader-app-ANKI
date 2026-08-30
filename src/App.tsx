@@ -43,7 +43,12 @@ export type BookDetailOrigin =
   | { type: "library"; state: LibraryRestoreState }
   | { type: "atlas" }
   | { type: "my-library"; state: MyLibraryRestoreState }
-  | { type: "notes" };
+  | { type: "notes" }
+  // HOME PRODUCT INTEGRATION v1: Home's own honest navigation origin --
+  // "Продолжить чтение" opens Book Detail from Home, and Back from Book
+  // Detail must return to Home specifically, not borrow one of the
+  // other origins above just to avoid a new union variant.
+  | { type: "home" };
 
 const TEST_EPUB_BOOK: Book = {
   id: "phase3-test-epub",
@@ -371,6 +376,11 @@ export function App() {
       return;
     }
 
+    if (bookDetailOrigin?.type === "home") {
+      setView("home");
+      return;
+    }
+
     setView("home");
 
   }
@@ -398,6 +408,18 @@ export function App() {
 
   function handleOpenBookDetailFromNotes(bookId: string): void {
     handleOpenBookDetail(bookId, { type: "notes" });
+  }
+
+  // HOME PRODUCT INTEGRATION v1: "Продолжить чтение" on Home. initialEdition
+  // is only ever a seed for Book Detail's own edition/language selection
+  // (exactly the same pattern handleOpenBookDetailFromMyLibrary already
+  // uses) -- Book Detail remains the sole Edition/rights gate, Reader is
+  // never opened directly from here.
+  function handleOpenBookDetailFromHome(
+    bookId: string,
+    initialEdition: { editionId: string; language: string } | null
+  ): void {
+    handleOpenBookDetail(bookId, { type: "home" }, initialEdition);
   }
 
   function handleRequireSignIn(): void {
@@ -550,6 +572,10 @@ export function App() {
         onOpenAuthorDetail={handleOpenAuthorDetailFromHome}
         onOpenLibrary={handleOpenLibrary}
         onOpenSearch={() => openSearch()}
+        onOpenBookDetailFromHome={handleOpenBookDetailFromHome}
+        onOpenMyLibrary={() => handleAccountNavigate("my-library")}
+        onOpenAtlas={() => handleAccountNavigate("atlas")}
+        onOpenNotes={() => handleAccountNavigate("notes")}
       />
     );
   }
