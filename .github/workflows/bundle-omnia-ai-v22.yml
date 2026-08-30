@@ -1,0 +1,67 @@
+name: Bundle exact omnia-ai v22
+
+on:
+  push:
+    branches:
+      - tmp-ai-entitlements-0011-gate
+    paths:
+      - '.github/workflows/bundle-omnia-ai-v22.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: subscription-ai-entitlements-staging-v1
+          fetch-depth: 0
+
+      - name: Verify exact staging commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "9654bb049281614f73494ae329fefa1f0ccd0cae"
+          git diff --check HEAD^
+
+      - name: Install toolchain
+        run: npm install --no-audit --no-fund
+
+      - name: Transpile and minify exact Edge source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/esbuild supabase/functions/omnia-ai/index.ts \
+            --loader:.ts=ts \
+            --platform=neutral \
+            --format=esm \
+            --minify \
+            --outfile=/tmp/omnia-ai-v22.min.js
+          node --check /tmp/omnia-ai-v22.min.js
+          grep -q 'consume_ai_allowance' /tmp/omnia-ai-v22.min.js
+          grep -q 'auth_required' /tmp/omnia-ai-v22.min.js
+          grep -q 'ai_monthly_limit_reached' /tmp/omnia-ai-v22.min.js
+          grep -q 'ai_hourly_limit_reached' /tmp/omnia-ai-v22.min.js
+          echo "bundle_bytes=$(wc -c < /tmp/omnia-ai-v22.min.js)"
+          sha256sum /tmp/omnia-ai-v22.min.js
+
+      - name: Publish immutable bundle transport branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ANKI Edge Bundle Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          rm -rf /tmp/bundle-repo
+          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/bundle-repo
+          cd /tmp/bundle-repo
+          git checkout --orphan tmp-omnia-ai-v22-bundle
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/omnia-ai-v22.min.js ./index.ts
+          printf 'source_commit=9654bb049281614f73494ae329fefa1f0ccd0cae\n' > SOURCE.txt
+          git add index.ts SOURCE.txt
+          git commit -m 'Exact bundled omnia-ai v22 transport'
+          git push --force origin tmp-omnia-ai-v22-bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
