@@ -207,8 +207,28 @@ export class ThoughtThreadAppendError extends Error {
 // server-controlled discriminant, not a parsed message string. 42501 is
 // also what create_thought_thread/replace_thought_thread already raise
 // for "Authentication required", reused here for the same meaning.
+//
+// CORRECTION PASS: an expired/invalid/missing Bearer JWT can be
+// rejected by PostgREST itself BEFORE the RPC ever runs -- in that
+// case append_annotation_to_thought_thread() never executes, so its
+// own "auth.uid() is null" -> 42501 path is never reached at all, and
+// the error body instead carries one of PostgREST's OWN authentication
+// error codes (source: PostgREST's error reference, "Authentication"
+// group -- https://docs.postgrest.org/en/stable/references/errors.html):
+//   PGRST301 -- "JWT couldn't be decoded or it is invalid" (expired/malformed)
+//   PGRST302 -- request without Bearer auth while the anonymous role is disabled
+//   PGRST303 -- JWT claims validation/parsing failed
+// All three are genuinely "please sign in again" cases, so they map to
+// the same not_authenticated kind as 42501. PGRST300 ("no JWT secret
+// configured on the server") is deliberately NOT included -- that is a
+// server misconfiguration no amount of re-authenticating fixes, so it
+// is left to fall through to "generic" rather than telling the visitor
+// their session expired.
 const APPEND_ERROR_CODE_KIND: Record<string, ThoughtThreadAppendErrorKind> = {
   "42501": "not_authenticated",
+  "PGRST301": "not_authenticated",
+  "PGRST302": "not_authenticated",
+  "PGRST303": "not_authenticated",
   "AK001": "thread_unavailable",
   "AK002": "annotation_unavailable"
 };
@@ -255,7 +275,18 @@ export async function appendAnnotationToThoughtThread(threadId: string, annotati
   const detail = await response.json().catch(() => null) as { code?: string } | null;
   console.error(`thoughtThreads append failed (${response.status}):`, detail?.code ?? "");
 
-  const kind = (detail?.code && APPEND_ERROR_CODE_KIND[detail.code]) || "generic";
+  // Preferred rule: a known PostgREST/RPC SQLSTATE code wins when present;
+  // otherwise fall back to the HTTP status itself. This matters because a
+  // PostgREST-level pre-RPC rejection (expired/invalid/missing Bearer JWT)
+  // can arrive with an unexpected or empty JSON body -- no `code` field at
+  // all -- yet PostgREST still reports it as HTTP 401. Treating bare 401
+  // as not_authenticated even without a recognized `code` closes that
+  // gap. Deliberately NOT done for 403: PostgREST/RLS also uses 403 for
+  // ordinary "not permitted" cases unrelated to session expiry (e.g. RLS
+  // denial with a valid token), so a bare 403 stays "generic" rather than
+  // being misreported as "session expired".
+  const kind = (detail?.code && APPEND_ERROR_CODE_KIND[detail.code])
+    || (response.status === 401 ? "not_authenticated" : "generic");
   throw new ThoughtThreadAppendError(kind, APPEND_FAILURE_MESSAGE);
 
 }
