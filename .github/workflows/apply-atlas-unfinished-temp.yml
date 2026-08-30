@@ -1,0 +1,69 @@
+name: Apply Atlas Unfinished Lines patch (temporary)
+
+on:
+  push:
+    branches:
+      - integrate-atlas-unfinished-lines-v1-transfer
+    paths:
+      - .github/workflows/apply-atlas-unfinished-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Reconstruct and verify patch
+        run: |
+          cat \
+            .tmp/atlas-unfinished.part01.b64 \
+            .tmp/atlas-unfinished.part02.b64 \
+            .tmp/atlas-unfinished.part03.b64 \
+            .tmp/atlas-unfinished.part04.b64 \
+            .tmp/atlas-unfinished.part05.b64 \
+            .tmp/atlas-unfinished.part06.b64 \
+            .tmp/atlas-unfinished.part07.b64 \
+            .tmp/atlas-unfinished.part08.b64 \
+            .tmp/atlas-unfinished.tail01.b64 \
+            .tmp/atlas-unfinished.tail02.b64 \
+            .tmp/atlas-unfinished.tail03.b64 \
+            .tmp/atlas-unfinished.tail04.b64 \
+            .tmp/atlas-unfinished.tail05.b64 \
+            .tmp/atlas-unfinished.tail06.b64 \
+            .tmp/atlas-unfinished.tail07.b64 \
+            > /tmp/atlas-unfinished.b64
+          base64 -d /tmp/atlas-unfinished.b64 > /tmp/atlas-unfinished.patch
+          echo "6fee8990083d2bb7f3432c6033c1620813faa9482d5c808af081c27de5002ff5  /tmp/atlas-unfinished.patch" | sha256sum -c -
+          git apply --check /tmp/atlas-unfinished.patch
+
+      - name: Apply exact patch
+        run: git apply /tmp/atlas-unfinished.patch
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          npm ci
+          npm run build
+
+      - name: Remove temporary staging files
+        run: |
+          rm -f .tmp/atlas-unfinished.part*.b64 .tmp/atlas-unfinished.tail*.b64
+          rm -f .github/workflows/apply-atlas-unfinished-temp.yml
+
+      - name: Commit exact product diff
+        run: |
+          git add -A
+          git diff --cached --check
+          git commit -m "Add Atlas Unfinished Lines of Thought v1"
+          git push origin HEAD:integrate-atlas-unfinished-lines-v1-transfer
