@@ -1,6 +1,8 @@
 import type { Book, Fragment, Bookmark } from "./types";
 import type { ProgressStore } from "../progressStore/progressStore";
 import type { AnnotationStore, Annotation } from "../annotationStore";
+import type { ThoughtThreadBridge, ThoughtThread } from "../threadBridge";
+import { ThoughtThreadSessionExpiredError, ThoughtThreadNotFoundError } from "../threadBridge";
 import { createSelectionController, type SelectionController } from "./selection";
 import { translateText, explainText } from "../../../api/ai";
 import { detectLoader } from "./formats/detect";
@@ -26,6 +28,13 @@ export interface ReaderEngineOptions {
   // highlight is ever rendered back into the page. Non-null only for a
   // signed-in visitor opening a real catalog Edition.
   annotationStore: AnnotationStore | null;
+  // READER -> THOUGHT THREAD BRIDGE v1: null for exactly the same visitors
+  // annotationStore is null for (guest, or a Book with no workId -- see
+  // ReaderView.tsx's own comment). When null, "Добавить в нить" is never
+  // rendered at all -- not shown-disabled, not a locked/premium-looking
+  // affordance, simply absent, per the spec's own "guest path unchanged"
+  // requirement.
+  threadBridge: ThoughtThreadBridge | null;
   onExit: () => void;
 }
 
@@ -83,7 +92,7 @@ function flattenDocument(doc: LoadedDocument): FlatPage[] {
 
 export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
-  const { container, progressStore, annotationStore, onExit } = options;
+  const { container, progressStore, annotationStore, threadBridge, onExit } = options;
 
   let currentBook: Book | null = null;
   let loadedDocument: LoadedDocument | null = null;
@@ -117,6 +126,28 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   // succeeds, or fails, this never needs rebinding from a temporary id to
   // a server-assigned one -- it is set exactly once, in openNoteSheet().
   let activeNoteAnnotationId: string | null = null;
+  // READER -> THOUGHT THREAD BRIDGE v1: annotation ids whose Supabase
+  // create() has actually resolved -- "Добавить в нить" stays disabled
+  // for an id until it appears here (see runSaveAnnotation()'s own
+  // comment). Only ever grows; a failed create() simply never adds its
+  // id, matching the existing optimistic-rollback behaviour (the
+  // annotation itself is removed from `annotations` and the sheet shows
+  // an error instead). Reset for free on every open() because this
+  // engine instance is destroyed and recreated per book (see
+  // ReaderView.tsx's own effect cleanup) -- no manual reset needed here.
+  const confirmedAnnotationIds = new Set<string>();
+  // On-demand, cached for the lifetime of THIS engine instance only (one
+  // open book) -- fetched the first time the visitor expands the Thread
+  // picker, reused for later expansions within the same session so
+  // opening the picker twice for two different saved fragments doesn't
+  // refetch every Thought Thread twice. Never trusted for the write
+  // itself: threadBridge.addAnnotation() always re-fetches fresh state
+  // immediately before writing (see threadBridge.ts's own comment) --
+  // this cache only drives what the picker LIST shows (membership
+  // "Уже в нити" labels, thread titles/questions), and is refreshed
+  // in place after every successful add.
+  let threadListCache: ThoughtThread[] | null = null;
+  let threadListFetchInFlight: Promise<ThoughtThread[]> | null = null;
   let fontSize = Number(localStorage.getItem(FONT_KEY)) || DEFAULT_FONT_SIZE;
   let theme: Theme = (localStorage.getItem(THEME_KEY) as Theme) || "dark";
 
@@ -586,6 +617,14 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
       annotations = annotations.map(item => (item.id === id ? real : item));
       renderPage(currentPage);
 
+      // READER -> THOUGHT THREAD BRIDGE v1: the annotation is now a real,
+      // confirmed Supabase row -- only from this point on is it safe to
+      // let the visitor reference it from a Thought Thread (see this
+      // function's own header comment on why: a thread item must never
+      // point at an annotation that could still roll back a moment
+      // later). This never fires on the catch path below.
+      markAnnotationConfirmed(id);
+
     } catch (error) {
 
       console.error("annotation create failed:", error);
@@ -612,6 +651,29 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   // surface. Empty/blank input clears the note (see updateAnnotationNote's
   // own comment on note_text: null).
   function noteEditorHtml(): string {
+    // READER -> THOUGHT THREAD BRIDGE v1: the picker block below is only
+    // ever included when this visitor actually has a bridge (see
+    // ReaderEngineOptions.threadBridge's own comment) -- a guest or a
+    // Book with no workId never sees so much as an inert/disabled
+    // "Добавить в нить", exactly per the spec's "guest path unchanged"
+    // requirement. The toggle starts disabled unconditionally: this
+    // template is only ever built from within runSaveAnnotation() (via
+    // openNoteSheet()), synchronously BEFORE that function's own
+    // `await annotationStore.create(...)` can possibly have resolved --
+    // see markAnnotationConfirmed()'s own comment for how it becomes
+    // enabled once the real Supabase row is confirmed.
+    const threadPickerHtml = threadBridge
+      ? `
+        <div class="annotation-thread-picker">
+          <div class="annotation-thread-picker-actions">
+            <button type="button" class="text-link annotation-thread-toggle" disabled>Добавить в нить</button>
+          </div>
+          <div class="annotation-thread-picker-list hidden"></div>
+          <p class="annotation-thread-picker-status" aria-live="polite"></p>
+        </div>
+      `
+      : "";
+
     return `
       <div class="annotation-note-editor">
         <p class="annotation-note-hint">Заметка (необязательно)</p>
@@ -620,6 +682,7 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
           <button type="button" class="text-link annotation-note-save">Сохранить заметку</button>
         </div>
         <p class="annotation-note-status" aria-live="polite"></p>
+        ${threadPickerHtml}
       </div>
     `;
   }
@@ -635,9 +698,228 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     actionSheet.classList.remove("hidden");
 
     wireNoteEditor();
+    wireThreadPicker(annotationId);
 
     const status = actionResult.querySelector<HTMLElement>(".annotation-note-status");
     if (status) status.textContent = statusMessage;
+
+  }
+
+  // READER -> THOUGHT THREAD BRIDGE v1: marks one annotation's create()
+  // as confirmed and, if the action sheet is still open on that exact
+  // annotation, enables its "Добавить в нить" toggle in place. Called
+  // only from runSaveAnnotation()'s own success branch. A failed
+  // create() never calls this -- the id simply never becomes
+  // confirmed, matching the existing rollback (the optimistic
+  // annotation is removed and the sheet shows an error instead, see
+  // runSaveAnnotation()'s own catch block).
+  function markAnnotationConfirmed(annotationId: string): void {
+    confirmedAnnotationIds.add(annotationId);
+    if (activeNoteAnnotationId !== annotationId) return;
+    const toggle = actionResult.querySelector<HTMLButtonElement>(".annotation-thread-toggle");
+    if (toggle) toggle.disabled = false;
+  }
+
+  // On-demand fetch, shared by every picker expansion in this Reader
+  // session -- see threadListCache's own comment. Never called unless
+  // threadBridge is non-null (every call site below already checks).
+  async function fetchThreadList(): Promise<ThoughtThread[]> {
+    if (threadListCache) return threadListCache;
+    if (threadListFetchInFlight) return threadListFetchInFlight;
+    if (!threadBridge) return [];
+
+    const request = threadBridge.list()
+      .then(list => {
+        threadListCache = list;
+        threadListFetchInFlight = null;
+        return list;
+      })
+      .catch(error => {
+        threadListFetchInFlight = null;
+        throw error;
+      });
+
+    threadListFetchInFlight = request;
+    return request;
+  }
+
+  function threadPickerErrorMessage(error: unknown): string {
+    if (error instanceof ThoughtThreadSessionExpiredError) {
+      return "Сессия истекла. Войдите снова, чтобы добавить фрагмент в нить.";
+    }
+    return "Не удалось загрузить нити мысли.";
+  }
+
+  // Renders the full list of the visitor's OWN existing Thought Threads
+  // for ONE specific annotation -- a Thread already containing this
+  // annotation id shows a static "Уже в нити" label (never a second
+  // clickable Add, never a second write), every other Thread gets a
+  // clickable "Добавить". Re-run after every successful add so
+  // membership is reflected immediately without closing the sheet (see
+  // handleAddToThread's own comment) -- 0 threads is its own honest
+  // empty state, distinct from a fetch failure (see
+  // threadPickerErrorMessage above, used only for actual failures).
+  function renderThreadPickerList(listContainer: HTMLElement, annotationId: string, threads: ThoughtThread[]): void {
+
+    listContainer.innerHTML = "";
+
+    if (threads.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "annotation-thread-picker-empty";
+      empty.textContent = "У вас пока нет нитей мысли. Создать первую можно в Atlas.";
+      listContainer.appendChild(empty);
+      return;
+    }
+
+    for (const thread of threads) {
+
+      const row = document.createElement("div");
+      row.className = "annotation-thread-item-row";
+
+      const info = document.createElement("div");
+      info.className = "annotation-thread-item-info";
+
+      const titleEl = document.createElement("p");
+      titleEl.className = "annotation-thread-item-title";
+      titleEl.textContent = thread.title;
+      info.appendChild(titleEl);
+
+      if (thread.question) {
+        const questionEl = document.createElement("p");
+        questionEl.className = "annotation-thread-item-question";
+        questionEl.textContent = thread.question;
+        info.appendChild(questionEl);
+      }
+
+      row.appendChild(info);
+
+      if (thread.annotationIds.includes(annotationId)) {
+        const status = document.createElement("span");
+        status.className = "annotation-thread-item-status";
+        status.textContent = "Уже в нити";
+        row.appendChild(status);
+      } else {
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "text-link annotation-thread-item-add";
+        addBtn.textContent = "Добавить";
+        addBtn.addEventListener("click", () => void handleAddToThread(thread.id, annotationId, listContainer, addBtn));
+        row.appendChild(addBtn);
+      }
+
+      listContainer.appendChild(row);
+
+    }
+
+  }
+
+  // Fires only from a click on one specific, still-valid (non-member)
+  // Thread row. Per the spec's own critical write-path requirement,
+  // threadBridge.addAnnotation() itself re-fetches fresh Thread state
+  // immediately before writing (see threadBridge.ts) -- this function
+  // never assumes the cached list it rendered from is still current.
+  async function handleAddToThread(
+    threadId: string,
+    annotationId: string,
+    listContainer: HTMLElement,
+    triggerBtn: HTMLButtonElement
+  ): Promise<void> {
+
+    if (!threadBridge) return;
+
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = "Добавляем…";
+
+    try {
+
+      const fresh = await threadBridge.addAnnotation(threadId, annotationId);
+      threadListCache = fresh;
+
+      // Never touch DOM belonging to a sheet the visitor has since
+      // closed, or that has since moved on to a different annotation
+      // (e.g. re-opened for a different fragment) -- the write itself
+      // already succeeded regardless, only the UI update is skipped.
+      if (activeNoteAnnotationId !== annotationId) return;
+
+      const status = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-status");
+      if (status) status.textContent = "Добавлено в нить.";
+      renderThreadPickerList(listContainer, annotationId, fresh);
+
+    } catch (error) {
+
+      if (error instanceof ThoughtThreadNotFoundError) {
+        // Real race: the Thread was deleted/changed away between the
+        // picker being opened and this click. Never resurrect it --
+        // drop the stale cache and show an explicit unavailable state.
+        threadListCache = null;
+        if (activeNoteAnnotationId !== annotationId) return;
+        const status = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-status");
+        if (status) status.textContent = "Эта нить больше недоступна.";
+        try {
+          const refreshed = await fetchThreadList();
+          if (activeNoteAnnotationId === annotationId) renderThreadPickerList(listContainer, annotationId, refreshed);
+        } catch {
+          // Leave the empty list as-is; the toggle can be closed/reopened.
+        }
+        return;
+      }
+
+      console.error("Thought Thread add failed:", error);
+
+      if (activeNoteAnnotationId !== annotationId) return;
+
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = "Добавить";
+      const status = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-status");
+      if (status) {
+        status.textContent = error instanceof ThoughtThreadSessionExpiredError
+          ? "Сессия истекла. Войдите снова, чтобы добавить фрагмент в нить."
+          : "Не удалось добавить фрагмент в нить. Попробуйте ещё раз.";
+      }
+
+    }
+
+  }
+
+  function wireThreadPicker(annotationId: string): void {
+
+    if (!threadBridge) return;
+
+    const toggle = actionResult.querySelector<HTMLButtonElement>(".annotation-thread-toggle");
+    const listContainer = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-list");
+    if (!toggle || !listContainer) return;
+
+    toggle.disabled = !confirmedAnnotationIds.has(annotationId);
+
+    toggle.addEventListener("click", async () => {
+
+      const isExpanded = !listContainer.classList.contains("hidden");
+      if (isExpanded) {
+        listContainer.classList.add("hidden");
+        return;
+      }
+
+      listContainer.classList.remove("hidden");
+      listContainer.innerHTML = "";
+      const loading = document.createElement("p");
+      loading.className = "annotation-thread-picker-status";
+      loading.textContent = "Загружаем нити мысли…";
+      listContainer.appendChild(loading);
+
+      try {
+        const threads = await fetchThreadList();
+        if (activeNoteAnnotationId !== annotationId) return;
+        renderThreadPickerList(listContainer, annotationId, threads);
+      } catch (error) {
+        if (activeNoteAnnotationId !== annotationId) return;
+        listContainer.innerHTML = "";
+        const message = document.createElement("p");
+        message.className = "annotation-thread-picker-error";
+        message.textContent = threadPickerErrorMessage(error);
+        listContainer.appendChild(message);
+      }
+
+    });
 
   }
 

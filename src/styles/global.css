@@ -1639,6 +1639,110 @@ mark.reader-highlight.reader-highlight-focus {
   color: var(--reader-meta, var(--home-muted));
   font-size: 12px;
 }
+
+/* READER -> THOUGHT THREAD BRIDGE v1: a second, equally compact block in
+   the same action-sheet vocabulary as .annotation-note-editor above --
+   one small link-style toggle that reveals a short list of the
+   visitor's own existing Thought Threads. Reuses button.text-link for
+   both the toggle and each row's "Добавить", and mirrors .toc-item's
+   own list-row look (block, full-width, bottom border, gold on hover)
+   rather than inventing a second row style. */
+.annotation-thread-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  margin-top: 4px;
+  padding-top: 12px;
+
+  border-top: 1px solid var(--reader-border, var(--home-border));
+}
+
+.annotation-thread-picker-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.annotation-thread-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.annotation-thread-picker-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-thread-picker-list.hidden {
+  display: none;
+}
+
+.annotation-thread-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 10px 0;
+
+  border-bottom: 1px solid var(--reader-border, var(--home-border));
+}
+
+.annotation-thread-item-row:last-child {
+  border-bottom: none;
+}
+
+.annotation-thread-item-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.annotation-thread-item-title {
+  margin: 0;
+
+  color: var(--reader-text);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 16px;
+}
+
+.annotation-thread-item-question {
+  margin: 2px 0 0;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  color: var(--reader-meta, var(--home-muted));
+  font-size: 13px;
+}
+
+.annotation-thread-item-status {
+  flex: 0 0 auto;
+
+  color: var(--reader-meta, var(--home-muted));
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.annotation-thread-item-add {
+  flex: 0 0 auto;
+}
+
+.annotation-thread-picker-empty,
+.annotation-thread-picker-error {
+  margin: 0;
+
+  color: var(--reader-meta, var(--home-muted));
+  font-size: 13px;
+}
+
+.annotation-thread-picker-status {
+  margin: 0;
+
+  color: var(--reader-meta, var(--home-muted));
+  font-size: 12px;
+}
+
 /* =========================================================
    MOBILE
    ========================================================= */

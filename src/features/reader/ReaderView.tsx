@@ -4,6 +4,7 @@ import { createReaderEngine, type ReaderEngine } from "./engine/readerEngine";
 import { createLocalStorageStore } from "./progressStore/localStorageStore";
 import { createSupabaseProgressStore } from "./progressStore/supabaseProgressStore";
 import { createSupabaseAnnotationStore } from "./annotationStore";
+import { createSupabaseThoughtThreadBridge } from "./threadBridge";
 import { getSession } from "../../auth/supabaseAuth";
 import { fetchProgress } from "../../api/readerProgress";
 
@@ -66,6 +67,17 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
         ? createSupabaseAnnotationStore(session.user.id, book.workId, book.id)
         : null;
 
+      // READER -> THOUGHT THREAD BRIDGE v1: same gate as annotationStore,
+      // on purpose -- "Добавить в нить" only ever appears once a real
+      // Supabase annotation exists to add, so there is never a case where
+      // this needs to be non-null while annotationStore is null. Guest /
+      // no-workId visitors get null here exactly like annotationStore,
+      // and readerEngine.ts never renders the Thread picker when this is
+      // null (see its own comment).
+      const threadBridge = session && book.workId
+        ? createSupabaseThoughtThreadBridge()
+        : null;
+
       // The visitor could have navigated away (book changed, or this
       // view unmounted) while fetchProgress() above was in flight --
       // don't build/open an engine for a book that's no longer current.
@@ -75,6 +87,7 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
         container,
         progressStore,
         annotationStore,
+        threadBridge,
         onExit
       });
 
