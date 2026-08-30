@@ -21,6 +21,7 @@ import { ShellPage } from "../shared/ShellPage";
 import { buildAtlasConnections, type AtlasConnection } from "./buildAtlas";
 import { AtlasQuestionsSection } from "./AtlasQuestionsSection";
 import { AtlasContradictionsSection } from "./AtlasContradictionsSection";
+import { AtlasUnfinishedLinesSection } from "./AtlasUnfinishedLinesSection";
 
 interface AtlasViewProps {
   onBack: () => void;
@@ -659,6 +660,13 @@ export function AtlasView({
               })}
             </div>
           </section>
+
+          <AtlasUnfinishedLinesSection
+            threads={atlas.threads}
+            annotationById={annotationById}
+            onOpenAnnotationInReader={resolveAndOpenMemory}
+            onThreadUpdated={refreshThreads}
+          />
 
           <AtlasQuestionsSection
             annotationCount={atlas.annotations.length}
