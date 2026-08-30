@@ -44,6 +44,7 @@ jobs:
           grep -q 'auth_required' /tmp/omnia-ai-v22.min.js
           grep -q 'ai_monthly_limit_reached' /tmp/omnia-ai-v22.min.js
           grep -q 'ai_hourly_limit_reached' /tmp/omnia-ai-v22.min.js
+          test "$(sha256sum /tmp/omnia-ai-v22.min.js | awk '{print $1}')" = "8d7d7b382b74719491947eea58def6493ba6ef9bd5f2555788b6b2b6064c8610"
           echo "bundle_bytes=$(wc -c < /tmp/omnia-ai-v22.min.js)"
           sha256sum /tmp/omnia-ai-v22.min.js
 
@@ -51,15 +52,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'ANKI Edge Bundle Gate'
-          git config user.email 'actions@users.noreply.github.com'
           rm -rf /tmp/bundle-repo
           git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/bundle-repo
           cd /tmp/bundle-repo
+          git config user.name 'ANKI Edge Bundle Gate'
+          git config user.email 'actions@users.noreply.github.com'
           git checkout --orphan tmp-omnia-ai-v22-bundle
           git rm -rf . >/dev/null 2>&1 || true
           cp /tmp/omnia-ai-v22.min.js ./index.ts
-          printf 'source_commit=741552c7ec1f9aa13a9ca1e630d7f8abd0dbcd32\n' > SOURCE.txt
+          printf 'source_commit=741552c7ec1f9aa13a9ca1e630d7f8abd0dbcd32\nbundle_sha256=8d7d7b382b74719491947eea58def6493ba6ef9bd5f2555788b6b2b6064c8610\n' > SOURCE.txt
           git add index.ts SOURCE.txt
           git commit -m 'Exact bundled omnia-ai v22 transport'
           git push --force origin tmp-omnia-ai-v22-bundle
