@@ -224,7 +224,17 @@ export function AtlasView({
     setThreadTitle(thread.title);
     setThreadQuestion(thread.question ?? "");
     setThreadSynthesis(thread.synthesisNote ?? "");
-    setSelectedAnnotationIds(thread.annotationIds.filter(id => annotationById.has(id)));
+    // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1 correction: thread.annotationIds
+    // IS Thread membership -- it must be taken as-is, never filtered through
+    // this tab's annotationById lookup. atlas.annotations and atlas.threads
+    // come from two separate reads (Promise.all in loadAtlas is not a single
+    // transactional snapshot), so an id can legitimately be missing from
+    // annotationById here even though the server still considers it part of
+    // this Thread. Filtering it out would silently drop it from
+    // selectedAnnotationIds while editingThreadExpectedUpdatedAt still
+    // matches the current DB version, so the very next save could delete it
+    // with no OCC conflict at all.
+    setSelectedAnnotationIds([...thread.annotationIds]);
     setThreadError(null);
     setThreadConflict(false);
     setThreadComposerOpen(true);
@@ -330,7 +340,12 @@ export function AtlasView({
 
     setLoadingLatestThread(true);
     try {
-      const threads = await listThoughtThreads();
+      // Fresh, RLS-backed reads of both Threads and annotations -- not a
+      // single transactional snapshot, but close enough in time that we can
+      // also refresh the annotation cards this conflict may be about (e.g.
+      // a fragment Reader appended in another tab), on top of the
+      // membership fix below which does not depend on this succeeding.
+      const [threads, annotations] = await Promise.all([listThoughtThreads(), listAnnotationsForUser()]);
       const fresh = threads.find(candidate => candidate.id === editingThreadId);
 
       if (!fresh) {
@@ -340,13 +355,36 @@ export function AtlasView({
         return;
       }
 
+      // Bring in any books behind the freshly-loaded annotations that this
+      // tab's catalog doesn't already know about, so new fragment cards can
+      // render a title/author instead of "Книга больше не найдена". Minimal
+      // on purpose -- this is not a full Atlas reload.
+      const unknownWorkIds = Array.from(
+        new Set(annotations.map(annotation => annotation.workId).filter(workId => !getBookById(workId)))
+      );
+      if (unknownWorkIds.length) {
+        await fetchAndMergeWorksByIds(unknownWorkIds);
+      }
+
       setThreadTitle(fresh.title);
       setThreadQuestion(fresh.question ?? "");
       setThreadSynthesis(fresh.synthesisNote ?? "");
-      setSelectedAnnotationIds(fresh.annotationIds.filter(id => annotationById.has(id)));
+      // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1 correction: same invariant
+      // as openEditThread() above -- fresh.annotationIds IS the server's
+      // Thread membership and must be kept as-is. Filtering it through the
+      // annotation objects we just fetched (or the stale ones from before)
+      // would silently drop any id the annotations read didn't happen to
+      // return, then this becomes the new "expected" save baseline and the
+      // very next save deletes that id with no conflict -- the exact bug
+      // this reload action exists to fix, just reproduced one level deeper.
+      // If an id is genuinely gone (annotation actually deleted), the
+      // server's own AK002 on the next save is what surfaces that -- not a
+      // silent client-side drop here.
+      setSelectedAnnotationIds([...fresh.annotationIds]);
       setEditingThreadExpectedUpdatedAt(fresh.updatedAt);
       setAtlas(current => ({
         ...current,
+        annotations,
         threads: current.threads.map(candidate => (candidate.id === fresh.id ? fresh : candidate))
       }));
       setThreadConflict(false);
