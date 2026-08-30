@@ -6,10 +6,18 @@
 // out, nothing persisted here.
 //
 // Evidence reopen reuses the SAME exact-annotation Reader flow every other
-// Atlas surface already uses (resolveEditionFile -> toReaderBook) via the
-// boolean-returning resolver passed in from AtlasView -- no second
-// Reader-opening mechanism here, same pattern as AtlasQuestionsSection and
-// AtlasContradictionsSection.
+// Atlas surface already uses (resolveEditionFile -> toReaderBook), via
+// AtlasView's onOpenEvidence(annotationId) -- no second Reader-opening
+// mechanism here. Unlike AtlasQuestionsSection/AtlasContradictionsSection
+// (whose evidence always comes from this tab's own already-loaded
+// annotationById, so a plain synchronous boolean resolver is enough),
+// onOpenEvidence takes an id rather than an Annotation and is async: this
+// feature specifically surfaces NEW annotations the server just read from
+// the visitor's live Reading Memory, which this tab's own annotationById
+// snapshot may not have fetched yet. AtlasView.resolveAndOpenMemoryById()
+// does one best-effort refresh in that case before giving up, but still
+// funnels through the exact same underlying resolveAndOpenMemory() path
+// everything else uses -- see that function's own comment.
 //
 // FINAL INTEGRATION CORRECTION: "Добавить в нить" now writes through
 // appendAnnotationToThoughtThread() (src/api/thoughtThreads.ts) -- the
@@ -54,7 +62,7 @@ import { GuestNotice } from "../shared/GuestNotice";
 interface AtlasUnfinishedLinesSectionProps {
   threads: ThoughtThread[];
   annotationById: Map<string, Annotation>;
-  onOpenAnnotationInReader: (annotation: Annotation) => boolean;
+  onOpenEvidence: (annotationId: string) => Promise<boolean>;
   onThreadUpdated: () => Promise<void>;
 }
 
@@ -102,7 +110,7 @@ function addErrorMessage(error: unknown): string {
 export function AtlasUnfinishedLinesSection({
   threads,
   annotationById,
-  onOpenAnnotationInReader,
+  onOpenEvidence,
   onThreadUpdated
 }: AtlasUnfinishedLinesSectionProps) {
   const [state, setState] = useState<FindState>({ kind: "idle" });
@@ -145,13 +153,17 @@ export function AtlasUnfinishedLinesSection({
     }
   }
 
-  function handleOpenEvidence(evidence: AtlasUnfinishedLineEvidence): void {
-    const annotation = annotationById.get(evidence.annotationId);
-    if (!annotation) {
-      setUnavailableId(evidence.annotationId);
-      return;
-    }
-    setUnavailableId(onOpenAnnotationInReader(annotation) ? null : evidence.annotationId);
+  // CORRECTION: onOpenEvidence(annotationId) (AtlasView.resolveAndOpenMemoryById)
+  // does its own local-lookup-then-refresh resolution -- this component no
+  // longer looks annotationById up itself before calling it, since that
+  // lookup was exactly what falsely reported a real, existing (but
+  // locally-stale) annotation as unavailable. A failure here (refresh
+  // failed, or the annotation genuinely no longer exists) only sets
+  // unavailableId for this one evidence card; the found line itself, and
+  // every other card on screen, stays exactly as it was.
+  async function handleOpenEvidence(evidence: AtlasUnfinishedLineEvidence): Promise<void> {
+    const opened = await onOpenEvidence(evidence.annotationId);
+    setUnavailableId(opened ? null : evidence.annotationId);
   }
 
   async function handleAddToThread(line: AtlasUnfinishedLine): Promise<void> {
@@ -167,15 +179,28 @@ export function AtlasUnfinishedLinesSection({
       // the same write Reader's own Thought Thread picker uses, and it is
       // the ONLY write this component performs.
       await appendAnnotationToThoughtThread(line.threadId, line.newEvidence.annotationId);
-      // Success is shown only after a confirmed server write and a fresh
-      // RLS-backed read of Thought Threads -- same discipline as the
-      // Thought Threads composer itself (AtlasView.handleSaveThread).
-      await onThreadUpdated();
-      setAddState(current => ({ ...current, [key]: "added" }));
     } catch (error) {
       console.error("Atlas Unfinished Lines: add to thread failed:", error);
       setAddState(current => ({ ...current, [key]: "error" }));
       setAddError(current => ({ ...current, [key]: addErrorMessage(error) }));
+      return;
+    }
+
+    // CORRECTION -- TRUE SUCCESS SEMANTICS: the append above is CONFIRMED,
+    // so this IS success no matter what happens next -- same discipline
+    // threadBridge.ts's own addAnnotation() already established for
+    // Reader's picker (see that file's own TRUE SUCCESS SEMANTICS
+    // comment). A failure in the best-effort refresh below must never
+    // retroactively turn a completed DB write into a UI-visible failure or
+    // invite the visitor to "retry" a write that already happened.
+    setAddState(current => ({ ...current, [key]: "added" }));
+    try {
+      await onThreadUpdated();
+    } catch (refreshError) {
+      console.error(
+        "Atlas Unfinished Lines: Thought Thread list refresh failed after a CONFIRMED append (the append itself succeeded):",
+        refreshError
+      );
     }
   }
 
@@ -192,7 +217,7 @@ export function AtlasUnfinishedLinesSection({
           {annotation?.quoteText ?? evidence.quotePreview}
         </blockquote>
         <div className="notes-card-actions">
-          <button type="button" className="text-link" onClick={() => handleOpenEvidence(evidence)}>
+          <button type="button" className="text-link" onClick={() => void handleOpenEvidence(evidence)}>
             Открыть точное место
           </button>
         </div>

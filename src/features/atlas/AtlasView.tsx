@@ -193,6 +193,58 @@ export function AtlasView({
     setUnavailableId(resolveAndOpenMemory(annotation) ? null : annotation.id);
   }
 
+  // CORRECTION: Unfinished Lines specifically surfaces NEW annotations --
+  // ones that may have been saved (in Reader, another tab, ...) after this
+  // Atlas tab's own annotationById snapshot was built. A plain
+  // annotationById.get() lookup would then falsely report a real, existing
+  // annotation as "unavailable" just because this tab hadn't fetched it
+  // yet, even though production omnia-ai's atlas-unfinished-lines action
+  // itself read it straight from the visitor's own current Reading Memory.
+  //
+  // This does ONE best-effort refresh before giving up, and still funnels
+  // through the exact same resolveAndOpenMemory() -> resolveEditionFile ->
+  // toReaderBook -> onOpenAnnotationInReader path every other Atlas
+  // surface uses -- no second Reader-opening mechanism. A refresh failure
+  // (or the annotation genuinely not existing) returns false so the caller
+  // can show its own unavailable state; it never touches any Thread and
+  // never discards whatever result the caller is currently displaying.
+  async function resolveAndOpenMemoryById(annotationId: string): Promise<boolean> {
+    const existing = annotationById.get(annotationId);
+    if (existing) return resolveAndOpenMemory(existing);
+
+    let fresh: Annotation[];
+    try {
+      fresh = await listAnnotationsForUser();
+    } catch (refreshError) {
+      console.error("Atlas: refreshing annotations for exact reopen failed:", refreshError);
+      return false;
+    }
+
+    const found = fresh.find(candidate => candidate.id === annotationId);
+    if (!found) return false;
+
+    if (!getBookById(found.workId)) {
+      try {
+        await fetchAndMergeWorksByIds([found.workId]);
+      } catch (mergeError) {
+        // Still attempt to open below -- resolveAndOpenMemory() itself
+        // safely returns false if the book truly cannot be resolved.
+        console.error("Atlas: merging Work for exact reopen failed:", mergeError);
+      }
+    }
+
+    // So a second click on the same (still-stale-until-now) card resolves
+    // instantly via the fast path above, and so the fragment now actually
+    // renders in this tab's own lists rather than staying invisible.
+    setAtlas(current =>
+      current.annotations.some(candidate => candidate.id === found.id)
+        ? current
+        : { ...current, annotations: [...current.annotations, found] }
+    );
+
+    return resolveAndOpenMemory(found);
+  }
+
   function resetThreadComposer(): void {
     setEditingThreadId(null);
     setEditingThreadExpectedUpdatedAt(null);
@@ -664,7 +716,7 @@ export function AtlasView({
           <AtlasUnfinishedLinesSection
             threads={atlas.threads}
             annotationById={annotationById}
-            onOpenAnnotationInReader={resolveAndOpenMemory}
+            onOpenEvidence={resolveAndOpenMemoryById}
             onThreadUpdated={refreshThreads}
           />
 

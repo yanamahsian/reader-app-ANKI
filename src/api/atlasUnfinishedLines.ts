@@ -12,9 +12,11 @@
 //
 // No new persistence anywhere in this flow -- results are ephemeral UI
 // state. Marking a suggestion "handled" is not a separate write: adding it
-// to its thread via replaceThoughtThread() (src/api/thoughtThreads.ts)
-// naturally advances that thread's own updated_at, which is what stops the
-// same candidate from qualifying as "new" again on a later run.
+// to its thread via appendAnnotationToThoughtThread() (src/api/thoughtThreads.ts),
+// the same atomic, row-locked append_annotation_to_thought_thread RPC
+// Reader's own Thread picker uses, naturally advances that thread's own
+// updated_at, which is what stops the same candidate from qualifying as
+// "new" again on a later run.
 import { getValidAccessToken, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../auth/supabaseAuth";
 import { AtlasSessionExpiredError } from "./atlasQuestions";
 
