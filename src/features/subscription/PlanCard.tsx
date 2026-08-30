@@ -14,8 +14,30 @@ export interface PlanDef {
   isCurrent?: boolean;
 }
 
+// PAYMENTS & SUBSCRIPTION LIFECYCLE v1: replaces the old hardcoded
+// `disabled` CTA. SubscriptionView (which already owns buildPlans/
+// PLAN_DEFS) is the single place that decides what a card's button says
+// and does — guest vs authenticated, current vs not, whether a
+// non-current paid plan should start a new Paddle checkout or open the
+// Customer Portal (instruction 21-22) — this component stays a pure
+// renderer of whatever it's handed, same separation of concerns as
+// PLAN_DEFS/buildPlans already established.
+export interface PlanCardCta {
+  label: string;
+  disabled: boolean;
+  loading: boolean;
+  // "secondary" is the de-emphasised styling for a lower-ranked plan when
+  // the visitor already has an active subscription elsewhere (instruction
+  // 30: "a lower plan doesn't need a direct downgrade button") — it still
+  // calls the same onClick as a "primary" CTA would for that same action,
+  // this only changes appearance.
+  variant: "primary" | "secondary";
+  onClick: (() => void) | null;
+}
+
 interface PlanCardProps {
   plan: PlanDef;
+  cta: PlanCardCta;
 }
 
 // One tier card: glass emblem, name, price, a divider, its feature
@@ -24,12 +46,7 @@ interface PlanCardProps {
 // already reuses ".plan-card"/".plan-card-highlighted"/".subscription-
 // plans" for its unrelated book-connection tiles, so redesigning those
 // classes here would have silently changed that other screen too.
-//
-// Checkout isn't wired up yet, so every CTA carries a real `disabled`
-// attribute (screen readers announce it, not just a faded-looking
-// span) — but the card around it still reads as a full premium tier,
-// not a "coming soon" placeholder, per the brief.
-export function PlanCard({ plan }: PlanCardProps) {
+export function PlanCard({ plan, cta }: PlanCardProps) {
   const cardClassName = [
     "pricing-card",
     plan.recommended ? "pricing-card-recommended" : "",
@@ -70,12 +87,16 @@ export function PlanCard({ plan }: PlanCardProps) {
 
       <button
         type="button"
-        className={plan.isCurrent ? "pricing-card-cta pricing-card-cta-current" : "pricing-card-cta"}
-        disabled
-        aria-disabled="true"
+        className={[
+          "pricing-card-cta",
+          plan.isCurrent ? "pricing-card-cta-current" : "",
+          cta.variant === "secondary" ? "pricing-card-cta-secondary" : ""
+        ].filter(Boolean).join(" ")}
+        disabled={cta.disabled}
+        aria-disabled={cta.disabled}
+        onClick={cta.onClick ?? undefined}
       >
-        {plan.isCurrent ? "Текущий план" : "Выбрать план"}
-        <span className="sr-only"> — оформление подписки скоро будет доступно</span>
+        {cta.loading ? "Оформляем…" : cta.label}
       </button>
 
     </article>

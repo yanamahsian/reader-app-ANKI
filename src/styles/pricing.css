@@ -221,6 +221,92 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
+/* PAYMENTS & SUBSCRIPTION LIFECYCLE v1: unlike every CTA before this pass,
+   a "choose"/"upgrade"/"manage" button is now genuinely clickable -- the
+   base .pricing-card-cta rule above still hardcodes cursor: not-allowed
+   (correct for the "Текущий план"/disabled states, which are the
+   majority), so this narrowly overrides it only for an actually-enabled
+   button rather than loosening the base rule itself. */
+.pricing-card-cta:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Low-emphasis variant for a lower-ranked plan when the visitor already
+   has an active Paddle subscription (instruction 30: "a lower plan
+   doesn't need a direct downgrade button") -- still routes to the same
+   Manage Subscription portal action as the primary "Upgrade" CTA, just
+   visually de-emphasised rather than a second, differently-mechanised
+   control. */
+.pricing-card-cta-secondary {
+  background: transparent;
+  box-shadow: none;
+  border-color: var(--home-border);
+  color: var(--home-muted);
+}
+
+.pricing-card-cta-secondary:not(:disabled):hover {
+  border-color: rgba(202, 160, 88, 0.55);
+  color: var(--home-text);
+}
+
+/* Monthly / annual interval toggle (instruction 31) -- selects which
+   interval a subsequent "Choose"/"Upgrade" checkout uses; the prices
+   themselves are unchanged and both are always shown on every card, so
+   this toggle never has to reformat the price block itself. */
+.pricing-interval-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+
+  margin: 0 0 28px;
+}
+
+.pricing-interval-toggle button {
+  padding: 10px 22px;
+
+  border: 1px solid var(--home-border);
+  border-right: none;
+  background: transparent;
+  color: var(--home-muted);
+
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+
+  cursor: pointer;
+}
+
+.pricing-interval-toggle button:last-child {
+  border-right: 1px solid var(--home-border);
+}
+
+.pricing-interval-toggle button[aria-pressed="true"] {
+  background: linear-gradient(180deg, #6c232e 0%, #4a151d 52%, #380d15 100%);
+  border-color: rgba(202, 160, 88, 0.64);
+  color: #f9ecd9;
+}
+
+/* Small status panel above the grid -- current billing state
+   (renewal date / cancel-at-period-end notice) plus, when available, the
+   "Manage subscription" link into Paddle's own Customer Portal
+   (instruction 29). */
+.pricing-billing-status {
+  margin: 0 0 22px;
+  padding: 14px 18px;
+
+  border: 1px solid var(--home-border);
+  background: rgba(16, 11, 9, 0.5);
+  color: var(--home-muted);
+
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pricing-billing-status strong {
+  color: var(--home-text);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .pricing-card:hover {
     border-color: rgba(202, 160, 88, 0.55);

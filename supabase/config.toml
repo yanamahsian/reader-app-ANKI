@@ -21,3 +21,30 @@
 # One or the other must happen -- this is not optional configuration.
 [functions.omnia-library-catalog]
 verify_jwt = false
+
+# PAYMENTS & SUBSCRIPTION LIFECYCLE v1 (Paddle Billing) -- two more
+# functions added the same way, for the same underlying reason as above:
+# neither ever receives a Supabase Authorization bearer JWT from its real
+# caller, so gateway-level JWT verification must be off, with each
+# function's own code providing whatever real access control it needs
+# instead (see each index.ts's own header comment).
+#
+# paddle-webhook: called exclusively by Paddle's own servers, which send
+# only a `Paddle-Signature` header -- never a Supabase JWT. This function's
+# own raw-body HMAC signature verification (not JWT verification) is what
+# actually gates every request; see supabase/functions/paddle-webhook/
+# index.ts.
+[functions.paddle-webhook]
+verify_jwt = false
+
+# paddle-checkout: called by the browser, WITH a Supabase Authorization
+# bearer JWT -- but action-level validation (a direct GoTrue
+# auth/v1/user check inside the function, the same underlying mechanism
+# omnia-library-catalog's own workIds branch already uses) is used instead
+# of gateway-level verify_jwt=true, for consistency with every other
+# authenticated Edge Function in this project (omnia-ai, via
+# consumeAiAllowance's own 401 detection) rather than introducing a third,
+# different auth-gating mechanism. See supabase/functions/paddle-checkout/
+# index.ts's own header comment for the full reasoning.
+[functions.paddle-checkout]
+verify_jwt = false

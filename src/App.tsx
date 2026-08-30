@@ -188,6 +188,21 @@ export function App() {
       setCurrentBook(TEST_EPUB_BOOK);
       setView("reader");
     }
+
+    // PAYMENTS & SUBSCRIPTION LIFECYCLE v1: Paddle's hosted checkout
+    // redirects the browser back to this exact URL
+    // (`/subscription?checkout=success`) on completion -- a real, full
+    // page navigation, not an in-app transition, so it must be routed
+    // here on mount exactly like openTestEpub above. This ONLY routes the
+    // visitor to the Subscription screen -- it never sets any plan/
+    // entitlement state itself (instruction 4: a checkout-success redirect
+    // is optimistic UX only, never proof of payment). SubscriptionView
+    // itself reads (and clears) this same query param again on its own
+    // mount to decide whether to show its bounded post-checkout
+    // confirmation polling -- see that component's own comment.
+    if (params.get("checkout") === "success") {
+      setView("subscription");
+    }
   }, []);
 
   useEffect(() => {
@@ -560,7 +575,7 @@ export function App() {
       />
     );
   } else if (view === "subscription") {
-    content = <SubscriptionView onBack={handleBackFromAccountShell} />;
+    content = <SubscriptionView onBack={handleBackFromAccountShell} onRequireSignIn={handleRequireSignIn} />;
   } else if (view === "settings") {
     content = <SettingsView onBack={handleBackFromAccountShell} />;
   } else if (view === "support") {
