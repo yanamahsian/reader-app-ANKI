@@ -1,0 +1,83 @@
+name: Gate 0011 AI Entitlements
+
+on:
+  push:
+    branches:
+      - tmp-ai-entitlements-0011-gate
+    paths:
+      - '.github/workflows/gate-0011-entitlements.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .gate/0011.patch.gz.b64 | gzip -d > /tmp/0011.patch
+          echo 'c657fe6fc4ebca5e9cfb0a1c5e7ca57beb37612a8ecba408d1916cba4e304092  /tmp/0011.patch' | sha256sum -c -
+
+      - name: Apply to exact production baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ANKI Integration Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git checkout --detach 293bf2b513c324e8541541b8531756b0a3141420
+          git am /tmp/0011.patch
+          test "$(git rev-list --count 293bf2b513c324e8541541b8531756b0a3141420..HEAD)" = '2'
+          git diff --check 293bf2b513c324e8541541b8531756b0a3141420..HEAD
+
+      - name: Verify scope and critical invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected-files <<'EOF'
+          src/api/ai.ts
+          src/api/aiEntitlements.ts
+          src/api/atlasContradictions.ts
+          src/api/atlasQuestions.ts
+          src/api/atlasUnfinishedLines.ts
+          src/features/atlas/AtlasContradictionsSection.tsx
+          src/features/atlas/AtlasQuestionsSection.tsx
+          src/features/atlas/AtlasUnfinishedLinesSection.tsx
+          src/features/reader/engine/readerEngine.ts
+          src/features/subscription/SubscriptionView.tsx
+          supabase/functions/omnia-ai/index.ts
+          supabase/sql/ai_entitlements_foundation_v1.sql
+          EOF
+          git diff --name-only 293bf2b513c324e8541541b8531756b0a3141420..HEAD | sort > /tmp/actual-files
+          sort /tmp/expected-files > /tmp/expected-sorted
+          diff -u /tmp/expected-sorted /tmp/actual-files
+          ! grep -R "SUPABASE_SERVICE_ROLE_KEY" src || true
+          grep -q "getOpenAIConfig" supabase/functions/omnia-ai/index.ts
+          grep -q "consumeAiAllowance" supabase/functions/omnia-ai/index.ts
+          grep -q "consume_ai_allowance" supabase/sql/ai_entitlements_foundation_v1.sql
+          grep -q "get_my_entitlement_snapshot" supabase/sql/ai_entitlements_foundation_v1.sql
+          grep -q "malformed body" src/api/aiEntitlements.ts
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Real production build
+        run: npm run build
+
+      - name: Verify build artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+
+      - name: Publish verified staging branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force origin HEAD:refs/heads/subscription-ai-entitlements-staging-v1
