@@ -233,3 +233,74 @@ revoke all on function public.create_thought_thread(text, text, text, uuid[]) fr
 revoke all on function public.replace_thought_thread(uuid, text, text, text, uuid[]) from public, anon;
 grant execute on function public.create_thought_thread(text, text, text, uuid[]) to authenticated;
 grant execute on function public.replace_thought_thread(uuid, text, text, text, uuid[]) to authenticated;
+
+-- READER -> THOUGHT THREAD BRIDGE v1, CORRECTION PASS -- see
+-- thought_threads_append_annotation_migration.sql's own header comment for
+-- why this exists (TOCTOU/lost-update fix for the Reader "Добавить в нить"
+-- write path) and full design rationale. A narrow, atomic, single-purpose
+-- primitive: adds exactly one thought_thread_items row under a row lock on
+-- the parent Thread (serializing concurrent appends to the same Thread),
+-- touches ONLY updated_at, and is idempotent when the annotation is
+-- already a member. Never touches title/question/synthesis_note/other
+-- items -- replace_thought_thread above remains the correct RPC for full
+-- Thread edits.
+create or replace function public.append_annotation_to_thought_thread(
+  p_thread_id uuid,
+  p_annotation_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_locked_thread_id uuid;
+  v_already_member boolean;
+  v_next_position integer;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  select t.id into v_locked_thread_id
+  from public.thought_threads t
+  where t.id = p_thread_id and t.user_id = v_user_id
+  for update;
+
+  if v_locked_thread_id is null then
+    raise exception 'Thought Thread not found or no longer available' using errcode = 'AK001';
+  end if;
+
+  if not exists (
+    select 1 from public.annotations a
+    where a.id = p_annotation_id and a.user_id = v_user_id
+  ) then
+    raise exception 'Annotation not found or no longer available' using errcode = 'AK002';
+  end if;
+
+  select exists (
+    select 1 from public.thought_thread_items i
+    where i.thread_id = p_thread_id and i.annotation_id = p_annotation_id
+  ) into v_already_member;
+
+  if v_already_member then
+    return;
+  end if;
+
+  select coalesce(max(position), -1) + 1
+  into v_next_position
+  from public.thought_thread_items
+  where thread_id = p_thread_id;
+
+  insert into public.thought_thread_items(thread_id, annotation_id, user_id, position)
+  values (p_thread_id, p_annotation_id, v_user_id, v_next_position);
+
+  update public.thought_threads
+  set updated_at = now()
+  where id = p_thread_id and user_id = v_user_id;
+end;
+$$;
+
+revoke all on function public.append_annotation_to_thought_thread(uuid, uuid) from public, anon;
+grant execute on function public.append_annotation_to_thought_thread(uuid, uuid) to authenticated;

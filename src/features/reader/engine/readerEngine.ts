@@ -2,7 +2,11 @@ import type { Book, Fragment, Bookmark } from "./types";
 import type { ProgressStore } from "../progressStore/progressStore";
 import type { AnnotationStore, Annotation } from "../annotationStore";
 import type { ThoughtThreadBridge, ThoughtThread } from "../threadBridge";
-import { ThoughtThreadSessionExpiredError, ThoughtThreadNotFoundError } from "../threadBridge";
+import {
+  ThoughtThreadSessionExpiredError,
+  ThoughtThreadNotFoundError,
+  ThoughtThreadAnnotationUnavailableError
+} from "../threadBridge";
 import { createSelectionController, type SelectionController } from "./selection";
 import { translateText, explainText } from "../../../api/ai";
 import { detectLoader } from "./formats/detect";
@@ -814,10 +818,21 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
   }
 
   // Fires only from a click on one specific, still-valid (non-member)
-  // Thread row. Per the spec's own critical write-path requirement,
-  // threadBridge.addAnnotation() itself re-fetches fresh Thread state
-  // immediately before writing (see threadBridge.ts) -- this function
-  // never assumes the cached list it rendered from is still current.
+  // Thread row. threadBridge.addAnnotation() writes through the atomic
+  // append_annotation_to_thought_thread RPC (see threadBridge.ts) --
+  // there is no client-held snapshot to go stale here at all, unlike
+  // the earlier read/modify/replace path this replaced.
+  //
+  // TRUE SUCCESS SEMANTICS (correction pass): once
+  // threadBridge.addAnnotation() resolves WITHOUT throwing, the append
+  // is already confirmed server-side -- full stop. Everything after
+  // that point (updating threadListCache, re-rendering the row as
+  // "Уже в нити") is just reflecting an already-true fact in the UI,
+  // and if the bridge's own best-effort post-write refresh failed
+  // (signalled by a resolved `null`, never a thrown error), this
+  // function updates its local cache deterministically instead of
+  // treating that as a write failure. A write failure is ONLY ever a
+  // thrown error from addAnnotation() itself (see the catch block).
   async function handleAddToThread(
     threadId: string,
     annotationId: string,
@@ -833,7 +848,18 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     try {
 
       const fresh = await threadBridge.addAnnotation(threadId, annotationId);
-      threadListCache = fresh;
+
+      // fresh === null means the append was confirmed but the
+      // follow-up list refresh failed -- patch the existing cache
+      // in place (append-only, exactly what the confirmed server
+      // write itself did) rather than discarding it or treating this
+      // as any kind of failure.
+      const updatedList: ThoughtThread[] = fresh ?? (threadListCache ?? []).map(thread =>
+        thread.id === threadId && !thread.annotationIds.includes(annotationId)
+          ? { ...thread, annotationIds: [...thread.annotationIds, annotationId] }
+          : thread
+      );
+      threadListCache = updatedList;
 
       // Never touch DOM belonging to a sheet the visitor has since
       // closed, or that has since moved on to a different annotation
@@ -843,14 +869,15 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
 
       const status = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-status");
       if (status) status.textContent = "Добавлено в нить.";
-      renderThreadPickerList(listContainer, annotationId, fresh);
+      renderThreadPickerList(listContainer, annotationId, updatedList);
 
     } catch (error) {
 
       if (error instanceof ThoughtThreadNotFoundError) {
         // Real race: the Thread was deleted/changed away between the
-        // picker being opened and this click. Never resurrect it --
-        // drop the stale cache and show an explicit unavailable state.
+        // picker being opened and this click's own RPC call. Never
+        // resurrect it -- drop the stale cache and show an explicit
+        // unavailable state.
         threadListCache = null;
         if (activeNoteAnnotationId !== annotationId) return;
         const status = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-status");
@@ -861,6 +888,18 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
         } catch {
           // Leave the empty list as-is; the toggle can be closed/reopened.
         }
+        return;
+      }
+
+      if (error instanceof ThoughtThreadAnnotationUnavailableError) {
+        // The Thread itself is fine -- THIS fragment is the problem
+        // (deleted, or ownership no longer matches). No other Thread's
+        // cached data is stale, so the cache is left as-is.
+        if (activeNoteAnnotationId !== annotationId) return;
+        triggerBtn.disabled = true;
+        triggerBtn.textContent = "Недоступно";
+        const status = actionResult.querySelector<HTMLElement>(".annotation-thread-picker-status");
+        if (status) status.textContent = "Этот фрагмент больше недоступен.";
         return;
       }
 

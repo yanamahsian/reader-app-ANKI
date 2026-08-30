@@ -172,6 +172,94 @@ export async function addAnnotationToThoughtThread(
   await throwOnError(response, "add-item");
 }
 
+// READER -> THOUGHT THREAD BRIDGE v1, CORRECTION PASS: a stable,
+// dedicated discriminant for appendAnnotationToThoughtThread()'s failure
+// modes -- deliberately NOT the generic user-visible Russian string
+// throwOnError() produces elsewhere in this file, because a caller here
+// (src/features/reader/threadBridge.ts) needs to tell "session expired"
+// apart from "Thread no longer exists" apart from "annotation no longer
+// available" apart from an ordinary network/server failure, and matching
+// message text is fragile. "not_authenticated" also covers the ordinary
+// local case (no session / token refresh failed, same as authContext()
+// throws everywhere else in this file) so callers only ever need to
+// switch on ONE error shape regardless of whether the failure happened
+// before or during the request.
+export type ThoughtThreadAppendErrorKind =
+  | "not_authenticated"
+  | "thread_unavailable"
+  | "annotation_unavailable"
+  | "generic";
+
+export class ThoughtThreadAppendError extends Error {
+  readonly kind: ThoughtThreadAppendErrorKind;
+  constructor(kind: ThoughtThreadAppendErrorKind, message: string) {
+    super(message);
+    this.name = "ThoughtThreadAppendError";
+    this.kind = kind;
+  }
+}
+
+// Mirrors the distinct, stable SQLSTATEs
+// append_annotation_to_thought_thread's own SQL raises (see
+// supabase/sql/thought_threads_append_annotation_migration.sql) --
+// PostgREST surfaces a raised PL/pgSQL exception's SQLSTATE verbatim as
+// the RPC error response body's `code` field, so this is a genuine
+// server-controlled discriminant, not a parsed message string. 42501 is
+// also what create_thought_thread/replace_thought_thread already raise
+// for "Authentication required", reused here for the same meaning.
+const APPEND_ERROR_CODE_KIND: Record<string, ThoughtThreadAppendErrorKind> = {
+  "42501": "not_authenticated",
+  "AK001": "thread_unavailable",
+  "AK002": "annotation_unavailable"
+};
+
+const APPEND_FAILURE_MESSAGE = "Не удалось выполнить действие с нитью мысли (append).";
+
+// Atomic single-annotation append via append_annotation_to_thought_thread
+// (security definer, row-locked on the Thread -- see that RPC's own SQL
+// for the full atomicity/ownership/ordering/idempotency proof). Adds
+// exactly one thought_thread_item and, only when that item is new, bumps
+// thought_threads.updated_at -- title/question/synthesisNote and every
+// other existing item are left completely untouched, unlike
+// replaceThoughtThread (still the correct call for the actual Thread
+// editor's full metadata+membership edits). Idempotent: calling this
+// again for an annotation already in the Thread resolves successfully
+// without a duplicate row or a second updated_at bump.
+export async function appendAnnotationToThoughtThread(threadId: string, annotationId: string): Promise<void> {
+
+  let headers: Record<string, string>;
+  try {
+    ({ headers } = await authContext());
+  } catch {
+    throw new ThoughtThreadAppendError("not_authenticated", NOT_AUTHENTICATED);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${RPC_ENDPOINT}/append_annotation_to_thought_thread`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ p_thread_id: threadId, p_annotation_id: annotationId })
+    });
+  } catch (networkError) {
+    console.error("thoughtThreads append network failure:", networkError);
+    throw new ThoughtThreadAppendError("generic", APPEND_FAILURE_MESSAGE);
+  }
+
+  if (response.ok) return;
+
+  // Only the SQLSTATE `code` is read from the body -- never annotation
+  // quote/note text or Thread title/question, none of which this RPC's
+  // error response would even carry, but kept minimal on principle to
+  // match this file's existing logging discipline.
+  const detail = await response.json().catch(() => null) as { code?: string } | null;
+  console.error(`thoughtThreads append failed (${response.status}):`, detail?.code ?? "");
+
+  const kind = (detail?.code && APPEND_ERROR_CODE_KIND[detail.code]) || "generic";
+  throw new ThoughtThreadAppendError(kind, APPEND_FAILURE_MESSAGE);
+
+}
+
 export async function removeAnnotationFromThoughtThread(threadId: string, annotationId: string): Promise<void> {
   const { headers } = await authContext({ Prefer: "return=minimal" });
   const response = await fetch(
