@@ -24,18 +24,24 @@
 // src/api/thoughtThreads.ts -- it is still the correct call for the real
 // Thread editor's full metadata + membership + reordering edits.
 import type { ThoughtThread } from "../../api/thoughtThreads";
-import { listThoughtThreads, appendAnnotationToThoughtThread, ThoughtThreadAppendError } from "../../api/thoughtThreads";
+import {
+  listThoughtThreads,
+  appendAnnotationToThoughtThread,
+  ThoughtThreadAppendError,
+  ThoughtThreadLoadError
+} from "../../api/thoughtThreads";
 
 export type { ThoughtThread };
 
-// Mirrors the exact string src/api/thoughtThreads.ts's own authContext()
-// throws when there is no session or the access token could not be
-// refreshed (annotations.ts uses the identical literal for the same
-// purpose) -- used only by list() below, which still calls the
-// unmodified listThoughtThreads() and so still only has a message string
-// to go on. addAnnotation()'s own failures are classified from the
-// stable, dedicated ThoughtThreadAppendError.kind instead (see
-// classifyAppendError below) -- not from this string.
+// MERGE-GATE CORRECTION: this string is no longer the PRIMARY way list()
+// recognizes a session-expired failure -- listThoughtThreads() now throws
+// a typed ThoughtThreadLoadError with kind "not_authenticated" for both
+// the local no-session case and a PostgREST-level pre-query JWT rejection
+// (see classifyLoadError below), matching how addAnnotation() already
+// classifies appendAnnotationToThoughtThread() via ThoughtThreadAppendError.kind.
+// This literal is kept only as a defense-in-depth fallback for any other
+// caller shape that might still surface the bare message (annotations.ts
+// uses the identical literal for its own, unrelated authContext() calls).
 const NOT_AUTHENTICATED_MESSAGE = "Не авторизован.";
 
 export class ThoughtThreadSessionExpiredError extends Error {
@@ -67,11 +73,21 @@ export class ThoughtThreadAnnotationUnavailableError extends Error {
   }
 }
 
-function rethrowTyped(error: unknown): never {
-  if (error instanceof Error && error.message === NOT_AUTHENTICATED_MESSAGE) {
-    throw new ThoughtThreadSessionExpiredError();
+// MERGE-GATE CORRECTION: classifies listThoughtThreads()'s own typed
+// ThoughtThreadLoadError -- the symmetric counterpart to
+// classifyAppendError() below. Checks the typed kind FIRST (the primary,
+// new mechanism); the bare message-string comparison only runs as a
+// defense-in-depth fallback for a shape this bridge cannot otherwise
+// recognize, never as the main path for the new PostgREST-pre-query-JWT
+// case this correction pass adds.
+function classifyLoadError(error: unknown): Error {
+  if (error instanceof ThoughtThreadLoadError) {
+    return error.kind === "not_authenticated" ? new ThoughtThreadSessionExpiredError() : error;
   }
-  throw error;
+  if (error instanceof Error && error.message === NOT_AUTHENTICATED_MESSAGE) {
+    return new ThoughtThreadSessionExpiredError();
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 // Maps appendAnnotationToThoughtThread()'s own stable error kind onto
@@ -128,7 +144,7 @@ export function createSupabaseThoughtThreadBridge(): ThoughtThreadBridge {
       try {
         return await listThoughtThreads();
       } catch (error) {
-        rethrowTyped(error);
+        throw classifyLoadError(error);
       }
     },
 

@@ -64,6 +64,72 @@ async function throwOnError(response: Response, action: string): Promise<void> {
   throw new Error(`Не удалось выполнить действие с нитью мысли (${action}).`);
 }
 
+// MERGE-GATE CORRECTION: the single, shared definition of "this response
+// means the visitor needs to sign in again" -- used by BOTH
+// appendAnnotationToThoughtThread() below and listThoughtThreads() (see
+// throwOnLoadError below it), so the two paths can never drift apart on
+// what counts as an auth rejection. Deliberately NOT duplicated as a
+// second PGRST301/302/303 list anywhere else in this file or in
+// src/features/reader/threadBridge.ts.
+//
+// PGRST301/PGRST302/PGRST303 are PostgREST's own pre-RPC/pre-query
+// rejection codes for an expired/invalid/missing Bearer JWT (verified
+// against PostgREST's error reference -- see the longer citation further
+// below, kept there since that is where these codes were first
+// introduced in this file). 42501 is the SQLSTATE our own RPCs raise for
+// "auth.uid() is null" and is also Postgres's native "insufficient
+// privilege" code, so it is treated the same way here. A bare HTTP 401
+// with no recognized `code` at all (empty/unparseable body) also counts
+// -- PostgREST reports its own pre-RPC/pre-query rejections as 401
+// regardless of whether the body could be parsed. A bare 403 is
+// deliberately NOT included: PostgREST/RLS also use 403 for ordinary
+// "not permitted" cases with a perfectly valid token, so treating any
+// 403 as session-expiry would be a false positive, not a fix.
+const AUTH_REJECTION_CODES = new Set(["42501", "PGRST301", "PGRST302", "PGRST303"]);
+
+function isAuthRejection(status: number, code: string | undefined): boolean {
+  return (!!code && AUTH_REJECTION_CODES.has(code)) || status === 401;
+}
+
+// MERGE-GATE CORRECTION: listThoughtThreads()'s own stable, typed
+// failure discriminant -- mirrors ThoughtThreadAppendError further below
+// (same two-value "not_authenticated" | "generic" shape covers
+// everything a caller here needs; there is no per-item AK001/AK002
+// equivalent for a plain list load). Exists so
+// src/features/reader/threadBridge.ts's list() can classify a
+// PostgREST-level pre-query JWT rejection exactly the same way
+// addAnnotation() already classifies a PostgREST-level pre-RPC one,
+// without comparing user-visible Russian message text as the primary
+// mechanism.
+export type ThoughtThreadLoadErrorKind = "not_authenticated" | "generic";
+
+export class ThoughtThreadLoadError extends Error {
+  readonly kind: ThoughtThreadLoadErrorKind;
+  constructor(kind: ThoughtThreadLoadErrorKind, message: string) {
+    super(message);
+    this.name = "ThoughtThreadLoadError";
+    this.kind = kind;
+  }
+}
+
+const LOAD_FAILURE_MESSAGE = "Не удалось загрузить нити мысли.";
+
+// Same responsibility as throwOnError() above, but for listThoughtThreads()
+// specifically: classifies the failure via isAuthRejection() instead of
+// always producing an undiscriminated generic Error. throwOnError() itself
+// is left untouched -- it is still shared by create/replace/add-item/
+// remove-item/delete, none of which this correction pass touches or needs
+// typed auth classification for.
+async function throwOnLoadError(response: Response, action: string): Promise<void> {
+  if (response.ok) return;
+  const detail = await response.json().catch(() => null) as { code?: string } | null;
+  console.error(`thoughtThreads ${action} failed (${response.status}):`, detail?.code ?? "");
+  if (isAuthRejection(response.status, detail?.code)) {
+    throw new ThoughtThreadLoadError("not_authenticated", NOT_AUTHENTICATED);
+  }
+  throw new ThoughtThreadLoadError("generic", LOAD_FAILURE_MESSAGE);
+}
+
 function fromRows(thread: ThreadRow, items: ThreadItemRow[]): ThoughtThread {
   return {
     id: thread.id,
@@ -82,22 +148,48 @@ function fromRows(thread: ThreadRow, items: ThreadItemRow[]): ThoughtThread {
 // Two requests total, never N+1: one for all of the current user's Thread rows and one for
 // all relation rows. RLS on both tables supplies the user filter, while the API combines them
 // locally so a Thread that has lost all annotations still survives and renders its synthesis.
+//
+// MERGE-GATE CORRECTION: this is the symmetric fix to appendAnnotationToThoughtThread()'s own
+// PostgREST-pre-RPC-JWT-rejection handling. Both the initial picker load (this function) and
+// the later atomic append must recognize the SAME class of server-side rejection the SAME way,
+// via ThoughtThreadLoadError's typed "not_authenticated" kind -- never via an undiscriminated
+// generic Error, and never by duplicating the PGRST301/302/303 list anywhere else (see
+// isAuthRejection() above, the single shared source of truth for both paths). A local
+// missing-session/token failure, a PostgREST-level pre-query JWT rejection on EITHER request,
+// and a rejection on both requests all resolve to the exact same ThoughtThreadLoadError kind,
+// so a caller only ever needs to check one shape regardless of where the failure happened.
+// An ordinary 403/500/network failure still resolves to "generic" -- 0 Threads remains
+// reachable only via two genuinely successful, empty responses, never as a stand-in for a
+// swallowed auth failure.
 export async function listThoughtThreads(): Promise<ThoughtThread[]> {
-  const { headers } = await authContext();
 
-  const [threadsResponse, itemsResponse] = await Promise.all([
-    fetch(
-      `${THREADS_ENDPOINT}?select=id,user_id,title,question,synthesis_note,created_at,updated_at&order=updated_at.desc`,
-      { headers }
-    ),
-    fetch(
-      `${ITEMS_ENDPOINT}?select=thread_id,annotation_id,position,created_at&order=position.asc,created_at.asc`,
-      { headers }
-    )
-  ]);
+  let headers: Record<string, string>;
+  try {
+    ({ headers } = await authContext());
+  } catch {
+    throw new ThoughtThreadLoadError("not_authenticated", NOT_AUTHENTICATED);
+  }
 
-  await throwOnError(threadsResponse, "list-threads");
-  await throwOnError(itemsResponse, "list-items");
+  let threadsResponse: Response;
+  let itemsResponse: Response;
+  try {
+    [threadsResponse, itemsResponse] = await Promise.all([
+      fetch(
+        `${THREADS_ENDPOINT}?select=id,user_id,title,question,synthesis_note,created_at,updated_at&order=updated_at.desc`,
+        { headers }
+      ),
+      fetch(
+        `${ITEMS_ENDPOINT}?select=thread_id,annotation_id,position,created_at&order=position.asc,created_at.asc`,
+        { headers }
+      )
+    ]);
+  } catch (networkError) {
+    console.error("thoughtThreads list network failure:", networkError);
+    throw new ThoughtThreadLoadError("generic", LOAD_FAILURE_MESSAGE);
+  }
+
+  await throwOnLoadError(threadsResponse, "list-threads");
+  await throwOnLoadError(itemsResponse, "list-items");
 
   const threads = (await threadsResponse.json()) as ThreadRow[];
   const items = (await itemsResponse.json()) as ThreadItemRow[];
@@ -204,31 +296,18 @@ export class ThoughtThreadAppendError extends Error {
 // supabase/sql/thought_threads_append_annotation_migration.sql) --
 // PostgREST surfaces a raised PL/pgSQL exception's SQLSTATE verbatim as
 // the RPC error response body's `code` field, so this is a genuine
-// server-controlled discriminant, not a parsed message string. 42501 is
-// also what create_thought_thread/replace_thought_thread already raise
-// for "Authentication required", reused here for the same meaning.
+// server-controlled discriminant, not a parsed message string.
 //
-// CORRECTION PASS: an expired/invalid/missing Bearer JWT can be
-// rejected by PostgREST itself BEFORE the RPC ever runs -- in that
-// case append_annotation_to_thought_thread() never executes, so its
-// own "auth.uid() is null" -> 42501 path is never reached at all, and
-// the error body instead carries one of PostgREST's OWN authentication
-// error codes (source: PostgREST's error reference, "Authentication"
-// group -- https://docs.postgrest.org/en/stable/references/errors.html):
-//   PGRST301 -- "JWT couldn't be decoded or it is invalid" (expired/malformed)
-//   PGRST302 -- request without Bearer auth while the anonymous role is disabled
-//   PGRST303 -- JWT claims validation/parsing failed
-// All three are genuinely "please sign in again" cases, so they map to
-// the same not_authenticated kind as 42501. PGRST300 ("no JWT secret
-// configured on the server") is deliberately NOT included -- that is a
-// server misconfiguration no amount of re-authenticating fixes, so it
-// is left to fall through to "generic" rather than telling the visitor
-// their session expired.
+// MERGE-GATE CORRECTION: the auth-specific codes (42501, and PostgREST's
+// own PGRST301/302/303 pre-RPC rejection codes, plus the bare-401
+// fallback) used to live in THIS map. They have moved to the single
+// shared isAuthRejection() helper defined near throwOnError() above,
+// which is now also used by listThoughtThreads()'s own auth
+// classification (see throwOnLoadError() above) -- so the two paths
+// read from exactly one source of truth for "what counts as an auth
+// rejection" and can never drift apart. This map now only needs to
+// carry the codes that are NOT about authentication: AK001/AK002.
 const APPEND_ERROR_CODE_KIND: Record<string, ThoughtThreadAppendErrorKind> = {
-  "42501": "not_authenticated",
-  "PGRST301": "not_authenticated",
-  "PGRST302": "not_authenticated",
-  "PGRST303": "not_authenticated",
   "AK001": "thread_unavailable",
   "AK002": "annotation_unavailable"
 };
@@ -275,18 +354,17 @@ export async function appendAnnotationToThoughtThread(threadId: string, annotati
   const detail = await response.json().catch(() => null) as { code?: string } | null;
   console.error(`thoughtThreads append failed (${response.status}):`, detail?.code ?? "");
 
-  // Preferred rule: a known PostgREST/RPC SQLSTATE code wins when present;
-  // otherwise fall back to the HTTP status itself. This matters because a
-  // PostgREST-level pre-RPC rejection (expired/invalid/missing Bearer JWT)
-  // can arrive with an unexpected or empty JSON body -- no `code` field at
-  // all -- yet PostgREST still reports it as HTTP 401. Treating bare 401
-  // as not_authenticated even without a recognized `code` closes that
-  // gap. Deliberately NOT done for 403: PostgREST/RLS also uses 403 for
-  // ordinary "not permitted" cases unrelated to session expiry (e.g. RLS
-  // denial with a valid token), so a bare 403 stays "generic" rather than
-  // being misreported as "session expired".
-  const kind = (detail?.code && APPEND_ERROR_CODE_KIND[detail.code])
-    || (response.status === 401 ? "not_authenticated" : "generic");
+  // isAuthRejection() (defined near throwOnError() above, shared with
+  // listThoughtThreads()'s own throwOnLoadError()) is checked FIRST: it
+  // covers 42501, PostgREST's own PGRST301/302/303 pre-RPC rejection
+  // codes, and a bare HTTP 401 with an unexpected/empty body. Only once
+  // that is ruled out do AK001/AK002 get a chance -- so an auth
+  // rejection can never be shadowed by an unrelated code collision, and
+  // there is exactly one place (isAuthRejection) that decides what
+  // counts as "please sign in again" for both the append and list paths.
+  const kind: ThoughtThreadAppendErrorKind = isAuthRejection(response.status, detail?.code)
+    ? "not_authenticated"
+    : (detail?.code && APPEND_ERROR_CODE_KIND[detail.code]) || "generic";
   throw new ThoughtThreadAppendError(kind, APPEND_FAILURE_MESSAGE);
 
 }
