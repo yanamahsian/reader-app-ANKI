@@ -24,12 +24,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '6b4a427d5ca7624be04124f23f44a94063d044a85e6036e175bf9ae19413f3c1  .tmp/entitlements/chunk0.b64' | sha256sum -c -
+          echo '67fc66a016c4aed9887ebfc2ec40939a0d8333f7be1e17b398bd438504557da6  .tmp/entitlements/chunk0a.b64' | sha256sum -c -
+          echo 'f25f0a459b37a2d28c8fb5c483d6940696698f8a0705906ed7b874943d4201a5  .tmp/entitlements/chunk0b.b64' | sha256sum -c -
+          echo '2d3224cd274fb528cd559901f09e04314ec63c76ee8109c7ed05dce6015c5c67  .tmp/entitlements/chunk0c.b64' | sha256sum -c -
           echo '5078efbec8734244d180ad5b8038a48575558aa33356dbdcf41664e1a9bdfa09  .tmp/entitlements/chunk1.b64' | sha256sum -c -
           echo '52187e9cf575cffaa4392d69ac3dbb72542431dff8340b29919a2260655961a4  .tmp/entitlements/chunk2.b64' | sha256sum -c -
           echo 'b363e83bbe26d12e241193a0970758369364d88165bf518368a439a4769afbbb  .tmp/entitlements/chunk3.b64' | sha256sum -c -
           echo '9d6d2b0c8d340c8b21edc4dcfd8d5aa76e0f9f9c5fa8d668fbc3eec7c9434242  .tmp/entitlements/chunk4.b64' | sha256sum -c -
-          cat .tmp/entitlements/chunk0.b64 .tmp/entitlements/chunk1.b64 .tmp/entitlements/chunk2.b64 .tmp/entitlements/chunk3.b64 .tmp/entitlements/chunk4.b64 > /tmp/0010.patch.gz.b64
+          cat .tmp/entitlements/chunk0a.b64 .tmp/entitlements/chunk0b.b64 .tmp/entitlements/chunk0c.b64 .tmp/entitlements/chunk1.b64 .tmp/entitlements/chunk2.b64 .tmp/entitlements/chunk3.b64 .tmp/entitlements/chunk4.b64 > /tmp/0010.patch.gz.b64
           echo '2d1db7328d83f16d66ff34e1895845919e6e86e83296dcf8bbc033144131b579  /tmp/0010.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/0010.patch.gz.b64 | gunzip > /tmp/0010.patch
           echo '71c805db44721d59d18c7bc739d8a46d152b7cd5ba4c30b0389651ea5a5c3281  /tmp/0010.patch' | sha256sum -c -
