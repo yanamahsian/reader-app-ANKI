@@ -688,6 +688,15 @@ async function handleTranslate(
     );
   }
 
+  // CORRECTION (0011): provider config preflight BEFORE consume -- a
+  // missing OPENAI_API_KEY must never charge a usage unit for a request
+  // that was never actually dispatched. See getOpenAIConfig()'s own
+  // comment above.
+  const openAIConfig = getOpenAIConfig();
+  if (!openAIConfig) {
+    return openAIConfigUnavailableResponse();
+  }
+
   const allowance = await consumeAiAllowance(authorization, "translate");
   if (!allowance.ok) {
     return allowance.response;
@@ -700,6 +709,7 @@ async function handleTranslate(
 
   try {
     translation = await callOpenAI(
+      openAIConfig,
       `You are a precise literary translator. Translate the user's text into ${languageName} (ISO language code: ${language}). Preserve the original meaning, tone and register as closely as natural phrasing allows. Respond with ONLY the translated text -- no quotation marks, no notes, no explanations, no restating the source text.`,
       text,
       3000,
@@ -755,6 +765,13 @@ async function handleExplain(
     );
   }
 
+  // CORRECTION (0011): provider config preflight BEFORE consume -- see
+  // handleTranslate's identical comment above.
+  const openAIConfig = getOpenAIConfig();
+  if (!openAIConfig) {
+    return openAIConfigUnavailableResponse();
+  }
+
   const allowance = await consumeAiAllowance(authorization, "explain");
   if (!allowance.ok) {
     return allowance.response;
@@ -767,6 +784,7 @@ async function handleExplain(
 
   try {
     answer = await callOpenAI(
+      openAIConfig,
       `You are a literary reading companion built into an ebook reader. The user selected a short passage while reading and wants help understanding it. Explain it concisely -- meaning, context, references, or vocabulary, whichever is actually relevant to this passage -- so a curious reader understands it better. Answer in ${languageName} (ISO language code: ${language}) only, in plain text with no markdown formatting, in at most a short paragraph or two. Do not simply restate or repeat the passage itself.`,
       text,
       700,
@@ -935,6 +953,17 @@ async function handleAtlasQuestion(req: Request, body: JsonRecord): Promise<Resp
 
   const { systemPrompt, userPrompt, labelToAnnotation } = buildAtlasQuestionPrompt(question, candidates, memory);
 
+  // CORRECTION (0011): provider config preflight BEFORE consume -- same
+  // reasoning as handleTranslate's identical comment. Only reached once
+  // deterministic preselection has already confirmed the AI is actually
+  // going to be called (candidates.length > 0 above) -- no_memory and
+  // insufficient_material both returned earlier and never reach either
+  // this preflight or consumeAiAllowance below.
+  const openAIConfig = getOpenAIConfig();
+  if (!openAIConfig) {
+    return openAIConfigUnavailableAtlasResponse();
+  }
+
   // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: only reached once
   // deterministic preselection has already confirmed the AI is actually
   // going to be called (candidates.length > 0 above) -- no_memory and
@@ -947,7 +976,7 @@ async function handleAtlasQuestion(req: Request, body: JsonRecord): Promise<Resp
   let modelResult: { answer: string; hasSufficientEvidence: boolean; evidenceLabels: string[] };
 
   try {
-    modelResult = await callOpenAIForAtlasQuestion(systemPrompt, userPrompt);
+    modelResult = await callOpenAIForAtlasQuestion(openAIConfig, systemPrompt, userPrompt);
   } catch (error) {
     return jsonResponse(
       { status: "error", error: "ai_request_failed", message: error instanceof Error ? error.message : String(error) },
@@ -1029,6 +1058,70 @@ async function fetchOwnReadingMemory(
   const items = (await itemsRes.json()) as AtlasThreadItemRow[];
 
   return { annotations, threads, items };
+}
+
+// ============================================================
+// SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1 -- CORRECTION (0011):
+// provider config preflight, checked BEFORE any allowance is consumed.
+// ============================================================
+//
+// Independent review of 0010 found a real accounting bug: every handler
+// called consumeAiAllowance() and only THEN called callOpenAI()/
+// callOpenAIForAtlas*(), each of which read OPENAI_API_KEY itself and
+// threw if it was missing -- AFTER a usage unit had already been
+// consumed, for a request that never actually reached
+// api.openai.com. The v1 accounting invariant is "one usage unit per
+// REAL DISPATCHED OpenAI request" -- a request that fails before fetch()
+// was never dispatched, so it must never consume.
+//
+// getOpenAIConfig() is the single place all 4 dispatch functions below
+// now get their apiKey/model from (they used to each read
+// Deno.env.get("OPENAI_API_KEY") separately) -- called once per handler,
+// BEFORE consumeAiAllowance(), so a missing/misconfigured provider
+// secret is caught and returned as a typed failure with zero allowance
+// consumed. It returns null rather than throwing, specifically so a
+// handler's control flow reads as a plain preflight check
+// ("if (!config) return earlyFailure -- no consume happened") instead of
+// a try/catch wrapping the entitlement call too.
+type OpenAIConfig = {
+  apiKey: string;
+  model: string;
+};
+
+function getOpenAIConfig(): OpenAIConfig | null {
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!apiKey) return null;
+  const model = Deno.env.get("OMNIA_AI_MODEL") || DEFAULT_AI_MODEL;
+  return { apiKey, model };
+}
+
+// Deliberately distinct from entitlement_service_unavailable (503): the
+// entitlement DB can be completely healthy while OpenAI's own secret is
+// simply not configured in this project yet. Same message/status the
+// previous per-call try/catch already produced for a missing
+// OPENAI_API_KEY (see the 4 callOpenAI*/callOpenAIForAtlas* functions'
+// own prior "throw new Error(\"Missing OPENAI_API_KEY secret\")") -- this
+// keeps that exact wire shape, just returned from the preflight instead
+// of from a caught exception after the fact.
+function openAIConfigUnavailableResponse(): Response {
+  return jsonResponse(
+    { error: "Missing OPENAI_API_KEY secret" },
+    502,
+  );
+}
+
+// Same idea, but matching the three Atlas handlers' own existing
+// {status:"error", error:"ai_request_failed", message} 502 shape (their
+// catch-block around callOpenAIForAtlas* already produces exactly this
+// for a "Missing OPENAI_API_KEY secret" Error -- see each handler below)
+// rather than translate/explain's plain {error} shape above. Two small
+// response helpers, not a redesign of either surface's existing wire
+// format.
+function openAIConfigUnavailableAtlasResponse(): Response {
+  return jsonResponse(
+    { status: "error", error: "ai_request_failed", message: "Missing OPENAI_API_KEY secret" },
+    502,
+  );
 }
 
 // ============================================================
@@ -1365,25 +1458,18 @@ function buildAtlasQuestionPrompt(
 }
 
 async function callOpenAIForAtlasQuestion(
+  config: OpenAIConfig,
   systemPrompt: string,
   userText: string,
 ): Promise<{ answer: string; hasSufficientEvidence: boolean; evidenceLabels: string[] }> {
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY secret");
-  }
-
-  const model = Deno.env.get("OMNIA_AI_MODEL") || DEFAULT_AI_MODEL;
-
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      "Authorization": `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: config.model,
       input: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userText },
@@ -1576,6 +1662,17 @@ async function handleAtlasContradictions(req: Request, body: JsonRecord): Promis
 
   const { systemPrompt, userPrompt, allowedPairKeys } = buildAtlasContradictionsPrompt(pairCandidates, labelToAnnotation);
 
+  // CORRECTION (0011): provider config preflight BEFORE consume -- same
+  // reasoning as handleTranslate's identical comment. Only reached once
+  // deterministic pairing has already confirmed the AI is actually going
+  // to be called (pairCandidates.length > 0 above) -- no_memory and the
+  // earlier insufficient_material both returned before this point and
+  // never reach either this preflight or consumeAiAllowance below.
+  const openAIConfig = getOpenAIConfig();
+  if (!openAIConfig) {
+    return openAIConfigUnavailableAtlasResponse();
+  }
+
   // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: only reached once
   // deterministic pairing has already confirmed the AI is actually going
   // to be called (pairCandidates.length > 0 above) -- no_memory and the
@@ -1589,7 +1686,7 @@ async function handleAtlasContradictions(req: Request, body: JsonRecord): Promis
   let rawContradictions: RawAtlasContradiction[];
 
   try {
-    rawContradictions = await callOpenAIForAtlasContradictions(systemPrompt, userPrompt);
+    rawContradictions = await callOpenAIForAtlasContradictions(openAIConfig, systemPrompt, userPrompt);
   } catch (error) {
     return jsonResponse(
       { status: "error", error: "ai_request_failed", message: error instanceof Error ? error.message : String(error) },
@@ -1749,25 +1846,18 @@ type RawAtlasContradiction = {
 };
 
 async function callOpenAIForAtlasContradictions(
+  config: OpenAIConfig,
   systemPrompt: string,
   userText: string,
 ): Promise<RawAtlasContradiction[]> {
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY secret");
-  }
-
-  const model = Deno.env.get("OMNIA_AI_MODEL") || DEFAULT_AI_MODEL;
-
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      "Authorization": `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: config.model,
       input: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userText },
@@ -2022,6 +2112,18 @@ async function handleAtlasUnfinishedLines(req: Request, body: JsonRecord): Promi
 
   const { systemPrompt, userPrompt, allowedRowKeys } = buildAtlasUnfinishedLinesPrompt(threadContexts, candidateRows);
 
+  // CORRECTION (0011): provider config preflight BEFORE consume -- same
+  // reasoning as handleTranslate's identical comment. Only reached once
+  // deterministic preselection has already confirmed the AI is actually
+  // going to be called (candidateRows.length > 0 above) -- no_memory
+  // (unresolvedThreadCount === 0) and the earlier insufficient_material
+  // both returned before this point and never reach either this
+  // preflight or consumeAiAllowance below.
+  const openAIConfig = getOpenAIConfig();
+  if (!openAIConfig) {
+    return openAIConfigUnavailableAtlasResponse();
+  }
+
   // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: only reached once
   // deterministic preselection has already confirmed the AI is actually
   // going to be called (candidateRows.length > 0 above) -- no_memory
@@ -2035,7 +2137,7 @@ async function handleAtlasUnfinishedLines(req: Request, body: JsonRecord): Promi
   let rawResults: RawAtlasUnfinishedLine[];
 
   try {
-    rawResults = await callOpenAIForAtlasUnfinishedLines(systemPrompt, userPrompt);
+    rawResults = await callOpenAIForAtlasUnfinishedLines(openAIConfig, systemPrompt, userPrompt);
   } catch (error) {
     return jsonResponse(
       { status: "error", error: "ai_request_failed", message: error instanceof Error ? error.message : String(error) },
@@ -2287,25 +2389,18 @@ type RawAtlasUnfinishedLine = {
 };
 
 async function callOpenAIForAtlasUnfinishedLines(
+  config: OpenAIConfig,
   systemPrompt: string,
   userText: string,
 ): Promise<RawAtlasUnfinishedLine[]> {
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY secret");
-  }
-
-  const model = Deno.env.get("OMNIA_AI_MODEL") || DEFAULT_AI_MODEL;
-
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      "Authorization": `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: config.model,
       input: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userText },
@@ -2486,28 +2581,21 @@ function languageDisplayName(code: string): string {
 // output_text / output[].content[].text) -- reused here rather than a
 // second, differently-shaped provider call.
 async function callOpenAI(
+  config: OpenAIConfig,
   systemPrompt: string,
   userText: string,
   maxOutputTokens: number,
 ): Promise<string> {
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY secret");
-  }
-
-  const model = Deno.env.get("OMNIA_AI_MODEL") || DEFAULT_AI_MODEL;
-
   const response = await fetchWithTimeout(
     "https://api.openai.com/v1/responses",
     {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        "Authorization": `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         input: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userText },

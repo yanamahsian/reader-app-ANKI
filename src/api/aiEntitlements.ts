@@ -152,15 +152,69 @@ export interface EntitlementSnapshot {
   atlasAi: AIBucketSnapshot;
 }
 
-interface EntitlementSnapshotResponseBody {
-  effective_plan: string;
-  ai_tier_name: string;
-  reader_ai: { used: number; monthly_limit: number | null; reset_at: string | null };
-  atlas_ai: { used: number; monthly_limit: number | null; reset_at: string | null };
+function isEffectivePlan(value: unknown): value is EffectivePlan {
+  return value === "free" || value === "library" || value === "atlas" || value === "academy";
 }
 
-function isEffectivePlan(value: string): value is EffectivePlan {
-  return value === "free" || value === "library" || value === "atlas" || value === "academy";
+// CORRECTION (0011): a finite, non-negative number check for `used` and
+// (when not null) `monthly_limit` -- rejects NaN/Infinity/negative/
+// non-number values a malformed or tampered response body could carry.
+function isFiniteNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isNullOrString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function parseAIBucketSnapshot(value: unknown): AIBucketSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const bucket = value as Record<string, unknown>;
+  if (!isFiniteNonNegativeNumber(bucket.used)) return null;
+  if (bucket.monthly_limit !== null && !isFiniteNonNegativeNumber(bucket.monthly_limit)) return null;
+  if (!isNullOrString(bucket.reset_at)) return null;
+  return {
+    used: bucket.used,
+    monthlyLimit: bucket.monthly_limit as number | null,
+    resetAt: bucket.reset_at as string | null
+  };
+}
+
+// CORRECTION (0011) -- BLOCKER FIX: this used to fall back to "free" for
+// any effective_plan value it didn't recognize. That is wrong. The
+// server-side resolver (effective_plan_for_user) ALREADY returns "free"
+// itself whenever a real, authenticated visitor has no active grant --
+// so a well-formed, successful RPC response can never legitimately carry
+// anything other than one of the 4 real plan ids. An unrecognized or
+// malformed value here means the response itself is broken (wrong RPC,
+// stale/incompatible client, tampered payload, a future plan id this
+// build doesn't know about yet) -- a data-contract failure, not a signal
+// that this visitor is on Free. Treating it as Free would let a
+// malformed 200 respond as believable, silently-wrong data instead of
+// the honest, visible "couldn't load your plan" state SubscriptionView
+// already has (status:"error" -> zero cards marked current). Same
+// reasoning applies to every other field below: a 200 whose body doesn't
+// actually match the RPC's own documented shape is treated exactly like
+// a 503, never partially trusted.
+function parseEntitlementSnapshot(body: unknown): EntitlementSnapshot | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+
+  if (!isEffectivePlan(record.effective_plan)) return null;
+  if (typeof record.ai_tier_name !== "string") return null;
+
+  const readerAi = parseAIBucketSnapshot(record.reader_ai);
+  if (!readerAi) return null;
+
+  const atlasAi = parseAIBucketSnapshot(record.atlas_ai);
+  if (!atlasAi) return null;
+
+  return {
+    effectivePlan: record.effective_plan,
+    aiTierName: record.ai_tier_name,
+    readerAi,
+    atlasAi
+  };
 }
 
 // Loads the visitor's own real effective plan and current AI usage.
@@ -199,21 +253,22 @@ export async function getMyEntitlementSnapshot(signal?: AbortSignal): Promise<En
     throw new AIEntitlementError("service_unavailable");
   }
 
-  const body = (await response.json()) as EntitlementSnapshotResponseBody;
-  const effectivePlan = isEffectivePlan(body.effective_plan) ? body.effective_plan : "free";
+  let rawBody: unknown;
+  try {
+    rawBody = await response.json();
+  } catch (parseError) {
+    console.error("get_my_entitlement_snapshot returned an unparseable body:", parseError);
+    throw new AIEntitlementError("service_unavailable");
+  }
 
-  return {
-    effectivePlan,
-    aiTierName: body.ai_tier_name,
-    readerAi: {
-      used: body.reader_ai?.used ?? 0,
-      monthlyLimit: body.reader_ai?.monthly_limit ?? null,
-      resetAt: body.reader_ai?.reset_at ?? null
-    },
-    atlasAi: {
-      used: body.atlas_ai?.used ?? 0,
-      monthlyLimit: body.atlas_ai?.monthly_limit ?? null,
-      resetAt: body.atlas_ai?.reset_at ?? null
-    }
-  };
+  const snapshot = parseEntitlementSnapshot(rawBody);
+  if (!snapshot) {
+    // CORRECTION (0011): a malformed 200 is a server/data-contract
+    // failure, classified and handled identically to a 503 -- never
+    // silently coerced into a believable (but fake) Free snapshot.
+    console.error("get_my_entitlement_snapshot returned a malformed body:", JSON.stringify(rawBody));
+    throw new AIEntitlementError("service_unavailable");
+  }
+
+  return snapshot;
 }
