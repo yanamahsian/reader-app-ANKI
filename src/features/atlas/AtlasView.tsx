@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { useAuth } from "../../auth/supabaseAuth";
 import { fetchAndMergeWorksByIds, listLibrary, type LibraryEntry } from "../../api/userLibrary";
 import { listAnnotationsForUser, type Annotation } from "../../api/annotations";
@@ -22,6 +23,21 @@ import { buildAtlasConnections, type AtlasConnection } from "./buildAtlas";
 import { AtlasQuestionsSection } from "./AtlasQuestionsSection";
 import { AtlasContradictionsSection } from "./AtlasContradictionsSection";
 import { AtlasUnfinishedLinesSection } from "./AtlasUnfinishedLinesSection";
+import { AtlasOverview, type AtlasSectionId } from "./AtlasOverview";
+
+// ATLAS PRODUCT INTEGRATION v1: a small, reusable back-link every section
+// below the overview/index shares, so the visitor always has a way back to
+// the top of Atlas without a second global navigation surface. Reuses
+// existing notes-card-actions/text-link classes -- no new CSS.
+function AtlasBackToOverviewLink({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="notes-card-actions">
+      <button type="button" className="text-link" onClick={onClick}>
+        ↑ К оглавлению Atlas
+      </button>
+    </div>
+  );
+}
 
 interface AtlasViewProps {
   onBack: () => void;
@@ -57,6 +73,17 @@ function formatDate(iso: string): string {
 function normalizeOptional(value: string): string | null {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+// ATLAS PRODUCT INTEGRATION v1 spec section 8: a Thread is "open" for the
+// overview/index purely as a UI-only summary -- question non-empty AND
+// synthesisNote empty, both trimmed. This does not create any new server
+// state and must not be confused with (or try to replicate) the separate,
+// server-side Unfinished Lines candidate-selection logic in omnia-ai.
+function isThreadOpen(thread: ThoughtThread): boolean {
+  const hasQuestion = Boolean(thread.question && thread.question.trim().length > 0);
+  const hasSynthesis = Boolean(thread.synthesisNote && thread.synthesisNote.trim().length > 0);
+  return hasQuestion && !hasSynthesis;
 }
 
 export function AtlasView({
@@ -96,6 +123,34 @@ export function AtlasView({
   // always has, with the composer left open and nothing discarded.
   const [isThreadConflict, setThreadConflict] = useState(false);
   const [isLoadingLatestThread, setLoadingLatestThread] = useState(false);
+
+  // ATLAS PRODUCT INTEGRATION v1: in-page navigation only -- no new router,
+  // no window.location.hash. Every existing section stays on this same
+  // route/view; these refs just let the new overview/index scroll the
+  // visitor to an existing section, and let each section scroll back up.
+  const overviewRef = useRef<HTMLDivElement | null>(null);
+  const threadsRef = useRef<HTMLDivElement | null>(null);
+  const unfinishedRef = useRef<HTMLDivElement | null>(null);
+  const questionsRef = useRef<HTMLDivElement | null>(null);
+  const contradictionsRef = useRef<HTMLDivElement | null>(null);
+  const memoryRef = useRef<HTMLDivElement | null>(null);
+  const connectionsRef = useRef<HTMLDivElement | null>(null);
+
+  function scrollToSection(id: AtlasSectionId): void {
+    const targets: Record<AtlasSectionId, RefObject<HTMLDivElement | null>> = {
+      threads: threadsRef,
+      unfinished: unfinishedRef,
+      questions: questionsRef,
+      contradictions: contradictionsRef,
+      memory: memoryRef,
+      connections: connectionsRef
+    };
+    targets[id].current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function scrollToOverview(): void {
+    overviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +222,8 @@ export function AtlasView({
   const wantToReadCount = atlas.entries.filter(entry => entry.status === "want_to_read").length;
   const memoryWorkCount = new Set(atlas.annotations.map(annotation => annotation.workId)).size;
   const recentMemory = atlas.annotations.slice(0, 12);
+  const openThreadsCount = atlas.threads.filter(isThreadOpen).length;
+  const connectionsStrongCount = atlas.connections.filter(connection => connection.strength === "strong").length;
 
   // Shared exact-reopen gate: the same jurisdiction-aware check
   // (resolveEditionFile -> toReaderBook) used by every Atlas surface that
@@ -487,33 +544,20 @@ export function AtlasView({
         <GuestNotice message={error} />
       ) : (
         <>
-          <section className="subscription-current">
-            <h2>Atlas уже помнит то, что вы заметили</h2>
-            <p className="settings-section-note">
-              Atlas использует вашу библиотеку, выделения и заметки как реальные сигналы чтения. Автоматические связи между книгами по-прежнему строятся только из проверяемых данных AN.KI. Нити мысли ниже существуют только потому, что вы сами связали конкретные фрагменты.
-            </p>
-          </section>
+          <div ref={overviewRef}>
+            <AtlasOverview
+              booksCount={atlas.activeBooks.length}
+              fragmentsCount={atlas.annotations.length}
+              memoryWorkCount={memoryWorkCount}
+              threadsCount={atlas.threads.length}
+              openThreadsCount={openThreadsCount}
+              connectionsCount={atlas.connections.length}
+              connectionsStrongCount={connectionsStrongCount}
+              onNavigate={scrollToSection}
+            />
+          </div>
 
-          <section className="subscription-blocks" aria-label="Состояние Atlas">
-            <div className="subscription-block">
-              <h2>{atlas.activeBooks.length}</h2>
-              <p className="settings-section-note">книг уже участвуют в Atlas</p>
-            </div>
-            <div className="subscription-block">
-              <h2>{atlas.annotations.length}</h2>
-              <p className="settings-section-note">сохранённых фрагментов и мыслей</p>
-            </div>
-            <div className="subscription-block">
-              <h2>{atlas.threads.length}</h2>
-              <p className="settings-section-note">нитей мысли создано</p>
-            </div>
-            <div className="subscription-block">
-              <h2>{atlas.connections.length}</h2>
-              <p className="settings-section-note">проверяемых связей найдено</p>
-            </div>
-          </section>
-
-          <section className="notes-group" aria-label="Нити мысли">
+          <section ref={threadsRef} className="notes-group" aria-label="Нити мысли">
             <header className="notes-group-header">
               <div>
                 <p className="eyebrow">Thought Threads</p>
@@ -711,37 +755,50 @@ export function AtlasView({
                 );
               })}
             </div>
+
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
           </section>
 
-          <AtlasUnfinishedLinesSection
-            threads={atlas.threads}
-            annotationById={annotationById}
-            onOpenEvidence={resolveAndOpenMemoryById}
-            onThreadUpdated={refreshThreads}
-          />
+          <div ref={unfinishedRef}>
+            <AtlasUnfinishedLinesSection
+              threads={atlas.threads}
+              annotationById={annotationById}
+              onOpenEvidence={resolveAndOpenMemoryById}
+              onThreadUpdated={refreshThreads}
+            />
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
+          </div>
 
-          <AtlasQuestionsSection
-            annotationCount={atlas.annotations.length}
-            annotationById={annotationById}
-            onOpenAnnotationInReader={resolveAndOpenMemory}
-          />
+          <div ref={questionsRef}>
+            <AtlasQuestionsSection
+              annotationCount={atlas.annotations.length}
+              annotationById={annotationById}
+              onOpenAnnotationInReader={resolveAndOpenMemory}
+            />
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
+          </div>
 
-          <AtlasContradictionsSection
-            annotationCount={atlas.annotations.length}
-            annotationById={annotationById}
-            onOpenAnnotationInReader={resolveAndOpenMemory}
-          />
+          <div ref={contradictionsRef}>
+            <AtlasContradictionsSection
+              annotationCount={atlas.annotations.length}
+              annotationById={annotationById}
+              onOpenAnnotationInReader={resolveAndOpenMemory}
+            />
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
+          </div>
 
-          {recentMemory.length > 0 && (
-            <section className="notes-group" aria-label="Личная память чтения">
-              <header className="notes-group-header">
-                <div>
-                  <p className="eyebrow">Memory</p>
-                  <h2 className="notes-group-title">Ваши сохранённые мысли</h2>
-                  <p className="notes-group-author">Последние фрагменты, которые вы решили не потерять.</p>
-                </div>
-              </header>
+          <section ref={memoryRef} className="notes-group" aria-label="Личная память чтения">
+            <header className="notes-group-header">
+              <div>
+                <p className="eyebrow">Memory</p>
+                <h2 className="notes-group-title">Ваши сохранённые мысли</h2>
+                <p className="notes-group-author">Последние фрагменты, которые вы решили не потерять.</p>
+              </div>
+            </header>
 
+            {recentMemory.length === 0 ? (
+              <GuestNotice message="Atlas строится из фрагментов, которые вы сохраняете во время реального чтения. Сохраните первую мысль в Reader — она появится здесь." />
+            ) : (
               <div className="notes-group-items">
                 {recentMemory.map(annotation => {
                   const book = getBookById(annotation.workId);
@@ -773,8 +830,10 @@ export function AtlasView({
                   );
                 })}
               </div>
-            </section>
-          )}
+            )}
+
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
+          </section>
 
           {wantToReadCount > 0 && (
             <p className="settings-section-note">
@@ -782,42 +841,54 @@ export function AtlasView({
             </p>
           )}
 
-          {atlas.activeBooks.length < 2 ? (
-            <GuestNotice message="Для первой автоматической связи нужны хотя бы две книги из вашей реальной истории чтения." />
-          ) : atlas.connections.length === 0 ? (
-            <GuestNotice message="Книги уже в Atlas, но по текущим проверяемым метаданным между ними пока нет достаточно сильной автоматической связи." />
-          ) : (
-            <section className="subscription-plans" aria-label="Автоматические связи между книгами">
-              {atlas.connections.map(connection => (
-                <article
-                  key={connection.id}
-                  className={connection.strength === "strong" ? "plan-card plan-card-highlighted" : "plan-card"}
-                >
-                  <p className="eyebrow">{connection.strength === "strong" ? "Сильная связь" : "Связь"}</p>
-                  <h3 className="plan-card-name">{connection.left.title}</h3>
-                  <p className="settings-section-note">{connection.left.authorName}</p>
-                  <p className="plan-card-price" aria-hidden="true">↔</p>
-                  <h3 className="plan-card-name">{connection.right.title}</h3>
-                  <p className="settings-section-note">{connection.right.authorName}</p>
-                  <ul className="plan-card-features">
-                    {connection.reasons.map(reason => (
-                      <li key={`${connection.id}-${reason.kind}-${reason.label}`}>{reason.label}</li>
-                    ))}
-                  </ul>
-                  <div>
-                    <button type="button" className="text-link" onClick={() => onOpenBookDetail(connection.left.id)}>
-                      Открыть «{connection.left.title}»
-                    </button>
-                  </div>
-                  <div>
-                    <button type="button" className="text-link" onClick={() => onOpenBookDetail(connection.right.id)}>
-                      Открыть «{connection.right.title}»
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </section>
-          )}
+          <section ref={connectionsRef} className="notes-group" aria-label="Автоматические связи между книгами">
+            <header className="notes-group-header">
+              <div>
+                <p className="eyebrow">Connections</p>
+                <h2 className="notes-group-title">Связи книг</h2>
+                <p className="notes-group-author">Автоматические связи между прочитанными книгами по проверяемым метаданным.</p>
+              </div>
+            </header>
+
+            {atlas.activeBooks.length < 2 ? (
+              <GuestNotice message="Для первой автоматической связи нужны хотя бы две книги из вашей реальной истории чтения." />
+            ) : atlas.connections.length === 0 ? (
+              <GuestNotice message="Книги уже в Atlas, но по текущим проверяемым метаданным между ними пока нет достаточно сильной автоматической связи." />
+            ) : (
+              <div className="subscription-plans" aria-label="Найденные связи">
+                {atlas.connections.map(connection => (
+                  <article
+                    key={connection.id}
+                    className={connection.strength === "strong" ? "plan-card plan-card-highlighted" : "plan-card"}
+                  >
+                    <p className="eyebrow">{connection.strength === "strong" ? "Сильная связь" : "Связь"}</p>
+                    <h3 className="plan-card-name">{connection.left.title}</h3>
+                    <p className="settings-section-note">{connection.left.authorName}</p>
+                    <p className="plan-card-price" aria-hidden="true">↔</p>
+                    <h3 className="plan-card-name">{connection.right.title}</h3>
+                    <p className="settings-section-note">{connection.right.authorName}</p>
+                    <ul className="plan-card-features">
+                      {connection.reasons.map(reason => (
+                        <li key={`${connection.id}-${reason.kind}-${reason.label}`}>{reason.label}</li>
+                      ))}
+                    </ul>
+                    <div>
+                      <button type="button" className="text-link" onClick={() => onOpenBookDetail(connection.left.id)}>
+                        Открыть «{connection.left.title}»
+                      </button>
+                    </div>
+                    <div>
+                      <button type="button" className="text-link" onClick={() => onOpenBookDetail(connection.right.id)}>
+                        Открыть «{connection.right.title}»
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
+          </section>
 
           <section className="subscription-current">
             <h2>Что добавит AI позже</h2>
