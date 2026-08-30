@@ -23,8 +23,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "9654bb049281614f73494ae329fefa1f0ccd0cae"
-          git diff --check HEAD^
+          test "$(git rev-parse HEAD)" = "741552c7ec1f9aa13a9ca1e630d7f8abd0dbcd32"
+          git diff --check 293bf2b513c324e8541541b8531756b0a3141420..HEAD
 
       - name: Install toolchain
         run: npm install --no-audit --no-fund
@@ -59,7 +59,7 @@ jobs:
           git checkout --orphan tmp-omnia-ai-v22-bundle
           git rm -rf . >/dev/null 2>&1 || true
           cp /tmp/omnia-ai-v22.min.js ./index.ts
-          printf 'source_commit=9654bb049281614f73494ae329fefa1f0ccd0cae\n' > SOURCE.txt
+          printf 'source_commit=741552c7ec1f9aa13a9ca1e630d7f8abd0dbcd32\n' > SOURCE.txt
           git add index.ts SOURCE.txt
           git commit -m 'Exact bundled omnia-ai v22 transport'
           git push --force origin tmp-omnia-ai-v22-bundle
