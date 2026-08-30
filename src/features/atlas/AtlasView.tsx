@@ -890,13 +890,6 @@ export function AtlasView({
             <AtlasBackToOverviewLink onClick={scrollToOverview} />
           </section>
 
-          <section className="subscription-current">
-            <h2>Что добавит AI позже</h2>
-            <p className="settings-section-note">
-              Следующий интеллектуальный слой сможет предлагать смысловые связи между уже существующими сигналами: общие идеи в сохранённых фрагментах, противоречия, повторяющиеся вопросы и развитие темы между книгами. Но созданные вами нити останутся явными пользовательскими связями, а не догадкой AI.
-            </p>
-          </section>
-
           {(readingCount > 0 || finishedCount > 0) && (
             <p className="settings-section-note">
               Сейчас в библиотеке: читаете — {readingCount}, завершено — {finishedCount}. Книг с личной памятью — {memoryWorkCount}.
