@@ -162,6 +162,36 @@ const DEFAULT_AI_MODEL = "gpt-5.6-luna";
 const MAX_AI_TEXT_LENGTH = 8000;
 
 // ============================================================
+// SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1
+// ============================================================
+//
+// Every costly AI action (translate, explain, and the three Atlas AI
+// actions below) now requires the caller's real Supabase Authorization
+// Bearer token AND passes through consumeAiAllowance() -- see that
+// function's own comment, right before fetchOwnReadingMemory below -- for
+// exactly one server-owned atomic RPC call (public.consume_ai_allowance,
+// see supabase/sql/ai_entitlements_foundation_v1.sql) immediately before
+// the real OpenAI request is dispatched, never earlier. search/read/open/
+// status remain fully public/anonymous and are completely unaffected --
+// see CRITICAL ARCHITECTURAL RULE below and this project's own
+// verify_jwt=false Edge Function config, which this migration does not
+// change.
+//
+// This Edge Function never resolves a plan, a limit, or a usage count
+// itself -- consumeAiAllowance() only forwards the caller's own token to
+// the RPC and classifies its typed jsonb result into one of the HTTP
+// responses spec'd below. Plan/limit/usage truth lives exclusively in
+// Postgres.
+const AI_ALLOWANCE_ACTIONS = [
+  "translate",
+  "explain",
+  "atlas-question",
+  "atlas-contradictions",
+  "atlas-unfinished-lines",
+] as const;
+type AiAllowanceAction = (typeof AI_ALLOWANCE_ACTIONS)[number];
+
+// ============================================================
 // ATLAS CROSS-BOOK QUESTIONS v1
 // ============================================================
 //
@@ -171,17 +201,19 @@ const MAX_AI_TEXT_LENGTH = 8000;
 // scope for v1; see the task spec's section 4).
 //
 // Security model: this action requires the caller's real Supabase
-// Authorization Bearer token (unlike translate/explain, which are
-// anonymous). That token is forwarded, unmodified, to this project's own
-// PostgREST endpoint with the public anon/publishable apikey -- the exact
-// same two headers src/api/annotations.ts and src/api/thoughtThreads.ts
-// already send from the browser. Row Level Security (auth.uid() =
-// user_id on annotations/thought_threads/thought_thread_items) is the
-// ONLY thing that decides which rows come back. This function never
-// receives or trusts a client-supplied user_id or annotation id list --
-// there is nothing to re-check, because there is nothing to inject: a
-// forged annotationId in the request body (there isn't one) couldn't
-// widen what RLS already returns for this caller's own token.
+// Authorization Bearer token (as of SUBSCRIPTION & AI ENTITLEMENTS
+// FOUNDATION v1, translate/explain now require one too -- see above; this
+// action always has). That token is forwarded, unmodified, to this
+// project's own PostgREST endpoint with the public anon/publishable
+// apikey -- the exact same two headers src/api/annotations.ts and
+// src/api/thoughtThreads.ts already send from the browser. Row Level
+// Security (auth.uid() = user_id on annotations/thought_threads/
+// thought_thread_items) is the ONLY thing that decides which rows come
+// back. This function never receives or trusts a client-supplied user_id
+// or annotation id list -- there is nothing to re-check, because there is
+// nothing to inject: a forged annotationId in the request body (there
+// isn't one) couldn't widen what RLS already returns for this caller's
+// own token.
 const MAX_ATLAS_QUESTION_LENGTH = 300;
 
 // Deterministic lexical preselection only (never called "semantic" --
@@ -382,11 +414,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (action === "translate") {
-      return await handleTranslate(body);
+      return await handleTranslate(req, body);
     }
 
     if (action === "explain") {
-      return await handleExplain(body);
+      return await handleExplain(req, body);
     }
 
     if (action === "atlas-question") {
@@ -610,8 +642,21 @@ async function handleRead(
 // Both reuse this project's existing AI provider/secret (OpenAI /
 // OPENAI_API_KEY, see callOpenAI below) rather than introducing a
 // second provider integration.
+//
+// SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: both actions now require
+// the caller's real Supabase Authorization Bearer token -- a guest (no
+// token) gets a typed 401 auth_required and OpenAI is never called. This
+// is a deliberate, spec'd behaviour change from the previously-anonymous
+// contract above (kept as historical context, not current behaviour):
+// costly AI must be tied to a real account so usage is meterable and
+// enforceable server-side; search/read/open/status remain fully
+// anonymous and are untouched by this change. Deterministic validation
+// (missing/too-long text) still runs BEFORE any auth/allowance check --
+// there is no reason to consume an allowance unit, or even ask whether
+// one exists, for a request this function would reject anyway.
 
 async function handleTranslate(
+  req: Request,
   body: JsonRecord,
 ): Promise<Response> {
   const text = normalizeString(body.text);
@@ -632,6 +677,20 @@ async function handleTranslate(
       },
       400,
     );
+  }
+
+  const authorization = req.headers.get("Authorization") || req.headers.get("authorization");
+
+  if (!authorization) {
+    return jsonResponse(
+      { status: "error", error: "auth_required", message: "Authentication required" },
+      401,
+    );
+  }
+
+  const allowance = await consumeAiAllowance(authorization, "translate");
+  if (!allowance.ok) {
+    return allowance.response;
   }
 
   const language = normalizeString(body.language) || "ru";
@@ -664,6 +723,7 @@ async function handleTranslate(
 
 
 async function handleExplain(
+  req: Request,
   body: JsonRecord,
 ): Promise<Response> {
   const text = normalizeString(body.text);
@@ -684,6 +744,20 @@ async function handleExplain(
       },
       400,
     );
+  }
+
+  const authorization = req.headers.get("Authorization") || req.headers.get("authorization");
+
+  if (!authorization) {
+    return jsonResponse(
+      { status: "error", error: "auth_required", message: "Authentication required" },
+      401,
+    );
+  }
+
+  const allowance = await consumeAiAllowance(authorization, "explain");
+  if (!allowance.ok) {
+    return allowance.response;
   }
 
   const language = normalizeString(body.language) || "ru";
@@ -861,6 +935,15 @@ async function handleAtlasQuestion(req: Request, body: JsonRecord): Promise<Resp
 
   const { systemPrompt, userPrompt, labelToAnnotation } = buildAtlasQuestionPrompt(question, candidates, memory);
 
+  // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: only reached once
+  // deterministic preselection has already confirmed the AI is actually
+  // going to be called (candidates.length > 0 above) -- no_memory and
+  // insufficient_material both returned earlier and never consume a unit.
+  const allowance = await consumeAiAllowance(authorization, "atlas-question");
+  if (!allowance.ok) {
+    return allowance.response;
+  }
+
   let modelResult: { answer: string; hasSufficientEvidence: boolean; evidenceLabels: string[] };
 
   try {
@@ -946,6 +1029,165 @@ async function fetchOwnReadingMemory(
   const items = (await itemsRes.json()) as AtlasThreadItemRow[];
 
   return { annotations, threads, items };
+}
+
+// ============================================================
+// SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1 -- the one shared
+// enforcement primitive every costly AI action calls immediately before
+// its real OpenAI request, never earlier and never instead of a real
+// dispatch.
+// ============================================================
+//
+// Forwards the caller's own Authorization Bearer token, unmodified, to
+// this project's PostgREST endpoint's consume_ai_allowance RPC -- the
+// exact same "forward the real token, let RLS/the function's own
+// auth.uid() decide" pattern fetchOwnReadingMemory above already uses.
+// This function does not resolve a plan, look up a limit, or compute a
+// usage count itself -- it only classifies consume_ai_allowance's typed
+// jsonb result (or the RPC call's own HTTP-level failure) into exactly
+// one of the typed HTTP responses spec'd below. No service_role key, no
+// client-supplied user_id, no duplicated plan/limit logic -- that truth
+// lives exclusively in supabase/sql/ai_entitlements_foundation_v1.sql.
+type ConsumeAiAllowanceResult =
+  | { ok: true }
+  | { ok: false; response: Response };
+
+interface ConsumeAiAllowanceRpcBody {
+  allowed: boolean;
+  reason: "ok" | "monthly_limit_reached" | "hourly_limit_reached" | "configuration_error";
+  plan: string | null;
+  bucket: string | null;
+  used: number | null;
+  limit: number | null;
+  resets_at: string | null;
+}
+
+async function consumeAiAllowance(
+  authorization: string,
+  action: AiAllowanceAction,
+): Promise<ConsumeAiAllowanceResult> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+
+  if (!supabaseUrl || !anonKey) {
+    return {
+      ok: false,
+      response: jsonResponse(
+        { status: "error", error: "entitlement_service_unavailable" },
+        503,
+      ),
+    };
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetchWithTimeout(`${supabaseUrl}/rest/v1/rpc/consume_ai_allowance`, {
+      method: "POST",
+      headers: {
+        apikey: anonKey,
+        Authorization: authorization,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_action: action }),
+    });
+  } catch (error) {
+    console.error("consume_ai_allowance request failed:", error instanceof Error ? error.message : String(error));
+    return {
+      ok: false,
+      response: jsonResponse(
+        { status: "error", error: "entitlement_service_unavailable" },
+        503,
+      ),
+    };
+  }
+
+  // A malformed/expired JWT is rejected by PostgREST itself before the RPC
+  // body ever runs -- the exact same 401-detection fetchOwnReadingMemory
+  // above already relies on for the identical scenario.
+  if (response.status === 401) {
+    return {
+      ok: false,
+      response: jsonResponse(
+        { status: "error", error: "auth_required", message: "Your session has expired. Please sign in again." },
+        401,
+      ),
+    };
+  }
+
+  if (!response.ok) {
+    console.error(`consume_ai_allowance RPC failed with status ${response.status}`);
+    return {
+      ok: false,
+      response: jsonResponse(
+        { status: "error", error: "entitlement_service_unavailable" },
+        503,
+      ),
+    };
+  }
+
+  let result: ConsumeAiAllowanceRpcBody;
+
+  try {
+    result = (await response.json()) as ConsumeAiAllowanceRpcBody;
+  } catch (error) {
+    console.error("consume_ai_allowance returned an unparseable body:", error instanceof Error ? error.message : String(error));
+    return {
+      ok: false,
+      response: jsonResponse(
+        { status: "error", error: "entitlement_service_unavailable" },
+        503,
+      ),
+    };
+  }
+
+  if (result.allowed) {
+    return { ok: true };
+  }
+
+  if (result.reason === "monthly_limit_reached") {
+    return {
+      ok: false,
+      response: jsonResponse(
+        {
+          status: "error",
+          error: "ai_monthly_limit_reached",
+          plan: result.plan,
+          bucket: result.bucket,
+          resetAt: result.resets_at,
+        },
+        429,
+      ),
+    };
+  }
+
+  if (result.reason === "hourly_limit_reached") {
+    return {
+      ok: false,
+      response: jsonResponse(
+        {
+          status: "error",
+          error: "ai_hourly_limit_reached",
+          plan: result.plan,
+          bucket: result.bucket,
+          resetAt: result.resets_at,
+        },
+        429,
+      ),
+    };
+  }
+
+  // "configuration_error" (an unmapped action, or a missing plan/bucket
+  // limit config row) and any other unrecognized reason both fail closed
+  // the same way -- never leaked to the client as raw SQL/config detail.
+  console.error(`consume_ai_allowance denied with unexpected reason: ${result.reason}`);
+  return {
+    ok: false,
+    response: jsonResponse(
+      { status: "error", error: "entitlement_service_unavailable" },
+      503,
+    ),
+  };
 }
 
 // Deterministic lexical token-overlap scoring -- explicitly NOT semantic
@@ -1333,6 +1575,16 @@ async function handleAtlasContradictions(req: Request, body: JsonRecord): Promis
   }
 
   const { systemPrompt, userPrompt, allowedPairKeys } = buildAtlasContradictionsPrompt(pairCandidates, labelToAnnotation);
+
+  // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: only reached once
+  // deterministic pairing has already confirmed the AI is actually going
+  // to be called (pairCandidates.length > 0 above) -- no_memory and the
+  // earlier insufficient_material both returned before this point and
+  // never consume a unit.
+  const allowance = await consumeAiAllowance(authorization, "atlas-contradictions");
+  if (!allowance.ok) {
+    return allowance.response;
+  }
 
   let rawContradictions: RawAtlasContradiction[];
 
@@ -1769,6 +2021,16 @@ async function handleAtlasUnfinishedLines(req: Request, body: JsonRecord): Promi
   }
 
   const { systemPrompt, userPrompt, allowedRowKeys } = buildAtlasUnfinishedLinesPrompt(threadContexts, candidateRows);
+
+  // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: only reached once
+  // deterministic preselection has already confirmed the AI is actually
+  // going to be called (candidateRows.length > 0 above) -- no_memory
+  // (unresolvedThreadCount === 0) and the earlier insufficient_material
+  // both returned before this point and never consume a unit.
+  const allowance = await consumeAiAllowance(authorization, "atlas-unfinished-lines");
+  if (!allowance.ok) {
+    return allowance.response;
+  }
 
   let rawResults: RawAtlasUnfinishedLine[];
 

@@ -1,11 +1,28 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ShellPage } from "../shared/ShellPage";
 import { PlanCard, type PlanDef } from "./PlanCard";
+import { useAuth } from "../../auth/supabaseAuth";
+import { getMyEntitlementSnapshot, type EffectivePlan } from "../../api/aiEntitlements";
 import "../../styles/pricing.css";
 
 interface SubscriptionViewProps {
   onBack: () => void;
 }
+
+// SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: which card is marked
+// "current" now comes from a real loaded effective plan (via the new
+// get_my_entitlement_snapshot() RPC) instead of being hardcoded to Free.
+//   - Guest: baseline Free access is shown as a courtesy, with zero
+//     network entitlement requests (there is no account to query).
+//   - Authenticated, snapshot loaded: the server's own effective plan.
+//   - Authenticated, snapshot failed to load: null -- no card is marked
+//     current. A load failure must never be silently presented as "you
+//     are on Free" for a visitor who may actually hold a paid plan.
+type SnapshotState =
+  | { status: "guest" }
+  | { status: "loading" }
+  | { status: "loaded"; plan: EffectivePlan }
+  | { status: "error" };
 
 // Canonical tier names, prices and entitlements per
 // docs/ANKI_PRODUCT_ARCHITECTURE.md (§10-§18, §12 pricing table). Prices
@@ -13,14 +30,17 @@ interface SubscriptionViewProps {
 // Feature lists are trimmed to the 5-8 clearest entitlements per card
 // (the full matrix lives in the architecture doc) so a card stays
 // readable rather than reproducing every row.
-const PLANS: PlanDef[] = [
+//
+// isCurrent is now a function of the real loaded plan (see
+// SnapshotState above) rather than a hardcoded field on each entry --
+// buildPlans() below stamps it on per-render.
+const PLAN_DEFS: Omit<PlanDef, "isCurrent">[] = [
   {
     id: "free",
     name: "Free",
     figure: "pawn",
     price: "€0",
     tagline: "Постоянный бесплатный доступ.",
-    isCurrent: true,
     features: [
       "Личная библиотека AN.KI — ограниченная подборка",
       "Базовый Reader и прогресс чтения",
@@ -90,7 +110,20 @@ const PLANS: PlanDef[] = [
   },
 ];
 
+// Stamps isCurrent onto each plan definition from the real loaded plan
+// id (or leaves every card un-marked when there isn't one yet/it failed
+// to load) -- a pure function so it's trivially testable on its own,
+// independent of the snapshot-loading effect below.
+function buildPlans(currentPlanId: EffectivePlan | null): PlanDef[] {
+  return PLAN_DEFS.map(plan => ({ ...plan, isCurrent: plan.id === currentPlanId }));
+}
+
 export function SubscriptionView({ onBack }: SubscriptionViewProps) {
+  const { isAuthenticated } = useAuth();
+  const [snapshotState, setSnapshotState] = useState<SnapshotState>(
+    isAuthenticated ? { status: "loading" } : { status: "guest" }
+  );
+
   // Account-shell navigation does not use a router, so the browser keeps
   // the previous page's scroll position when switching views. Pricing is
   // a top-level showcase and must always open from its heading rather
@@ -98,6 +131,44 @@ export function SubscriptionView({ onBack }: SubscriptionViewProps) {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isAuthenticated) {
+      // Guest path: zero network entitlement requests. Guest still sees
+      // baseline Free access reflected as "current" -- see SnapshotState's
+      // own comment -- purely a local, no-fetch courtesy.
+      setSnapshotState({ status: "guest" });
+      return;
+    }
+
+    setSnapshotState({ status: "loading" });
+
+    getMyEntitlementSnapshot()
+      .then(snapshot => {
+        if (cancelled) return;
+        setSnapshotState({ status: "loaded", plan: snapshot.effectivePlan });
+      })
+      .catch(loadError => {
+        if (cancelled) return;
+        console.error("SubscriptionView: getMyEntitlementSnapshot failed:", loadError);
+        setSnapshotState({ status: "error" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  const currentPlanId: EffectivePlan | null =
+    snapshotState.status === "guest"
+      ? "free"
+      : snapshotState.status === "loaded"
+        ? snapshotState.plan
+        : null;
+
+  const plans = buildPlans(currentPlanId);
 
   return (
     <ShellPage
@@ -108,8 +179,14 @@ export function SubscriptionView({ onBack }: SubscriptionViewProps) {
       wide
     >
 
+      {snapshotState.status === "error" && (
+        <p className="settings-section-note">
+          Не удалось загрузить ваш текущий план. Обновите страницу, чтобы попробовать снова.
+        </p>
+      )}
+
       <section className="pricing-showcase">
-        {PLANS.map((plan) => (
+        {plans.map((plan) => (
           <PlanCard key={plan.id} plan={plan} />
         ))}
       </section>

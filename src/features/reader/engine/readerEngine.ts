@@ -9,6 +9,7 @@ import {
 } from "../threadBridge";
 import { createSelectionController, type SelectionController } from "./selection";
 import { translateText, explainText } from "../../../api/ai";
+import { AIEntitlementError, describeAIEntitlementErrorRu } from "../../../api/aiEntitlements";
 import { detectLoader } from "./formats/detect";
 import type { LoadedDocument } from "./formats/types";
 import { computeAnchorFromRange, formatPageWithHighlights } from "./highlightAnchor";
@@ -439,6 +440,16 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
     return `<div class="sheet-error">Не удалось получить ответ.</div>`;
   }
 
+  // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: a signed-in-required,
+  // monthly-limit, hourly-limit, or entitlement-service failure is not
+  // the same thing as a real network/provider error -- each gets its own
+  // honest Russian sentence instead of the generic errorTemplate() above.
+  // This is deliberately still just a message inside the existing action
+  // sheet, not a new paywall modal or a Reader redesign.
+  function entitlementErrorTemplate(error: AIEntitlementError): string {
+    return `<div class="sheet-error">${describeAIEntitlementErrorRu(error.kind)}</div>`;
+  }
+
   /* ------------------------------------------------------------------
      AI actions (shared by the floating toolbar and the action sheet)
      ------------------------------------------------------------------ */
@@ -466,9 +477,12 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
       translationCache.set(cacheKey, translation);
       updateActionSheet(translation);
     } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        updateActionSheet(errorTemplate());
+      if ((error as Error).name === "AbortError") return;
+      if (error instanceof AIEntitlementError) {
+        updateActionSheet(entitlementErrorTemplate(error));
+        return;
       }
+      updateActionSheet(errorTemplate());
     }
 
   }
@@ -496,9 +510,12 @@ export function createReaderEngine(options: ReaderEngineOptions): ReaderEngine {
       explanationCache.set(cacheKey, answer);
       updateActionSheet(answer);
     } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        updateActionSheet(errorTemplate());
+      if ((error as Error).name === "AbortError") return;
+      if (error instanceof AIEntitlementError) {
+        updateActionSheet(entitlementErrorTemplate(error));
+        return;
       }
+      updateActionSheet(errorTemplate());
     }
 
   }

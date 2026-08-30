@@ -16,6 +16,7 @@ import {
   type AtlasContradiction,
   type AtlasContradictionEvidence
 } from "../../api/atlasContradictions";
+import { AIEntitlementError, describeAIEntitlementErrorRu } from "../../api/aiEntitlements";
 import { getBookById } from "../../catalog";
 import { GuestNotice } from "../shared/GuestNotice";
 
@@ -65,6 +66,10 @@ export function AtlasContradictionsSection({
     } catch (error) {
       if (error instanceof AtlasSessionExpiredError) {
         setState({ kind: "error", text: "Похоже, истекла сессия. Обновите страницу и войдите снова." });
+        return;
+      }
+      if (error instanceof AIEntitlementError) {
+        setState({ kind: "error", text: describeAIEntitlementErrorRu(error.kind) });
         return;
       }
       console.error("findAtlasContradictions failed:", error);

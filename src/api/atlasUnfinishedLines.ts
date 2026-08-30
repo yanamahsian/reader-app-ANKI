@@ -19,6 +19,7 @@
 // "new" again on a later run.
 import { getValidAccessToken, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../auth/supabaseAuth";
 import { AtlasSessionExpiredError } from "./atlasQuestions";
+import { toAIEntitlementError } from "./aiEntitlements";
 
 const AI_ENDPOINT = `${SUPABASE_URL}/functions/v1/omnia-ai`;
 
@@ -96,6 +97,12 @@ export async function findAtlasUnfinishedLines(signal?: AbortSignal): Promise<At
   }
 
   if (!response.ok) {
+    // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: see askAtlasQuestion's
+    // identical comment in atlasQuestions.ts -- a limit/service-outage
+    // response is a distinct typed case, not the generic failure below.
+    const entitlementError = await toAIEntitlementError(response);
+    if (entitlementError.kind !== "generic") throw entitlementError;
+
     // Never log response body content here -- privacy rules for Atlas AI
     // features (spec section 14 of Cross-Book Questions, carried over here
     // and to Contradictions) apply to diagnostics too.

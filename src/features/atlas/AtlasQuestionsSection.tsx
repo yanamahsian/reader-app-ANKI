@@ -11,6 +11,7 @@
 import { useState } from "react";
 import type { Annotation } from "../../api/annotations";
 import { askAtlasQuestion, AtlasSessionExpiredError, type AtlasQuestionEvidence } from "../../api/atlasQuestions";
+import { AIEntitlementError, describeAIEntitlementErrorRu } from "../../api/aiEntitlements";
 import { getBookById } from "../../catalog";
 import { GuestNotice } from "../shared/GuestNotice";
 
@@ -67,6 +68,10 @@ export function AtlasQuestionsSection({
     } catch (error) {
       if (error instanceof AtlasSessionExpiredError) {
         setState({ kind: "error", text: "Похоже, истекла сессия. Обновите страницу и войдите снова." });
+        return;
+      }
+      if (error instanceof AIEntitlementError) {
+        setState({ kind: "error", text: describeAIEntitlementErrorRu(error.kind) });
         return;
       }
       console.error("askAtlasQuestion failed:", error);

@@ -15,6 +15,7 @@
 // its answer are ephemeral UI state, never persisted, matching v1's
 // explicitly-not-a-chat-app framing.
 import { getValidAccessToken, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../auth/supabaseAuth";
+import { toAIEntitlementError } from "./aiEntitlements";
 
 const AI_ENDPOINT = `${SUPABASE_URL}/functions/v1/omnia-ai`;
 
@@ -75,6 +76,15 @@ export async function askAtlasQuestion(question: string, signal?: AbortSignal): 
   }
 
   if (!response.ok) {
+    // SUBSCRIPTION & AI ENTITLEMENTS FOUNDATION v1: a monthly/hourly AI
+    // limit or an entitlement-service outage is a distinct, typed case
+    // -- not the same generic failure as a real network/provider error
+    // -- surfaced as AIEntitlementError so AtlasQuestionsSection.tsx can
+    // show a specific message the same way it already does for
+    // AtlasSessionExpiredError.
+    const entitlementError = await toAIEntitlementError(response);
+    if (entitlementError.kind !== "generic") throw entitlementError;
+
     // Never log response body content here -- it may echo the visitor's
     // own question text back in an error payload, and privacy rules for
     // this feature (spec section 14) apply to diagnostics too.
