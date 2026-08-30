@@ -161,12 +161,28 @@ $$;
 
 -- Atomic metadata + membership replacement. 0/1 items are deliberately legal here so deleting
 -- source memory never forces deletion of the user's synthesis.
+--
+-- THOUGHT THREAD OPTIMISTIC CONCURRENCY v1 -- see
+-- thought_threads_optimistic_concurrency_migration.sql's own header comment for full design
+-- rationale (the Atlas full Thread editor's stale-overwrite race and why updated_at is a
+-- sufficient optimistic-concurrency token). p_expected_updated_at is now REQUIRED: the caller
+-- must echo back the exact updated_at it most recently read for this Thread. If the Thread's
+-- current updated_at no longer matches, this raises AK003 and performs NO write at all --
+-- title/question/synthesis_note/items/positions/updated_at are all left completely untouched.
+-- The row lock (FOR UPDATE) is combined with the ownership check in one statement, exactly like
+-- append_annotation_to_thought_thread's own pattern, so the version read below is guaranteed
+-- current and stable for the rest of this transaction. AK001 (Thread not found) and AK002
+-- (annotation unavailable) replace what used to be a shared 42501 for both cases -- the SAME
+-- code reserved for "not authenticated" -- so the client's typed classification cannot
+-- misinterpret either as a session expiry; 42501 is now reserved exclusively for that one
+-- meaning across both this RPC and append_annotation_to_thought_thread.
 create or replace function public.replace_thought_thread(
   p_thread_id uuid,
   p_title text,
   p_question text,
   p_synthesis_note text,
-  p_annotation_ids uuid[]
+  p_annotation_ids uuid[],
+  p_expected_updated_at timestamptz
 )
 returns void
 language plpgsql
@@ -175,6 +191,8 @@ set search_path = public, auth, pg_temp
 as $$
 declare
   v_user_id uuid := auth.uid();
+  v_locked_thread_id uuid;
+  v_current_updated_at timestamptz;
   v_expected integer;
   v_owned integer;
 begin
@@ -186,11 +204,20 @@ begin
     raise exception 'Thread title is required' using errcode = '22023';
   end if;
 
-  if not exists (
-    select 1 from public.thought_threads t
-    where t.id = p_thread_id and t.user_id = v_user_id
-  ) then
-    raise exception 'Thought Thread not found' using errcode = '42501';
+  select t.id, t.updated_at into v_locked_thread_id, v_current_updated_at
+  from public.thought_threads t
+  where t.id = p_thread_id and t.user_id = v_user_id
+  for update;
+
+  if v_locked_thread_id is null then
+    raise exception 'Thought Thread not found or no longer available' using errcode = 'AK001';
+  end if;
+
+  -- IS DISTINCT FROM treats a null p_expected_updated_at as a guaranteed
+  -- conflict rather than a silently-skipped comparison -- there is no
+  -- legitimate caller with "no version to compare".
+  if v_current_updated_at is distinct from p_expected_updated_at then
+    raise exception 'Thought Thread was modified since it was opened for editing' using errcode = 'AK003';
   end if;
 
   select count(*) into v_expected
@@ -205,7 +232,7 @@ begin
     and a.id = any(coalesce(p_annotation_ids, '{}'::uuid[]));
 
   if v_owned <> v_expected then
-    raise exception 'One or more annotations are unavailable' using errcode = '42501';
+    raise exception 'One or more annotations are unavailable' using errcode = 'AK002';
   end if;
 
   update public.thought_threads
@@ -230,9 +257,9 @@ end;
 $$;
 
 revoke all on function public.create_thought_thread(text, text, text, uuid[]) from public, anon;
-revoke all on function public.replace_thought_thread(uuid, text, text, text, uuid[]) from public, anon;
+revoke all on function public.replace_thought_thread(uuid, text, text, text, uuid[], timestamptz) from public, anon;
 grant execute on function public.create_thought_thread(text, text, text, uuid[]) to authenticated;
-grant execute on function public.replace_thought_thread(uuid, text, text, text, uuid[]) to authenticated;
+grant execute on function public.replace_thought_thread(uuid, text, text, text, uuid[], timestamptz) to authenticated;
 
 -- READER -> THOUGHT THREAD BRIDGE v1, CORRECTION PASS -- see
 -- thought_threads_append_annotation_migration.sql's own header comment for

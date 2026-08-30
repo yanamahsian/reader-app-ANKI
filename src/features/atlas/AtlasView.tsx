@@ -7,6 +7,7 @@ import {
   deleteThoughtThread,
   listThoughtThreads,
   replaceThoughtThread,
+  ThoughtThreadReplaceError,
   type ThoughtThread
 } from "../../api/thoughtThreads";
 import { getBookById } from "../../catalog";
@@ -71,6 +72,14 @@ export function AtlasView({
   const [unavailableId, setUnavailableId] = useState<string | null>(null);
 
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: the updated_at snapshot the
+  // editor was opened at -- the token replaceThoughtThread() must echo
+  // back unchanged. Deliberately set ONLY by openEditThread() and
+  // handleLoadLatestThreadVersion() below, never by loadAtlas()/
+  // refreshThreads() while the editor is open: the whole point is that
+  // this stays frozen at the version the visitor actually started editing
+  // from, even if atlas.threads itself refreshes in the background.
+  const [editingThreadExpectedUpdatedAt, setEditingThreadExpectedUpdatedAt] = useState<string | null>(null);
   const [isThreadComposerOpen, setThreadComposerOpen] = useState(false);
   const [threadTitle, setThreadTitle] = useState("");
   const [threadQuestion, setThreadQuestion] = useState("");
@@ -79,6 +88,13 @@ export function AtlasView({
   const [isSavingThread, setSavingThread] = useState(false);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
+  // True only for the specific "someone else changed this Thread since
+  // you opened it" failure -- gates the "Загрузить актуальную версию"
+  // action below. Every other save failure (auth/thread-unavailable/
+  // annotation-unavailable/generic) shows threadError the same way it
+  // always has, with the composer left open and nothing discarded.
+  const [isThreadConflict, setThreadConflict] = useState(false);
+  const [isLoadingLatestThread, setLoadingLatestThread] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,31 +194,39 @@ export function AtlasView({
 
   function resetThreadComposer(): void {
     setEditingThreadId(null);
+    setEditingThreadExpectedUpdatedAt(null);
     setThreadComposerOpen(false);
     setThreadTitle("");
     setThreadQuestion("");
     setThreadSynthesis("");
     setSelectedAnnotationIds([]);
     setThreadError(null);
+    setThreadConflict(false);
   }
 
   function openCreateThread(): void {
     setEditingThreadId(null);
+    setEditingThreadExpectedUpdatedAt(null);
     setThreadTitle("");
     setThreadQuestion("");
     setThreadSynthesis("");
     setSelectedAnnotationIds([]);
     setThreadError(null);
+    setThreadConflict(false);
     setThreadComposerOpen(true);
   }
 
   function openEditThread(thread: ThoughtThread): void {
     setEditingThreadId(thread.id);
+    // Captured once, here -- see this state's own declaration comment for
+    // why it must not track later atlas.threads refreshes.
+    setEditingThreadExpectedUpdatedAt(thread.updatedAt);
     setThreadTitle(thread.title);
     setThreadQuestion(thread.question ?? "");
     setThreadSynthesis(thread.synthesisNote ?? "");
     setSelectedAnnotationIds(thread.annotationIds.filter(id => annotationById.has(id)));
     setThreadError(null);
+    setThreadConflict(false);
     setThreadComposerOpen(true);
   }
 
@@ -231,6 +255,7 @@ export function AtlasView({
 
     setSavingThread(true);
     setThreadError(null);
+    setThreadConflict(false);
 
     const input = {
       title,
@@ -241,7 +266,14 @@ export function AtlasView({
 
     try {
       if (editingThreadId) {
-        await replaceThoughtThread(editingThreadId, input);
+        if (!editingThreadExpectedUpdatedAt) {
+          // Defensive only -- openEditThread() always sets this together
+          // with editingThreadId, so this should be unreachable. Fail the
+          // same way a real conflict would rather than ever sending a
+          // replace with no version token at all.
+          throw new ThoughtThreadReplaceError("conflict", "Отсутствует версия нити для сохранения.");
+        }
+        await replaceThoughtThread(editingThreadId, input, editingThreadExpectedUpdatedAt);
       } else {
         await createThoughtThread(input);
       }
@@ -250,9 +282,80 @@ export function AtlasView({
       resetThreadComposer();
     } catch (saveError) {
       console.error("Thought Thread save failed:", saveError);
-      setThreadError("Не удалось сохранить нить мысли.");
+
+      if (saveError instanceof ThoughtThreadReplaceError) {
+        switch (saveError.kind) {
+          case "conflict":
+            // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: this is the whole
+            // point of this feature -- never silently merge, never
+            // auto-discard the visitor's in-progress edit. The composer
+            // stays open, title/question/synthesis/selectedAnnotationIds
+            // are untouched, and the visitor explicitly decides via
+            // handleLoadLatestThreadVersion() below.
+            setThreadConflict(true);
+            setThreadError(
+              "Эта нить изменилась в другом месте. Загрузите актуальную версию перед повторным сохранением."
+            );
+            break;
+          case "thread_unavailable":
+            setThreadError("Эта нить мысли больше не существует.");
+            break;
+          case "annotation_unavailable":
+            setThreadError("Один или несколько выбранных фрагментов больше недоступны. Обновите страницу и попробуйте снова.");
+            break;
+          case "not_authenticated":
+            setThreadError("Сессия истекла. Войдите снова, чтобы сохранить нить.");
+            break;
+          default:
+            setThreadError("Не удалось сохранить нить мысли.");
+        }
+      } else {
+        setThreadError("Не удалось сохранить нить мысли.");
+      }
     } finally {
       setSavingThread(false);
+    }
+  }
+
+  // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: the visitor's explicit
+  // response to a save conflict -- fetches a fresh, RLS-backed read of
+  // this exact Thread and replaces the composer's fields with it,
+  // including a fresh editingThreadExpectedUpdatedAt so the next save
+  // attempt is based on the version actually just loaded. Deliberately
+  // never called automatically -- only this one button click discards the
+  // visitor's unsaved local edits, and only after they were already shown
+  // the conflict message.
+  async function handleLoadLatestThreadVersion(): Promise<void> {
+    if (!editingThreadId) return;
+
+    setLoadingLatestThread(true);
+    try {
+      const threads = await listThoughtThreads();
+      const fresh = threads.find(candidate => candidate.id === editingThreadId);
+
+      if (!fresh) {
+        // Deleted elsewhere in the meantime -- nothing left to reload.
+        resetThreadComposer();
+        setThreadError("Эта нить мысли больше не существует.");
+        return;
+      }
+
+      setThreadTitle(fresh.title);
+      setThreadQuestion(fresh.question ?? "");
+      setThreadSynthesis(fresh.synthesisNote ?? "");
+      setSelectedAnnotationIds(fresh.annotationIds.filter(id => annotationById.has(id)));
+      setEditingThreadExpectedUpdatedAt(fresh.updatedAt);
+      setAtlas(current => ({
+        ...current,
+        threads: current.threads.map(candidate => (candidate.id === fresh.id ? fresh : candidate))
+      }));
+      setThreadConflict(false);
+      setThreadError(null);
+    } catch (loadError) {
+      console.error("Failed to load the latest Thought Thread version:", loadError);
+      setThreadError("Не удалось загрузить актуальную версию нити. Попробуйте ещё раз.");
+    } finally {
+      setLoadingLatestThread(false);
     }
   }
 
@@ -402,6 +505,24 @@ export function AtlasView({
                     );
                   })}
                 </div>
+
+                {isThreadConflict && (
+                  <>
+                    <p className="settings-section-note">
+                      Это заменит несохранённые изменения в форме актуальной версией из базы.
+                    </p>
+                    <div className="notes-card-actions">
+                      <button
+                        type="button"
+                        className="text-link"
+                        disabled={isLoadingLatestThread}
+                        onClick={() => void handleLoadLatestThreadVersion()}
+                      >
+                        {isLoadingLatestThread ? "Загрузка…" : "Загрузить актуальную версию"}
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 <div className="notes-card-actions">
                   <button

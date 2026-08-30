@@ -223,23 +223,110 @@ export async function createThoughtThread(input: ThoughtThreadInput): Promise<st
   return id;
 }
 
-// Atomic metadata + membership replacement. This avoids showing success after only half of an
-// edit has reached Supabase. Unlike create, 0/1 items are legal so a Thread can survive source
-// annotation deletion without destroying the user's synthesis.
-export async function replaceThoughtThread(threadId: string, input: ThoughtThreadInput): Promise<void> {
-  const { headers } = await authContext();
-  const response = await fetch(`${RPC_ENDPOINT}/replace_thought_thread`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      p_thread_id: threadId,
-      p_title: input.title,
-      p_question: input.question,
-      p_synthesis_note: input.synthesisNote,
-      p_annotation_ids: input.annotationIds
-    })
-  });
-  await throwOnError(response, "replace");
+// THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: a stable, dedicated
+// discriminant for replaceThoughtThread()'s failure modes -- mirrors
+// ThoughtThreadAppendError's own shape (same reasoning: a caller here,
+// src/features/atlas/AtlasView.tsx's Thread editor, needs to tell
+// "session expired" apart from "Thread no longer exists" apart from
+// "annotation no longer available" apart from "someone else changed this
+// Thread since you opened it" apart from an ordinary network/server
+// failure, and matching message text is fragile). "conflict" is new:
+// there was never a stale-overwrite possibility for this RPC before, so
+// no prior kind covers it.
+export type ThoughtThreadReplaceErrorKind =
+  | "not_authenticated"
+  | "thread_unavailable"
+  | "annotation_unavailable"
+  | "conflict"
+  | "generic";
+
+export class ThoughtThreadReplaceError extends Error {
+  readonly kind: ThoughtThreadReplaceErrorKind;
+  constructor(kind: ThoughtThreadReplaceErrorKind, message: string) {
+    super(message);
+    this.name = "ThoughtThreadReplaceError";
+    this.kind = kind;
+  }
+}
+
+// Mirrors the distinct, stable SQLSTATEs replace_thought_thread's own SQL
+// raises (see supabase/sql/thought_threads_optimistic_concurrency_migration.sql).
+// AK001/AK002 are the SAME codes append_annotation_to_thought_thread
+// already uses for the same two meanings (replace_thought_thread used to
+// raise plain 42501 for both -- the SAME code reserved for
+// "not authenticated" -- which would have made a not-found Thread or an
+// unavailable annotation misclassify as a session expiry here; that was
+// fixed as part of introducing this typed classification, not left as
+// latent ambiguity). AK003 is new: a genuine optimistic-concurrency
+// conflict, never raised by any other function in this schema. The
+// auth-specific codes are deliberately NOT listed here -- see
+// isAuthRejection() above, the single shared source of truth also used
+// by appendAnnotationToThoughtThread() and listThoughtThreads().
+const REPLACE_ERROR_CODE_KIND: Record<string, ThoughtThreadReplaceErrorKind> = {
+  "AK001": "thread_unavailable",
+  "AK002": "annotation_unavailable",
+  "AK003": "conflict"
+};
+
+const REPLACE_FAILURE_MESSAGE = "Не удалось сохранить нить мысли.";
+
+// Atomic metadata + membership replacement, now gated on optimistic
+// concurrency control: expectedUpdatedAt must be the exact updated_at
+// string this caller most recently read for this Thread (never
+// reformatted through a client-side Date object, which would risk
+// truncating precision the server compares exactly). If the Thread's
+// current updated_at no longer matches -- someone else (another Atlas
+// editor, or Reader's own atomic append) saved a change since this
+// caller last read the Thread -- the server performs NO write at all
+// (see replace_thought_thread's own SQL) and this throws a "conflict"
+// kind instead. 0/1 items remain legal, same as before, so a Thread can
+// survive source annotation deletion without destroying the user's
+// synthesis.
+export async function replaceThoughtThread(
+  threadId: string,
+  input: ThoughtThreadInput,
+  expectedUpdatedAt: string
+): Promise<void> {
+
+  let headers: Record<string, string>;
+  try {
+    ({ headers } = await authContext());
+  } catch {
+    throw new ThoughtThreadReplaceError("not_authenticated", NOT_AUTHENTICATED);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${RPC_ENDPOINT}/replace_thought_thread`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        p_thread_id: threadId,
+        p_title: input.title,
+        p_question: input.question,
+        p_synthesis_note: input.synthesisNote,
+        p_annotation_ids: input.annotationIds,
+        p_expected_updated_at: expectedUpdatedAt
+      })
+    });
+  } catch (networkError) {
+    console.error("thoughtThreads replace network failure:", networkError);
+    throw new ThoughtThreadReplaceError("generic", REPLACE_FAILURE_MESSAGE);
+  }
+
+  if (response.ok) return;
+
+  const detail = await response.json().catch(() => null) as { code?: string } | null;
+  console.error(`thoughtThreads replace failed (${response.status}):`, detail?.code ?? "");
+
+  // Same precedence as appendAnnotationToThoughtThread(): isAuthRejection()
+  // first (covers a PostgREST-level pre-RPC JWT rejection too, not just
+  // the RPC's own 42501), then the RPC-specific code map, then generic.
+  const kind: ThoughtThreadReplaceErrorKind = isAuthRejection(response.status, detail?.code)
+    ? "not_authenticated"
+    : (detail?.code && REPLACE_ERROR_CODE_KIND[detail.code]) || "generic";
+  throw new ThoughtThreadReplaceError(kind, REPLACE_FAILURE_MESSAGE);
+
 }
 
 // Explicit low-level relation operations are available for future smaller interactions. The
