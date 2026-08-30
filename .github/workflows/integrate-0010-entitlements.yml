@@ -1,0 +1,104 @@
+name: Prepare Subscription AI Entitlements 0010
+
+on:
+  push:
+    branches:
+      - tmp-entitlements-transport
+    paths:
+      - '.github/workflows/integrate-0010-entitlements.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout transport
+        uses: actions/checkout@v4
+        with:
+          ref: tmp-entitlements-transport
+          fetch-depth: 0
+
+      - name: Reconstruct exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .tmp/entitlements/chunk0.b64 .tmp/entitlements/chunk1.b64 .tmp/entitlements/chunk2.b64 .tmp/entitlements/chunk3.b64 .tmp/entitlements/chunk4.b64 | base64 -d | gunzip > /tmp/0010.patch
+          echo '71c805db44721d59d18c7bc739d8a46d152b7cd5ba4c30b0389651ea5a5c3281  /tmp/0010.patch' | sha256sum -c -
+
+      - name: Apply to exact production baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach 293bf2b513c324e8541541b8531756b0a3141420
+          git config user.name 'AN.KI Integration'
+          git config user.email 'actions@users.noreply.github.com'
+          git am /tmp/0010.patch
+
+      - name: Correct malformed entitlement snapshot semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/api/aiEntitlements.ts')
+          s = p.read_text()
+          old = '  const effectivePlan = isEffectivePlan(body.effective_plan) ? body.effective_plan : "free";\n'
+          new = '''  if (!isEffectivePlan(body.effective_plan)) {\n    throw new AIEntitlementError("service_unavailable", {\n      message: "Entitlement snapshot returned an unknown effective plan"\n    });\n  }\n  const effectivePlan = body.effective_plan;\n'''
+          if old not in s:
+              raise SystemExit('expected malformed-plan fallback not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+          git add src/api/aiEntitlements.ts
+          git commit -m 'Harden entitlement snapshot plan validation'
+
+      - name: Verify scope and safety invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only 293bf2b513c324e8541541b8531756b0a3141420..HEAD | sort > /tmp/files
+          cat > /tmp/expected <<'EOF'
+          src/api/ai.ts
+          src/api/aiEntitlements.ts
+          src/api/atlasContradictions.ts
+          src/api/atlasQuestions.ts
+          src/api/atlasUnfinishedLines.ts
+          src/features/atlas/AtlasContradictionsSection.tsx
+          src/features/atlas/AtlasQuestionsSection.tsx
+          src/features/atlas/AtlasUnfinishedLinesSection.tsx
+          src/features/reader/engine/readerEngine.ts
+          src/features/subscription/SubscriptionView.tsx
+          supabase/functions/omnia-ai/index.ts
+          supabase/sql/ai_entitlements_foundation_v1.sql
+          EOF
+          sort -o /tmp/expected /tmp/expected
+          diff -u /tmp/expected /tmp/files
+          grep -q 'handleTranslate(req, body)' supabase/functions/omnia-ai/index.ts
+          grep -q 'handleExplain(req, body)' supabase/functions/omnia-ai/index.ts
+          grep -q 'consume_ai_allowance' supabase/functions/omnia-ai/index.ts
+          ! grep -q 'service_role' src/api/ai.ts src/api/aiEntitlements.ts
+          ! grep -q 'body\.user_id\|body\.plan' supabase/functions/omnia-ai/index.ts
+          grep -q 'unknown effective plan' src/api/aiEntitlements.ts
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+        continue-on-error: true
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: |
+          npm run build
+          test -f dist/index.html
+
+      - name: Publish clean integration branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:refs/heads/tmp-entitlements-ready --force
