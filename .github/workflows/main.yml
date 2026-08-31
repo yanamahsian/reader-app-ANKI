@@ -47,6 +47,9 @@ jobs:
           fi
 
       - name: Build
+        env:
+          VITE_PADDLE_ENV: sandbox
+          VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9
         run: npm run build
 
       - name: Verify build output exists
