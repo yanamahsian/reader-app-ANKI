@@ -1,6 +1,7 @@
 import type { Book } from "../types";
 import type { FormatLoader, LoadedDocument, LoadedChapter } from "./types";
 import { normalizeBook, paginateText, formatPage } from "../pagination";
+import { getValidAccessToken } from "../../../../auth/supabaseAuth";
 
 // Same requirement, same reasoning as src/catalog/remoteCatalog.ts:
 // Supabase's gateway requires a valid `apikey` header on every Edge
@@ -11,6 +12,16 @@ import { normalizeBook, paginateText, formatPage } from "../pagination";
 // current docs, publishable/secret keys are not JWTs and the
 // platform rejects them if sent as a bearer token.
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy";
+
+// FREE / LIBRARY CATALOG BOUNDARY v1: paid visitors must send their own
+// current Supabase Auth access token to omnia-book-content. Guests omit
+// Authorization completely and retain normal Free-corpus access.
+async function buildContentRequestHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { apikey: SUPABASE_PUBLISHABLE_KEY };
+  const accessToken = await getValidAccessToken();
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  return headers;
+}
 
 // AN.KI's own normalized reader content (Phase 9) — produced entirely
 // server-side by ingestion (see supabase-functions/omnia-ingest and
@@ -82,12 +93,22 @@ export const ankiJsonLoader: FormatLoader = {
   async load(book: Book): Promise<LoadedDocument> {
 
     const response = await fetch(book.url, {
-      headers: {
-        "apikey": SUPABASE_PUBLISHABLE_KEY
-      }
+      headers: await buildContentRequestHeaders()
     });
 
     if (!response.ok) {
+      if (response.status === 403) {
+        let code: string | undefined;
+        try {
+          const body = await response.clone().json();
+          code = typeof body?.code === "string" ? body.code : undefined;
+        } catch {
+          // Keep the generic status message for non-JSON failures.
+        }
+        if (code === "catalog_plan_required") {
+          throw new Error("catalog_plan_required");
+        }
+      }
       throw new Error(`Failed to fetch AN.KI normalized content: ${response.status}`);
     }
 
