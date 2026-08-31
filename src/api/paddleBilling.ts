@@ -326,3 +326,86 @@ export async function createPaddleManagePortalSession(signal?: AbortSignal): Pro
 
   return body.portalUrl;
 }
+
+// ==========================================================================
+// 4. paddle-checkout Edge Function, action:"change_subscription"
+// ==========================================================================
+// CORRECTIVE-PASS ADDITION. An independent review found that upgrade/
+// downgrade routed through the ordinary Paddle Customer Portal (function 3
+// above) was wrong: Paddle's Customer Portal plan-change capability is
+// currently EARLY ACCESS (requires product collections / special dashboard
+// access) and this codebase must not depend on it. This function instead
+// calls the general-availability paddle-checkout action:"change_subscription"
+// (which itself calls Paddle's own `PATCH /subscriptions/{id}` REST API
+// server-side -- see that Edge Function's own handleChangeSubscription for
+// the full reasoning and proration-mode policy).
+//
+// Only ever sends {plan, interval} -- never a subscription_id or price_id,
+// same discipline as createPaddleCheckout above; the server alone resolves
+// which existing Paddle subscription belongs to the caller.
+//
+// Like every other call in this file, a 200 here is NOT proof the plan
+// changed -- it only means Paddle accepted the update request. The actual
+// entitlement change happens only once the resulting `subscription.updated`
+// webhook is verified server-side. Callers (SubscriptionView) must treat
+// this exactly like createPaddleCheckout's own result: start the same
+// bounded post-checkout confirmation polling, never set local plan state
+// from this call's success.
+interface PaddleChangeSubscriptionResponseBody {
+  status?: string;
+  error?: string;
+  message?: string;
+}
+
+export async function changeSubscriptionPlan(
+  plan: PaddlePlan,
+  interval: PaddleInterval,
+  signal?: AbortSignal
+): Promise<void> {
+  const token = await getValidAccessToken();
+  if (!token) throw new BillingError("auth_required");
+
+  let response: Response;
+  try {
+    response = await fetch(CHECKOUT_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_PUBLISHABLE_KEY
+      },
+      signal,
+      body: JSON.stringify({ action: "change_subscription", plan, interval })
+    });
+  } catch (networkError) {
+    if ((networkError as Error).name === "AbortError") throw networkError;
+    console.error("paddle-checkout (change_subscription) network failure:", networkError);
+    throw new BillingError("service_unavailable");
+  }
+
+  if (response.status === 401) {
+    throw new BillingError("auth_required");
+  }
+
+  if (!response.ok) {
+    let body: PaddleChangeSubscriptionResponseBody | null = null;
+    try {
+      body = (await response.json()) as PaddleChangeSubscriptionResponseBody;
+    } catch {
+      body = null;
+    }
+    // 404 (no_active_subscription) and 400 (invalid_plan/invalid_interval/
+    // already_on_plan) are both real, distinguishable client-facing
+    // outcomes -- surfaced as invalid_request so SubscriptionView can show
+    // an honest message rather than the generic service_unavailable one.
+    if (response.status === 404 || response.status === 400) {
+      throw new BillingError("invalid_request", body?.error ?? body?.message ?? undefined);
+    }
+    console.error(`paddle-checkout (change_subscription) failed with status ${response.status}`);
+    throw new BillingError("service_unavailable");
+  }
+
+  // Deliberately discards the response body -- {status:"ok"} carries no
+  // information this caller needs to act on (see this function's own
+  // header on why a 200 here is not proof of anything by itself).
+}

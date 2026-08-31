@@ -183,6 +183,18 @@ interface SignatureCheckResult {
 // missing header, malformed header, missing secret, expired timestamp, or
 // a mismatched digest -- so the caller can uniformly respond 401 with zero
 // DB interaction in every case.
+// CORRECTION (0013): the header can legitimately carry MORE THAN ONE `h1`
+// component during Paddle's own secret rotation window (both the old and
+// new destination secret's digest sent together so neither side of a
+// rotation drops events) -- confirmed by the independent review of patch
+// 0012, which found the previous `Map<string,string>` parse silently kept
+// only the LAST `h1` and discarded any earlier one. A rotation-window
+// delivery whose valid digest happened to be the FIRST `h1` (computed with
+// the secret this function still has configured) would then be rejected as
+// a forged signature. Every `h1` occurrence is now collected into an array
+// and the expected digest is timing-safe-compared against EACH ONE --
+// verification succeeds if ANY supplied `h1` matches, exactly mirroring
+// what Paddle's own multi-secret rotation model requires.
 async function verifyPaddleSignature(
   header: string | null,
   rawBody: string,
@@ -190,15 +202,19 @@ async function verifyPaddleSignature(
 ): Promise<SignatureCheckResult> {
   if (!header) return { ok: false, reason: "missing_signature_header" };
 
-  const parts = new Map<string, string>();
+  let ts: string | null = null;
+  const h1Candidates: string[] = [];
   for (const segment of header.split(";")) {
-    const [key, value] = segment.split("=");
-    if (key && value) parts.set(key.trim(), value.trim());
+    const eqIndex = segment.indexOf("=");
+    if (eqIndex === -1) continue;
+    const key = segment.slice(0, eqIndex).trim();
+    const value = segment.slice(eqIndex + 1).trim();
+    if (!key || !value) continue;
+    if (key === "ts") ts = value;
+    else if (key === "h1") h1Candidates.push(value);
   }
 
-  const ts = parts.get("ts");
-  const h1 = parts.get("h1");
-  if (!ts || !h1) return { ok: false, reason: "malformed_signature_header" };
+  if (!ts || h1Candidates.length === 0) return { ok: false, reason: "malformed_signature_header" };
 
   const tsNumber = Number(ts);
   if (!Number.isFinite(tsNumber)) return { ok: false, reason: "malformed_timestamp" };
@@ -209,7 +225,11 @@ async function verifyPaddleSignature(
   }
 
   const expectedDigest = await hmacSha256Hex(secret, `${ts}:${rawBody}`);
-  if (!timingSafeEqual(expectedDigest, h1.toLowerCase())) {
+  // Every candidate is compared -- never short-circuited on the first
+  // mismatch in a way that would skip a later, valid one -- and every
+  // comparison stays timing-safe individually.
+  const matched = h1Candidates.some((candidate) => timingSafeEqual(expectedDigest, candidate.toLowerCase()));
+  if (!matched) {
     return { ok: false, reason: "signature_mismatch" };
   }
 

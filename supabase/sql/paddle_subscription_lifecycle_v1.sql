@@ -225,9 +225,14 @@ revoke all privileges on table public.billing_webhook_events from anon, authenti
 -- this function returns immediately with zero further writes. Nothing
 -- after that first statement can ever run twice for the same event_id.
 --
--- OUT-OF-ORDER SAFETY: after passing the idempotency check, the target
--- billing_subscriptions row (if it already exists) is read with
--- `for update` and its last_event_at compared against this event's own
+-- OUT-OF-ORDER SAFETY: after passing the idempotency check, this function
+-- takes a transaction-scoped advisory lock keyed on the subscription id
+-- (see the pg_advisory_xact_lock call below) BEFORE reading
+-- billing_subscriptions -- this is the fix for a genuine concurrency hole
+-- an independent review of the first version of this function found (see
+-- that call's own comment for the exact race it closes). Only once that
+-- lock is held is the target billing_subscriptions row (if it already
+-- exists) read, and its last_event_at compared against this event's own
 -- occurred_at. An event that is not newer is recorded in the ledger as
 -- ignored_stale and never allowed to write billing_subscriptions or
 -- entitlement_grants -- state can only move forward in provider time.
@@ -303,10 +308,31 @@ begin
     return jsonb_build_object('status', 'duplicate_ignored', 'subscription_id', p_provider_subscription_id);
   end if;
 
-  -- OUT-OF-ORDER GUARD. `for update` on the existing row (if any) also
-  -- serializes concurrent event applications for the same subscription --
-  -- two overlapping webhook deliveries for the same provider_subscription_id
-  -- can never interleave their writes.
+  -- CORRECTION (0013) -- BLOCKER FIX: `select ... for update` alone only
+  -- serializes concurrent events once a billing_subscriptions row already
+  -- exists. For a subscription's FIRST-EVER event, no row exists yet, so
+  -- two concurrent deliveries (e.g. an out-of-order retry racing a newer
+  -- event, both for a brand-new subscription) would both see zero rows,
+  -- both pass the staleness check below (nothing to compare against yet),
+  -- and then both reach the INSERT ... ON CONFLICT DO UPDATE further down
+  -- -- whichever happens to commit LAST would win, regardless of which
+  -- event is actually newer in provider time. An independent review of
+  -- the first version of this function (patch 0012) found exactly this
+  -- hole. A transaction-scoped advisory lock keyed on the subscription id
+  -- closes it: it is acquired here, BEFORE the row is read, and every
+  -- concurrent call for the SAME provider_subscription_id -- whether or
+  -- not a row exists yet -- is fully serialized through this one point,
+  -- never a global lock (a different subscription id hashes to a
+  -- different lock key and proceeds independently). pg_advisory_xact_lock
+  -- auto-releases at transaction end (commit or rollback) -- no separate
+  -- unlock call is needed or correct here.
+  perform pg_advisory_xact_lock(hashtextextended('paddle_subscription:' || p_provider_subscription_id, 0));
+
+  -- OUT-OF-ORDER GUARD. Now that concurrent callers for this exact
+  -- subscription id are fully serialized by the advisory lock above, this
+  -- read (plus its own `for update`, kept as defense in depth for any
+  -- writer that reaches this row outside this function) is race-free
+  -- regardless of whether a row already existed.
   select last_event_at into v_existing_last_event_at
   from public.billing_subscriptions
   where provider_subscription_id = p_provider_subscription_id
@@ -548,3 +574,70 @@ $$;
 
 revoke all on function public.get_my_paddle_customer_id() from public, anon;
 grant execute on function public.get_my_paddle_customer_id() to authenticated;
+
+-- ==========================================================================
+-- 6. get_my_active_paddle_subscription -- narrow internal helper for the
+--    "change plan/interval" flow (CORRECTION 0013)
+-- ==========================================================================
+-- The independent review of patch 0012 found that routing an upgrade/
+-- downgrade through Paddle's Customer Portal assumed a portal capability
+-- ("Upgrade and downgrade subscriptions in the customer portal") that is
+-- currently Early Access, not something AN.KI should depend on for a
+-- normal product flow. The general-availability mechanism is the
+-- subscription update API itself -- PATCH /subscriptions/{id} with an
+-- `items` array and an explicit `proration_billing_mode` (confirmed
+-- against developer.paddle.com/build/subscriptions/replace-products-
+-- prices-upgrade-downgrade/ during this correction) -- which needs
+-- Paddle's own subscription id, not this project's user id or the Paddle
+-- customer id get_my_paddle_customer_id() already exposes.
+--
+-- Same "forward the caller's own token, let auth.uid() decide" pattern as
+-- every other RPC in this file -- paddle-checkout's new "change_subscription"
+-- action calls this using the caller's own forwarded session token, never
+-- a service-role client, and the browser itself never calls this directly
+-- (nothing in src/api/paddleBilling.ts exposes it).
+--
+-- Deliberately returns only an ACTIVE-ish subscription (status in active/
+-- trialing/past_due -- the exact same predicate get_my_billing_snapshot's
+-- own manage_subscription_available already uses) -- there is nothing
+-- meaningful to "change the plan of" for a lapsed/cancelled subscription,
+-- and the caller (paddle-checkout) treats a null result as
+-- "no_active_subscription", never as license to fall back to guessing an
+-- id from elsewhere.
+create or replace function public.get_my_active_paddle_subscription()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_row record;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication required' using errcode = 'AK010';
+  end if;
+
+  select provider_subscription_id, plan, billing_interval
+    into v_row
+  from public.billing_subscriptions
+  where user_id = v_user_id
+    and status in ('active', 'trialing', 'past_due')
+  order by updated_at desc
+  limit 1;
+
+  if not found then
+    return null;
+  end if;
+
+  return jsonb_build_object(
+    'subscription_id', v_row.provider_subscription_id,
+    'plan', v_row.plan,
+    'billing_interval', v_row.billing_interval
+  );
+end;
+$$;
+
+revoke all on function public.get_my_active_paddle_subscription() from public, anon;
+grant execute on function public.get_my_active_paddle_subscription() to authenticated;

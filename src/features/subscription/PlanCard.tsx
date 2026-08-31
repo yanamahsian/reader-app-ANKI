@@ -18,9 +18,12 @@ export interface PlanDef {
 // `disabled` CTA. SubscriptionView (which already owns buildPlans/
 // PLAN_DEFS) is the single place that decides what a card's button says
 // and does — guest vs authenticated, current vs not, whether a
-// non-current paid plan should start a new Paddle checkout or open the
-// Customer Portal (instruction 21-22) — this component stays a pure
-// renderer of whatever it's handed, same separation of concerns as
+// non-current paid plan should start a new Paddle checkout (via a
+// Paddle.js overlay) or change an existing subscription's plan/interval
+// via Paddle's general-availability subscription-update API
+// (CORRECTIVE-PASS: never via the Customer Portal, whose own
+// upgrade/downgrade UI is Paddle Early Access) — this component stays a
+// pure renderer of whatever it's handed, same separation of concerns as
 // PLAN_DEFS/buildPlans already established.
 export interface PlanCardCta {
   label: string;

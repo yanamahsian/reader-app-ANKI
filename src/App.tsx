@@ -20,6 +20,7 @@ import { SubscriptionView } from "./features/subscription/SubscriptionView";
 import { SettingsView } from "./features/settings/SettingsView";
 import { SupportView } from "./features/support/SupportView";
 import { loadRemoteCatalog } from "./catalog";
+import { ensurePaddleInitialized } from "./api/paddleJs";
 import type { Book } from "./features/reader/engine/types";
 
 type View =
@@ -182,6 +183,25 @@ export function App() {
       });
   }, []);
 
+  // PAYMENTS & SUBSCRIPTION LIFECYCLE v1, CORRECTIVE PASS: Paddle.js must be
+  // loaded and initialized on THIS page (AN.KI's single entry point)
+  // regardless of which `view` is currently showing -- not only while
+  // SubscriptionView happens to be mounted. Two reasons, both from the
+  // independent review: (1) SubscriptionView's own checkout button needs
+  // Paddle.Checkout.open() ready by the time a visitor clicks it, and a
+  // per-view init would race that first click; (2) Paddle's own "default
+  // payment link" mechanism (e.g. a payment-method-update link from a
+  // dunning email, which appends `?_ptxn=<id>` to whatever URL is
+  // configured as the account's default payment link) auto-opens Checkout
+  // ONLY if Paddle.js is already initialized on the page that link lands
+  // on -- so this has to run at the root, on every load, independent of
+  // navigation. Never awaited here -- a slow/failed Paddle.js load must
+  // never block the rest of the app from rendering (instruction 33); see
+  // ensurePaddleInitialized's own comment for its fail-closed behaviour.
+  useEffect(() => {
+    void ensurePaddleInitialized();
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("openTestEpub") === "1") {
@@ -189,17 +209,23 @@ export function App() {
       setView("reader");
     }
 
-    // PAYMENTS & SUBSCRIPTION LIFECYCLE v1: Paddle's hosted checkout
-    // redirects the browser back to this exact URL
-    // (`/subscription?checkout=success`) on completion -- a real, full
-    // page navigation, not an in-app transition, so it must be routed
-    // here on mount exactly like openTestEpub above. This ONLY routes the
-    // visitor to the Subscription screen -- it never sets any plan/
-    // entitlement state itself (instruction 4: a checkout-success redirect
-    // is optimistic UX only, never proof of payment). SubscriptionView
-    // itself reads (and clears) this same query param again on its own
-    // mount to decide whether to show its bounded post-checkout
-    // confirmation polling -- see that component's own comment.
+    // PAYMENTS & SUBSCRIPTION LIFECYCLE v1: `?checkout=success` on this
+    // page's own URL. CORRECTIVE-PASS NOTE: since the checkout itself now
+    // opens as a Paddle.js OVERLAY (see api/paddleJs.ts) rather than a
+    // full-page redirect to Paddle's hosted checkout, this param is no
+    // longer the primary post-checkout signal -- Paddle's own
+    // "checkout.completed" eventCallback fires in-page, with no navigation
+    // at all, and is what SubscriptionView now reacts to first. This
+    // remains wired up as the documented FALLBACK path (Paddle.js's own
+    // successUrl setting, honoured if the overlay's normal in-page flow
+    // isn't available for a given browser) -- so it still must be routed
+    // to the Subscription screen here on mount, exactly like openTestEpub
+    // above, and it still never sets any plan/entitlement state itself
+    // (instruction 4: a checkout-success redirect is optimistic UX only,
+    // never proof of payment). SubscriptionView itself reads (and clears)
+    // this same query param again on its own mount to decide whether to
+    // show its bounded post-checkout confirmation polling -- see that
+    // component's own comment.
     if (params.get("checkout") === "success") {
       setView("subscription");
     }

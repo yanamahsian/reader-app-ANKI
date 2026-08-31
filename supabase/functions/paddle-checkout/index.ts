@@ -11,18 +11,23 @@
 //     can open in Paddle's own Checkout overlay.
 //   * action:"portal" -- given a real, authenticated visitor who already
 //     has a Paddle subscription, creates a Paddle Customer Portal session
-//     URL for the "Manage subscription" flow (instruction 29) AND for
-//     upgrade/downgrade (instruction 21-22: Paddle's own Customer Portal /
-//     subscription-update flow is the mechanism for changing an EXISTING
-//     subscription's plan -- this codebase never builds custom payment UI
-//     for that, and never starts a second, parallel checkout for a visitor
-//     who already has an active subscription).
-// Neither action ever grants entitlement by itself -- only a verified
+//     URL for cancellation, invoices, and payment-method management only.
+//   * action:"change_subscription" -- CORRECTIVE-PASS ADDITION. Given a
+//     real, authenticated visitor with an existing active subscription and
+//     a {plan, interval} target, calls Paddle's general-availability
+//     `PATCH /subscriptions/{id}` API to change its plan/interval. This
+//     replaces the original 0012 design's assumption that the Customer
+//     Portal itself could do plan changes -- an independent review found
+//     that Portal-driven upgrade/downgrade is currently Paddle EARLY
+//     ACCESS (requires product collections / special dashboard access) and
+//     must not be depended on. See handleChangeSubscription below for the
+//     full reasoning and the proration-mode policy.
+// No action ever grants entitlement by itself -- only a verified
 // paddle-webhook event does that (see that function and
 // apply_paddle_subscription_event). checkout returns a transaction id;
-// portal returns a portal URL; SubscriptionView treats both purely as
-// "now go complete this with Paddle", never as proof anything already
-// happened.
+// portal returns a portal URL; change_subscription returns only
+// {status:"ok"}; SubscriptionView treats all three purely as "now go
+// complete this with Paddle", never as proof anything already happened.
 //
 // AUTHENTICATION -- action-level, not gateway verify_jwt=true (instruction
 // 15's explicit fallback: "verify_jwt=true if compatible, else action-level
@@ -274,6 +279,170 @@ async function handleCheckout(user: AuthenticatedUser, body: Record<string, unkn
   });
 }
 
+// PLAN RANK -- used only to decide upgrade vs downgrade direction for the
+// proration-mode choice below. Free is never a Paddle plan (see this
+// file's header) so it never appears here; a rank table is enough because
+// there are only three paid tiers and their ordering never changes at
+// runtime.
+const PLAN_RANK: Record<Plan, number> = { library: 1, atlas: 2, academy: 3 };
+
+// PRORATION MODE -- corrective-pass fix (independent review, blocker #3):
+// the Paddle Customer Portal's own plan-change UI is currently Early
+// Access (requires product collections / special dashboard access) and
+// this codebase must not depend on it. This handler instead calls the
+// general-availability `PATCH /subscriptions/{id}` API directly, and must
+// choose an explicit `proration_billing_mode` (Paddle requires one; there
+// is no server-side default this function can silently rely on).
+//
+// v1 semantics, derived from Paddle's own documented constraints (verified
+// via developer.paddle.com during this task, not guessed):
+//   * Upgrade, same billing interval -> "prorated_immediately" (explicitly
+//     specified by the review: charge/credit the difference right away).
+//   * Downgrade, same billing interval -> "prorated_next_billing_period"
+//     (the review asked for "an intentional billing semantic" for
+//     downgrades; this defers the lower price to the next renewal instead
+//     of issuing an immediate credit, which is the standard SaaS-friendly
+//     downgrade behaviour and is a real, documented Paddle mode).
+//   * ANY billing-interval change (month<->year), regardless of plan rank
+//     direction -- ALWAYS "prorated_immediately". This is not a choice:
+//     Paddle's documentation states `prorated_next_billing_period` is not
+//     a valid mode for billing-frequency changes, so the same-interval
+//     downgrade rule above cannot be applied when the interval also
+//     changes; `prorated_immediately` is valid for both frequency and
+//     plan changes, so it is the only mode usable for that combination.
+function chooseProrationMode(
+  currentPlan: Plan,
+  currentInterval: Interval,
+  targetPlan: Plan,
+  targetInterval: Interval,
+): "prorated_immediately" | "prorated_next_billing_period" {
+  if (targetInterval !== currentInterval) return "prorated_immediately";
+  return PLAN_RANK[targetPlan] >= PLAN_RANK[currentPlan]
+    ? "prorated_immediately"
+    : "prorated_next_billing_period";
+}
+
+// ACTION: "change_subscription" -- corrective-pass addition. Changes the
+// PLAN and/or INTERVAL of the caller's own EXISTING active Paddle
+// subscription, replacing the Early-Access Customer-Portal plan-change
+// flow the original 0012 patch mistakenly relied on. Input is ONLY
+// {plan, interval} -- exactly like action:"checkout" -- never a
+// subscription_id or price_id from the client (same §37 Checkout D/E/F
+// reasoning as handleCheckout: the server alone decides which Paddle
+// objects are touched, driven only by the caller's own verified identity).
+//
+// This function NEVER mutates entitlement_grants or billing_subscriptions
+// itself. A successful PATCH here only means Paddle has accepted the
+// change; the actual plan/interval AN.KI grants the user is decided solely
+// by the resulting `subscription.updated` webhook once paddle-webhook
+// verifies and applies it via the existing, unmodified
+// apply_paddle_subscription_event RPC. This mirrors handleCheckout's own
+// "this endpoint never grants anything by itself" contract.
+async function handleChangeSubscription(
+  supabaseUrl: string,
+  anonKey: string,
+  authorization: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const paddleApiKey = Deno.env.get("PADDLE_API_KEY");
+
+  const targetPlan = body.plan;
+  const targetInterval = body.interval;
+
+  if (!isPlan(targetPlan)) {
+    return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
+  }
+  if (!isInterval(targetInterval)) {
+    return jsonResponse({ status: "error", error: "invalid_interval", message: "interval must be month or year" }, 400);
+  }
+
+  const targetPriceId = resolvePriceId(targetPlan, targetInterval);
+  if (!targetPriceId || !paddleApiKey) {
+    console.error(`paddle-checkout misconfigured: missing price id or PADDLE_API_KEY for ${targetPlan}/${targetInterval}`);
+    return jsonResponse({ status: "error", error: "checkout_service_unavailable" }, 503);
+  }
+
+  // Forwards the caller's OWN token -- get_my_active_paddle_subscription()
+  // is auth.uid()-only (see supabase/sql/paddle_subscription_lifecycle_v1.
+  // sql, section 6), so this can never read or change another visitor's
+  // subscription. This is the ONLY source of the Paddle subscription id
+  // this handler ever uses -- never a client-supplied id.
+  let rpcResponse: Response;
+  try {
+    rpcResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/get_my_active_paddle_subscription`, {
+      method: "POST",
+      headers: {
+        apikey: anonKey,
+        Authorization: authorization,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    console.error("paddle-checkout: get_my_active_paddle_subscription request failed:", error instanceof Error ? error.message : String(error));
+    return jsonResponse({ status: "error", error: "checkout_service_unavailable" }, 503);
+  }
+
+  if (rpcResponse.status === 401) {
+    return jsonResponse({ status: "error", error: "auth_required" }, 401);
+  }
+  if (!rpcResponse.ok) {
+    console.error(`paddle-checkout: get_my_active_paddle_subscription RPC failed with status ${rpcResponse.status}`);
+    return jsonResponse({ status: "error", error: "checkout_service_unavailable" }, 503);
+  }
+
+  const snapshot = await rpcResponse.json().catch(() => null) as Record<string, unknown> | null;
+  const subscriptionId = snapshot && typeof snapshot.subscription_id === "string" ? snapshot.subscription_id : null;
+  const currentPlan = snapshot && isPlan(snapshot.plan) ? snapshot.plan : null;
+  const currentInterval = snapshot && isInterval(snapshot.billing_interval) ? snapshot.billing_interval : null;
+
+  if (!subscriptionId || !currentPlan || !currentInterval) {
+    // No active subscription to change -- e.g. a Free visitor, or one
+    // whose prior subscription already ended. This action never falls
+    // back to creating a new checkout; the frontend already has
+    // action:"checkout" for that separate case.
+    return jsonResponse({ status: "error", error: "no_active_subscription" }, 404);
+  }
+
+  if (currentPlan === targetPlan && currentInterval === targetInterval) {
+    return jsonResponse({ status: "error", error: "already_on_plan" }, 400);
+  }
+
+  const prorationBillingMode = chooseProrationMode(currentPlan, currentInterval, targetPlan, targetInterval);
+
+  let paddleResponse: Response;
+  try {
+    paddleResponse = await fetch(`${paddleApiBaseUrl()}/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${paddleApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        items: [{ price_id: targetPriceId, quantity: 1 }],
+        proration_billing_mode: prorationBillingMode,
+      }),
+    });
+  } catch (error) {
+    console.error("paddle-checkout: Paddle subscription PATCH request failed:", error instanceof Error ? error.message : String(error));
+    return jsonResponse({ status: "error", error: "checkout_service_unavailable" }, 503);
+  }
+
+  if (!paddleResponse.ok) {
+    const errorText = await paddleResponse.text().catch(() => "");
+    console.error(`paddle-checkout: Paddle subscription PATCH returned ${paddleResponse.status}: ${errorText}`);
+    return jsonResponse({ status: "error", error: "checkout_service_unavailable" }, 503);
+  }
+
+  // Deliberately does not read or return the Paddle response body -- this
+  // action's only job is "ask Paddle to change the subscription"; the
+  // fields AN.KI actually grants come only from the subsequent verified
+  // webhook, never from trusting this PATCH's own 200 (same
+  // never-trust-the-client-leg principle as checkout-success redirects,
+  // instruction 6).
+  return jsonResponse({ status: "ok" });
+}
+
 async function handlePortal(
   supabaseUrl: string,
   anonKey: string,
@@ -412,6 +581,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (action === "portal") {
     return await handlePortal(supabaseUrl, anonKey, authorization);
+  }
+
+  // Corrective-pass addition -- see handleChangeSubscription's own header
+  // comment for why this replaces the Early-Access Customer-Portal
+  // plan-change flow instead of extending handlePortal.
+  if (action === "change_subscription") {
+    return await handleChangeSubscription(supabaseUrl, anonKey, authorization, body);
   }
 
   // "checkout" is also the default when `action` is omitted, matching

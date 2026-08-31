@@ -7,12 +7,14 @@ import {
   getMyBillingSnapshot,
   createPaddleCheckout,
   createPaddleManagePortalSession,
+  changeSubscriptionPlan,
   BillingError,
   describeBillingErrorRu,
   type BillingSnapshot,
   type PaddlePlan,
   type PaddleInterval
 } from "../../api/paddleBilling";
+import { openPaddleCheckout, onPaddleCheckoutCompleted } from "../../api/paddleJs";
 import "../../styles/pricing.css";
 
 interface SubscriptionViewProps {
@@ -214,6 +216,23 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // CORRECTIVE-PASS ADDITION: Paddle's own "checkout.completed" overlay
+  // event (see api/paddleJs.ts) is now the PRIMARY post-checkout signal --
+  // it fires in-page, with no navigation and no query-string round trip,
+  // the moment the overlay itself considers the checkout done. This is
+  // still not proof of payment (same instruction 4 as everywhere else in
+  // this file) -- it only starts exactly the same bounded confirmation
+  // polling the `?checkout=success` fallback path above already triggers.
+  // Subscribed unconditionally on mount (not gated on isAuthenticated):
+  // the overlay can only ever have been opened by this same authenticated
+  // visitor's own handleChoosePlan/handleChangePlan call in the first
+  // place, so there is no guest-facing path that could fire this.
+  useEffect(() => {
+    return onPaddleCheckoutCompleted(() => {
+      setPostCheckoutState("confirming");
+    });
+  }, []);
+
   // Account-shell navigation does not use a router, so the browser keeps
   // the previous page's scroll position when switching views. Pricing is
   // a top-level showcase and must always open from its heading rather
@@ -326,25 +345,36 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
         ? snapshotState.plan
         : null;
 
+  // CORRECTIVE-PASS REWRITE (review blocker #1): no longer does a
+  // full-page `window.location.href` navigation to Paddle's own
+  // `checkout.url` -- that URL is Paddle's "default payment link" plus
+  // `?_ptxn=<id>`, a page which must ALREADY have Paddle.js initialized on
+  // it for Paddle's own auto-detection to work, and this SPA never built
+  // or deployed such a page. Instead, opens Paddle's own Checkout OVERLAY
+  // in-page via openPaddleCheckout (api/paddleJs.ts), the review's own
+  // suggested "cleaner for the current SPA" alternative -- see that
+  // function's header for the full reasoning, including why this also
+  // sidesteps the "no real /subscription route" problem entirely (the
+  // overlay never navigates away from this page at all).
   async function handleChoosePlan(plan: PaddlePlan): Promise<void> {
     setActionError(null);
     setPendingPlanId(plan);
     try {
       const result = await createPaddleCheckout(plan, billingInterval);
-      if (result.checkoutUrl) {
-        // Full-page navigation to Paddle's own hosted checkout -- this
-        // component intentionally does nothing further here; the pending
-        // state is left as-is because the page is about to leave anyway,
-        // and instruction 4 forbids treating this call's own success as
-        // proof of anything.
-        window.location.href = result.checkoutUrl;
+      const opened = await openPaddleCheckout(result.transactionId);
+      if (!opened) {
+        console.error("openPaddleCheckout failed: Paddle.js was not ready");
+        setActionError("Не удалось открыть окно оплаты.");
         return;
       }
-      console.error("createPaddleCheckout succeeded but returned no checkoutUrl");
-      setActionError("Не удалось открыть страницу оплаты.");
-      setPendingPlanId(null);
+      // The overlay is now showing on top of this page. This component
+      // does nothing further here -- Paddle's own UI drives the rest of
+      // the checkout, and this call's own success is never treated as
+      // proof of payment (instruction 4). Progress after this point is
+      // reported either by the "checkout.completed" event effect above,
+      // or by the visitor simply closing the overlay (in which case this
+      // button just returns to its normal, clickable state).
     } catch (checkoutError) {
-      setPendingPlanId(null);
       if (checkoutError instanceof BillingError) {
         if (checkoutError.kind === "auth_required") {
           onRequireSignIn();
@@ -358,9 +388,51 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
       }
       console.error("createPaddleCheckout failed:", checkoutError);
       setActionError("Не удалось начать оформление подписки.");
+    } finally {
+      setPendingPlanId(null);
     }
   }
 
+  // CORRECTIVE-PASS ADDITION (review blocker #3): changes the PLAN and/or
+  // INTERVAL of an existing active subscription via the general-
+  // availability Paddle subscription-update API (paddle-checkout,
+  // action:"change_subscription"), never via the Customer Portal's
+  // upgrade/downgrade UI -- that capability is currently Paddle EARLY
+  // ACCESS and this codebase must not depend on it (see
+  // handleManageSubscription's own comment below for what the Portal
+  // stays scoped to). Like handleChoosePlan, a successful call here is
+  // never treated as proof the plan actually changed -- only the resulting
+  // verified `subscription.updated` webhook does that -- so this reuses
+  // the exact same bounded post-checkout confirmation polling.
+  async function handleChangePlan(plan: PaddlePlan): Promise<void> {
+    setActionError(null);
+    setPendingPlanId(plan);
+    try {
+      await changeSubscriptionPlan(plan, billingInterval);
+      setPostCheckoutState("confirming");
+    } catch (changeError) {
+      if (changeError instanceof BillingError) {
+        if (changeError.kind === "auth_required") {
+          onRequireSignIn();
+          return;
+        }
+        setActionError(describeBillingErrorRu(changeError.kind));
+        return;
+      }
+      console.error("changeSubscriptionPlan failed:", changeError);
+      setActionError("Не удалось изменить план подписки.");
+    } finally {
+      setPendingPlanId(null);
+    }
+  }
+
+  // CORRECTIVE-PASS NARROWING (review blocker #3): this now opens the
+  // Paddle Customer Portal ONLY for cancellation, invoices, and payment-
+  // method management -- the things the Portal's general-availability
+  // surface actually, reliably supports. Plan/interval changes go through
+  // handleChangePlan above instead; this function is no longer reachable
+  // from any per-card "upgrade"/"downgrade" CTA, only from the standalone
+  // "Управление подпиской" link in the billing-status panel below.
   async function handleManageSubscription(): Promise<void> {
     setActionError(null);
     setPendingPlanId(MANAGE_PENDING_ID);
@@ -384,9 +456,13 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
 
   // Instruction 30's full CTA-state matrix, resolved once per card, per
   // render: guest / authenticated+free / authenticated+current /
-  // authenticated+higher(upgrade) / authenticated+lower(manage, de-
-  // emphasised). See this file's own header comments on handleChoosePlan/
-  // handleManageSubscription for what each onClick actually does.
+  // authenticated+higher(upgrade, via handleChangePlan) / authenticated+
+  // lower(downgrade, also via handleChangePlan, de-emphasised styling
+  // only). See this file's own header comments on handleChoosePlan/
+  // handleChangePlan/handleManageSubscription for what each onClick
+  // actually does -- CORRECTIVE-PASS NOTE: neither upgrade nor downgrade
+  // routes through the Portal any more (handleManageSubscription is now
+  // reachable only from the standalone billing-status panel action).
   function resolveCta(planDef: Omit<PlanDef, "isCurrent">): PlanCardCta {
     if (planDef.id === "free") {
       if (currentPlanId === "free" || currentPlanId === null) {
@@ -422,16 +498,25 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
     }
 
     const manageAvailable = billingState.status === "loaded" && billingState.snapshot.manageSubscriptionAvailable;
-    const managing = pendingPlanId === MANAGE_PENDING_ID;
 
+    // CORRECTIVE-PASS REWRITE (review blocker #3): a visitor who already
+    // has an active subscription and clicks a DIFFERENT plan's card now
+    // goes straight through handleChangePlan (the general-availability
+    // subscription-update API) -- never through the Portal, which cannot
+    // be relied on for plan changes (Early Access). "Managing" this
+    // specific card's own change is now tracked the same way a fresh
+    // checkout is (pendingPlanId === this card's own plan id), not via the
+    // separate MANAGE_PENDING_ID sentinel, which stays reserved for the
+    // standalone Portal-only "Управление подпиской" action below.
     if (manageAvailable) {
       const isUpgrade = (PLAN_RANK[planDef.id] ?? 0) > (PLAN_RANK[currentPlanId ?? "free"] ?? 0);
+      const changingThisPlan = pendingPlanId === planDef.id;
       return {
-        label: isUpgrade ? `Улучшить до ${planDef.name}` : "Изменить в личном кабинете",
-        disabled: managing,
-        loading: managing,
+        label: isUpgrade ? `Улучшить до ${planDef.name}` : `Перейти на ${planDef.name}`,
+        disabled: changingThisPlan,
+        loading: changingThisPlan,
         variant: isUpgrade ? "primary" : "secondary",
-        onClick: () => void handleManageSubscription()
+        onClick: () => void handleChangePlan(planDef.id as PaddlePlan)
       };
     }
 
