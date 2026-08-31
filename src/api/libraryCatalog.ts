@@ -1,4 +1,5 @@
 import type { Book, Author } from "../catalog/types";
+import { getValidAccessToken } from "../auth/supabaseAuth";
 
 // omnia-library-catalog (see supabase/functions/omnia-library-catalog/
 // index.ts) — AN.KI's OWN internal catalog (public.works/authors/
@@ -15,6 +16,18 @@ const CATALOG_ENDPOINT =
 // `Authorization: Bearer`. Public-safe publishable key, never
 // service_role.
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy";
+
+// FREE / LIBRARY CATALOG BOUNDARY v1 -- CORRECTION: omnia-library-catalog's
+// default (q/language/pagination) path now resolves the caller's plan
+// from an optional Authorization header. Signed-out visitors omit it;
+// signed-in visitors send their own current access token. `apikey` stays
+// present independently on every request.
+async function buildCatalogRequestHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { apikey: SUPABASE_PUBLISHABLE_KEY };
+  const accessToken = await getValidAccessToken();
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  return headers;
+}
 
 export interface LibraryCatalogParams {
   query?: string;
@@ -90,9 +103,7 @@ export async function fetchLibraryCatalogPage(params: LibraryCatalogParams): Pro
   url.searchParams.set("offset", String(params.offset ?? 0));
 
   const response = await fetch(url.toString(), {
-    headers: {
-      "apikey": SUPABASE_PUBLISHABLE_KEY
-    },
+    headers: await buildCatalogRequestHeaders(),
     signal: params.signal
   });
 
