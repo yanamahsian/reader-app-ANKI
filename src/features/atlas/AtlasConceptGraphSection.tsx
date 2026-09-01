@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { Annotation } from "../../api/annotations";
 import {
   loadAtlasGraph,
   type AtlasConcept,
@@ -68,7 +69,17 @@ interface LoadedGraph {
   relationships: AtlasRelationship[];
 }
 
-export function AtlasConceptGraphSection() {
+interface AtlasConceptGraphSectionProps {
+  annotationById: Map<string, Annotation>;
+  unavailableAnnotationId: string | null;
+  onOpenAnnotation: (annotation: Annotation) => void;
+}
+
+export function AtlasConceptGraphSection({
+  annotationById,
+  unavailableAnnotationId,
+  onOpenAnnotation
+}: AtlasConceptGraphSectionProps) {
   const [graph, setGraph] = useState<LoadedGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -214,7 +225,11 @@ export function AtlasConceptGraphSection() {
         )}
       </section>
 
-      <AtlasSemanticGraphSection />
+      <AtlasSemanticGraphSection
+        annotationById={annotationById}
+        unavailableAnnotationId={unavailableAnnotationId}
+        onOpenAnnotation={onOpenAnnotation}
+      />
     </>
   );
 }
