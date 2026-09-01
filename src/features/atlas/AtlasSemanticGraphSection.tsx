@@ -20,10 +20,12 @@ interface SemanticGraphState {
 }
 
 interface AtlasSemanticGraphSectionProps {
-  annotationById: Map<string, Annotation>;
-  unavailableAnnotationId: string | null;
-  onOpenAnnotation: (annotation: Annotation) => void;
+  annotationById?: Map<string, Annotation>;
+  unavailableAnnotationId?: string | null;
+  onOpenAnnotation?: (annotation: Annotation) => void;
 }
+
+const EMPTY_ANNOTATIONS = new Map<string, Annotation>();
 
 function entityTypeLabel(type: AtlasSemanticConcept["entityType"]): string {
   return type === "person" ? "Человек" : "Концепт";
@@ -68,10 +70,10 @@ function confidenceLabel(value: number): string {
 }
 
 export function AtlasSemanticGraphSection({
-  annotationById,
-  unavailableAnnotationId,
+  annotationById = EMPTY_ANNOTATIONS,
+  unavailableAnnotationId = null,
   onOpenAnnotation
-}: AtlasSemanticGraphSectionProps) {
+}: AtlasSemanticGraphSectionProps = {}) {
   const [graph, setGraph] = useState<SemanticGraphState>({ concepts: [], relationships: [] });
   const [indexResult, setIndexResult] = useState<AtlasSemanticIndexResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,6 +86,7 @@ export function AtlasSemanticGraphSection({
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [threadById, setThreadById] = useState<Map<string, ThoughtThread>>(new Map());
   const evidenceRequest = useRef(0);
+  const canDrillDown = typeof onOpenAnnotation === "function";
 
   async function refresh(runIndex: boolean, cancelled?: () => boolean): Promise<void> {
     if (runIndex) {
@@ -163,6 +166,8 @@ export function AtlasSemanticGraphSection({
   const remaining = indexResult?.remaining ?? 0;
 
   async function toggleEvidence(concept: AtlasSemanticConcept): Promise<void> {
+    if (!canDrillDown) return;
+
     if (selectedConceptId === concept.id) {
       evidenceRequest.current += 1;
       setSelectedConceptId(null);
@@ -236,9 +241,9 @@ export function AtlasSemanticGraphSection({
           {confidenceLabel(evidence.confidence)} · {formatEvidenceDate(evidence.sourceRevisionAt)}
         </p>
 
-        {annotation && (
+        {annotation && onOpenAnnotation && (
           <div className="notes-card-actions">
-            <button type="button" className="text-link" onClick={() => onOpenAnnotation(annotation)}>
+            <button type="button" className="text-link" onClick={() => onOpenAnnotation?.(annotation)}>
               Вернуться к точному фрагменту
             </button>
           </div>
@@ -291,11 +296,13 @@ export function AtlasSemanticGraphSection({
                   )}
                   <blockquote className="notes-card-quote">{annotation.quoteText}</blockquote>
                   {annotation.noteText && <p className="notes-card-note">{annotation.noteText}</p>}
-                  <div className="notes-card-actions">
-                    <button type="button" className="text-link" onClick={() => onOpenAnnotation(annotation)}>
-                      Вернуться к точному фрагменту
-                    </button>
-                  </div>
+                  {onOpenAnnotation && (
+                    <div className="notes-card-actions">
+                      <button type="button" className="text-link" onClick={() => onOpenAnnotation?.(annotation)}>
+                        Вернуться к точному фрагменту
+                      </button>
+                    </div>
+                  )}
                   {unavailableAnnotationId === annotation.id && (
                     <p className="book-detail-unavailable">
                       Это издание сейчас недоступно в вашей юрисдикции.
@@ -361,23 +368,25 @@ export function AtlasSemanticGraphSection({
                     {concept.sourceCount} {sourceForm(concept.sourceCount)} · {concept.evidenceCount} {evidenceForm(concept.evidenceCount)}
                     {concept.workCount > 0 ? ` · ${concept.workCount} книг` : ""}
                   </p>
-                  <div className="notes-card-actions">
-                    <button
-                      type="button"
-                      className="text-link"
-                      aria-expanded={expanded}
-                      aria-controls={targetId}
-                      onClick={() => void toggleEvidence(concept)}
-                    >
-                      {expanded ? "Скрыть доказательства" : "Показать доказательства"}
-                    </button>
-                  </div>
+                  {canDrillDown && (
+                    <div className="notes-card-actions">
+                      <button
+                        type="button"
+                        className="text-link"
+                        aria-expanded={expanded}
+                        aria-controls={targetId}
+                        onClick={() => void toggleEvidence(concept)}
+                      >
+                        {expanded ? "Скрыть доказательства" : "Показать доказательства"}
+                      </button>
+                    </div>
+                  )}
                 </article>
               );
             })}
           </div>
 
-          {selectedConcept && (
+          {selectedConcept && canDrillDown && (
             <section
               id={`atlas-semantic-evidence-${selectedConcept.id}`}
               className="notes-group"
