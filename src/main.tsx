@@ -4,9 +4,9 @@ import { App } from "./App";
 import { ReaderView } from "./features/reader/ReaderView";
 import type { Book } from "./features/reader/engine/types";
 import {
-  clearActivePersonalEpub,
-  readActivePersonalEpub,
-  subscribeToPersonalEpubOpen
+  clearActivePersonalBook,
+  readActivePersonalBook,
+  subscribeToPersonalBookOpen
 } from "./features/reader/personalEpubBridge";
 import "./styles/global.css";
 
@@ -16,18 +16,16 @@ if (!rootElement) {
   throw new Error("Root element #root not found");
 }
 
-// Personal EPUBs are device-local files, not catalog Works/Editions. Keep App
-// mounted underneath so its current My Library navigation state survives while
-// the dedicated Reader temporarily takes over the root surface. This preserves
-// Reader's existing "no catalog shell while reading" contract without forcing
-// device-local file objects into App's server-catalog navigation model.
+// Device-local imports are not catalog Works/Editions. Keep App mounted under
+// the dedicated Reader so My Library navigation state survives while a local
+// EPUB/PDF temporarily takes over the reading surface.
 function RootApp() {
-  const [personalBook, setPersonalBook] = useState<Book | null>(() => readActivePersonalEpub());
+  const [personalBook, setPersonalBook] = useState<Book | null>(() => readActivePersonalBook());
 
-  useEffect(() => subscribeToPersonalEpubOpen(setPersonalBook), []);
+  useEffect(() => subscribeToPersonalBookOpen(setPersonalBook), []);
 
   function closePersonalReader(): void {
-    clearActivePersonalEpub();
+    clearActivePersonalBook();
     setPersonalBook(null);
   }
 

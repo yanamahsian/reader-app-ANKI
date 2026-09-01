@@ -3,37 +3,32 @@ import type { Bookmark } from "../engine/types";
 import { createLocalStorageStore } from "./localStorageStore";
 import { saveProgress, type ReaderRemoteState } from "../../../api/readerProgress";
 import { isPersonalEpubBookId } from "../../../api/personalEpubLibrary";
+import { isPersonalPdfBookId } from "../../../api/personalPdfLibrary";
 import {
   deleteBookmark as deleteRemoteBookmark,
   saveBookmark as saveRemoteBookmark
 } from "../../../api/readerBookmarks";
 
+function isDeviceLocalImport(editionId: string): boolean {
+  return isPersonalEpubBookId(editionId) || isPersonalPdfBookId(editionId);
+}
+
 // Authenticated Reader state keeps the mature synchronous ProgressStore
-// contract while its source of truth lives in Supabase. ReaderView preloads
-// position + bookmarks through fetchProgress() before constructing this store,
-// so readerEngine.ts does not need an async rewrite. Guest fragments keep the
-// existing localStorage path.
+// contract while its source of truth lives in Supabase. Device-local imports
+// deliberately bypass that server path and reuse localStorage instead.
 export function createSupabaseProgressStore(
   editionId: string,
   initialState: ReaderRemoteState
 ): ProgressStore {
-
   const local = createLocalStorageStore();
 
-  // Personal imports are deliberately device-local in v1. They have no row in
-  // public.editions, so even a signed-in visitor must use the exact same local
-  // progress/bookmark implementation as a guest for these books. This avoids
-  // fake catalog Edition ids, FK violations, and misleading cross-device sync.
-  if (isPersonalEpubBookId(editionId)) return local;
+  if (isDeviceLocalImport(editionId)) return local;
 
   let cachedPosition = initialState.position;
   let cachedBookmarks = initialState.bookmarks
     .filter(bookmark => bookmark.bookId === editionId)
     .map(bookmark => ({ ...bookmark }));
 
-  // Bookmark writes must preserve click order. Without this queue, a fast
-  // "add → remove" can let DELETE finish before POST and resurrect the row
-  // when the slower POST eventually completes.
   let bookmarkWriteChain: Promise<void> = Promise.resolve();
 
   function enqueueBookmarkWrite(label: string, task: () => Promise<void>): void {
@@ -89,5 +84,4 @@ export function createSupabaseProgressStore(
     saveBookmark,
     deleteBookmark
   };
-
 }

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ShellPage } from "../shared/ShellPage";
 import { BookGrid } from "../shared/BookGrid";
 import { LibraryBookCard } from "../shared/LibraryBookCard";
 import { getBookById } from "../../catalog";
 import type { Book as CatalogBook } from "../../catalog/types";
 import type { Book as ReaderBook } from "../reader/engine/types";
-import { requestOpenPersonalEpub } from "../reader/personalEpubBridge";
+import { requestOpenPersonalBook } from "../reader/personalEpubBridge";
 import { useAuth } from "../../auth/supabaseAuth";
 import { fetchAndMergeWorksByIds, listLibrary } from "../../api/userLibrary";
 import type { LibraryEntry, LibraryStatus } from "../../api/userLibrary";
@@ -17,16 +17,16 @@ import {
   toPersonalEpubBook,
   type PersonalEpubSummary
 } from "../../api/personalEpubLibrary";
+import {
+  deletePersonalPdf,
+  importPersonalPdf,
+  listPersonalPdfs,
+  PersonalPdfImportError,
+  personalPdfErrorMessage,
+  toPersonalPdfBook,
+  type PersonalPdfSummary
+} from "../../api/personalPdfLibrary";
 import "./personalEpub.css";
-
-// USER LIBRARY PHASE: a real, Supabase-backed personal shelf --
-// distinct from features/library/LibraryView.tsx (the public catalog),
-// per that file's own original comment anticipating this. Reuses the
-// exact same tile components (BookGrid/LibraryBookCard) the public
-// Library already uses, per requirement #5 ("не копия глобальной
-// Library, но переиспользуй существующую карточку"), only with the
-// optional `badge` prop LibraryBookCard now supports for a quiet
-// per-card status label.
 
 export type MyLibraryTab = "all" | LibraryStatus;
 
@@ -36,25 +36,14 @@ export interface MyLibraryRestoreState {
 
 interface MyLibraryViewProps {
   onBack: () => void;
-  // Non-null only when arriving via "← Назад" from Book Detail --
-  // restores the tab the visitor had selected, same pattern
-  // LibraryView's own restoreState follows.
   restoreState: MyLibraryRestoreState | null;
   onOpenBookDetail: (
     bookId: string,
     state: MyLibraryRestoreState,
     initialEdition: { editionId: string; language: string } | null
   ) => void;
-  // Optional injection kept for isolated stories/tests. Production uses the
-  // top-level personal EPUB bridge so Reader can replace AppShell without
-  // making App's mature navigation state own device-local files.
   onOpenPersonalBook?: (book: ReaderBook) => void;
-  // Routes a signed-out visitor to the existing auth home (Profile) --
-  // same destination AccountMenu and BookDetailView's own
-  // "Добавить в библиотеку" already use (requirement #4).
   onRequireSignIn: () => void;
-  // The empty state's "Перейти в библиотеку" action (requirement #19)
-  // opens the public catalog Library, not this screen.
   onOpenLibrary: () => void;
 }
 
@@ -74,6 +63,10 @@ const STATUS_BADGE: Record<LibraryStatus, string> = {
 type Status = "loading" | "success" | "empty" | "error";
 type PersonalStatus = "loading" | "ready" | "error";
 
+type PersonalItem =
+  | { kind: "epub"; id: string; addedAt: number; summary: PersonalEpubSummary }
+  | { kind: "pdf"; id: string; addedAt: number; summary: PersonalPdfSummary };
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} МБ`;
@@ -87,14 +80,13 @@ export function MyLibraryView({
   onRequireSignIn,
   onOpenLibrary
 }: MyLibraryViewProps) {
-
   const { isAuthenticated } = useAuth();
   const [tab, setTab] = useState<MyLibraryTab>(restoreState?.tab ?? "all");
-
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [status, setStatus] = useState<Status>("loading");
 
-  const [personalBooks, setPersonalBooks] = useState<PersonalEpubSummary[]>([]);
+  const [personalEpubs, setPersonalEpubs] = useState<PersonalEpubSummary[]>([]);
+  const [personalPdfs, setPersonalPdfs] = useState<PersonalPdfSummary[]>([]);
   const [personalStatus, setPersonalStatus] = useState<PersonalStatus>("loading");
   const [personalError, setPersonalError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -102,28 +94,34 @@ export function MyLibraryView({
 
   const requestIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const openPersonalBook = onOpenPersonalBook ?? requestOpenPersonalEpub;
+  const openPersonalBook = onOpenPersonalBook ?? requestOpenPersonalBook;
 
-  // Personal EPUBs are intentionally independent of auth in v1. The file is
-  // stored in this browser's IndexedDB and never uploaded to AN.KI/Supabase.
-  // This keeps Free personal reading genuinely useful while avoiding a false
-  // promise of cross-device file sync before that storage product is designed.
+  const personalItems = useMemo<PersonalItem[]>(() => [
+    ...personalEpubs.map(summary => ({ kind: "epub" as const, id: summary.id, addedAt: summary.addedAt, summary })),
+    ...personalPdfs.map(summary => ({ kind: "pdf" as const, id: summary.id, addedAt: summary.addedAt, summary }))
+  ].sort((left, right) => right.addedAt - left.addedAt), [personalEpubs, personalPdfs]);
+
   useEffect(() => {
     let active = true;
     setPersonalStatus("loading");
     setPersonalError(null);
 
-    listPersonalEpubs()
-      .then(books => {
+    Promise.all([listPersonalEpubs(), listPersonalPdfs()])
+      .then(([epubs, pdfs]) => {
         if (!active) return;
-        setPersonalBooks(books);
+        setPersonalEpubs(epubs);
+        setPersonalPdfs(pdfs);
         setPersonalStatus("ready");
       })
       .catch(error => {
         if (!active) return;
-        console.error("personal EPUB library load failed:", error);
+        console.error("personal library load failed:", error);
         setPersonalStatus("error");
-        setPersonalError(personalEpubErrorMessage(error));
+        setPersonalError(
+          error instanceof PersonalPdfImportError
+            ? personalPdfErrorMessage(error)
+            : personalEpubErrorMessage(error)
+        );
       });
 
     return () => {
@@ -131,13 +129,7 @@ export function MyLibraryView({
     };
   }, []);
 
-  // Batch load (requirement #15 -- no N+1): one listLibrary() call for
-  // the membership rows, then a SINGLE fetchAndMergeWorksByIds() call
-  // for every distinct Work those rows reference, via
-  // omnia-library-catalog's auth-gated `workIds` mode -- never one
-  // request per row.
   useEffect(() => {
-
     if (!isAuthenticated) {
       setStatus("empty");
       setEntries([]);
@@ -147,67 +139,93 @@ export function MyLibraryView({
     const requestId = ++requestIdRef.current;
     setStatus("loading");
 
-    (async () => {
+    void (async () => {
       try {
-
         const rows = await listLibrary(tab === "all" ? {} : { status: tab });
         if (requestId !== requestIdRef.current) return;
 
         const workIds = Array.from(new Set(rows.map(row => row.workId)));
-        if (workIds.length > 0) {
-          await fetchAndMergeWorksByIds(workIds);
-        }
+        if (workIds.length > 0) await fetchAndMergeWorksByIds(workIds);
         if (requestId !== requestIdRef.current) return;
 
         setEntries(rows);
         setStatus(rows.length ? "success" : "empty");
-
       } catch (error) {
         if (requestId !== requestIdRef.current) return;
         console.error("MyLibraryView load failed:", error);
         setStatus("error");
       }
     })();
-
   }, [isAuthenticated, tab]);
 
   function snapshot(): MyLibraryRestoreState {
     return { tab };
   }
 
-  async function handleImportPersonalEpub(file: File): Promise<void> {
+  async function handleImportPersonalFile(file: File): Promise<void> {
     setImporting(true);
     setPersonalError(null);
 
     try {
-      const imported = await importPersonalEpub(file);
-      setPersonalBooks(current => [imported, ...current.filter(book => book.id !== imported.id)]);
+      const lowerName = file.name.toLowerCase();
+
+      if (lowerName.endsWith(".epub")) {
+        const imported = await importPersonalEpub(file);
+        setPersonalEpubs(current => [imported, ...current.filter(book => book.id !== imported.id)]);
+        openPersonalBook(toPersonalEpubBook(imported));
+      } else if (lowerName.endsWith(".pdf")) {
+        const imported = await importPersonalPdf(file);
+        setPersonalPdfs(current => [imported, ...current.filter(book => book.id !== imported.id)]);
+        openPersonalBook(toPersonalPdfBook(imported));
+      } else {
+        setPersonalError("Сейчас поддерживаются EPUB и PDF.");
+      }
+
       setPersonalStatus("ready");
-      openPersonalBook(toPersonalEpubBook(imported));
     } catch (error) {
-      console.error("personal EPUB import failed:", error);
-      setPersonalError(personalEpubErrorMessage(error));
+      console.error("personal book import failed:", error);
+      setPersonalError(
+        error instanceof PersonalPdfImportError
+          ? personalPdfErrorMessage(error)
+          : personalEpubErrorMessage(error)
+      );
       setPersonalStatus("ready");
     } finally {
       setImporting(false);
     }
   }
 
-  async function handleDeletePersonalEpub(book: PersonalEpubSummary): Promise<void> {
-    if (!window.confirm(`Удалить «${book.title}» с этого устройства?`)) return;
+  async function handleDeletePersonalItem(item: PersonalItem): Promise<void> {
+    const title = item.summary.title;
+    if (!window.confirm(`Удалить «${title}» с этого устройства?`)) return;
 
-    setDeletingPersonalId(book.id);
+    setDeletingPersonalId(item.id);
     setPersonalError(null);
 
     try {
-      await deletePersonalEpub(book.id);
-      setPersonalBooks(current => current.filter(item => item.id !== book.id));
+      if (item.kind === "epub") {
+        await deletePersonalEpub(item.id);
+        setPersonalEpubs(current => current.filter(book => book.id !== item.id));
+      } else {
+        await deletePersonalPdf(item.id);
+        setPersonalPdfs(current => current.filter(book => book.id !== item.id));
+      }
     } catch (error) {
-      console.error("personal EPUB delete failed:", error);
-      setPersonalError(personalEpubErrorMessage(error));
+      console.error("personal book delete failed:", error);
+      setPersonalError(
+        item.kind === "pdf" ? personalPdfErrorMessage(error) : personalEpubErrorMessage(error)
+      );
     } finally {
       setDeletingPersonalId(null);
     }
+  }
+
+  function openPersonalItem(item: PersonalItem): void {
+    openPersonalBook(
+      item.kind === "epub"
+        ? toPersonalEpubBook(item.summary)
+        : toPersonalPdfBook(item.summary)
+    );
   }
 
   function renderPersonalShelf() {
@@ -221,67 +239,64 @@ export function MyLibraryView({
             disabled={importing}
             onClick={() => fileInputRef.current?.click()}
           >
-            {importing ? "Импорт…" : "Импорт EPUB"}
+            {importing ? "Импорт…" : "Импорт книги"}
           </button>
           <input
             ref={fileInputRef}
             className="personal-library-file-input"
             type="file"
-            accept=".epub,application/epub+zip"
+            accept=".epub,.pdf,application/epub+zip,application/pdf"
             onChange={event => {
               const file = event.currentTarget.files?.[0] ?? null;
               event.currentTarget.value = "";
-              if (file) void handleImportPersonalEpub(file);
+              if (file) void handleImportPersonalFile(file);
             }}
           />
         </div>
 
         <p className="personal-library-copy">
-          EPUB сохраняется только в этом браузере и не загружается на сервер. Прогресс и закладки этой книги тоже остаются на устройстве.
+          EPUB и PDF сохраняются только в этом браузере и не загружаются на сервер. Прогресс и закладки личных книг тоже остаются на устройстве.
         </p>
 
         {personalError && <p className="personal-library-error">{personalError}</p>}
-
-        {personalStatus === "loading" && (
-          <p className="personal-library-loading">Загрузка личных книг…</p>
-        )}
-
+        {personalStatus === "loading" && <p className="personal-library-loading">Загрузка личных книг…</p>}
         {personalStatus === "error" && !personalError && (
           <p className="personal-library-error">Не удалось открыть локальную библиотеку.</p>
         )}
-
-        {personalStatus === "ready" && personalBooks.length === 0 && (
-          <p className="personal-library-empty">Здесь появятся EPUB, которые вы добавите с устройства.</p>
+        {personalStatus === "ready" && personalItems.length === 0 && (
+          <p className="personal-library-empty">Здесь появятся EPUB и PDF, которые вы добавите с устройства.</p>
         )}
 
-        {personalBooks.length > 0 && (
+        {personalItems.length > 0 && (
           <div className="personal-epub-grid">
-            {personalBooks.map(book => (
-              <article key={book.id} className="personal-epub-card">
-                <button
-                  type="button"
-                  className="personal-epub-open"
-                  onClick={() => openPersonalBook(toPersonalEpubBook(book))}
-                >
-                  <span className="personal-epub-format">EPUB · Личный файл</span>
-                  <span className="personal-epub-title">{book.title}</span>
-                  {book.author && <span className="personal-epub-author">{book.author}</span>}
-                  <span className="personal-epub-meta">
-                    {book.language ? `${book.language.toUpperCase()} · ` : ""}{formatFileSize(book.fileSize)}
-                  </span>
-                </button>
-                <div className="personal-epub-actions">
-                  <button
-                    type="button"
-                    className="personal-epub-delete"
-                    disabled={deletingPersonalId === book.id}
-                    onClick={() => void handleDeletePersonalEpub(book)}
-                  >
-                    {deletingPersonalId === book.id ? "Удаление…" : "Удалить с устройства"}
+            {personalItems.map(item => {
+              const summary = item.summary;
+              const pdfMeta = item.kind === "pdf" ? ` · ${item.summary.pageCount} стр.` : "";
+
+              return (
+                <article key={`${item.kind}:${item.id}`} className="personal-epub-card">
+                  <button type="button" className="personal-epub-open" onClick={() => openPersonalItem(item)}>
+                    <span className="personal-epub-format">{item.kind.toUpperCase()} · Личный файл</span>
+                    <span className="personal-epub-title">{summary.title}</span>
+                    {summary.author && <span className="personal-epub-author">{summary.author}</span>}
+                    <span className="personal-epub-meta">
+                      {summary.language ? `${summary.language.toUpperCase()} · ` : ""}
+                      {formatFileSize(summary.fileSize)}{pdfMeta}
+                    </span>
                   </button>
-                </div>
-              </article>
-            ))}
+                  <div className="personal-epub-actions">
+                    <button
+                      type="button"
+                      className="personal-epub-delete"
+                      disabled={deletingPersonalId === item.id}
+                      onClick={() => void handleDeletePersonalItem(item)}
+                    >
+                      {deletingPersonalId === item.id ? "Удаление…" : "Удалить с устройства"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
@@ -289,7 +304,6 @@ export function MyLibraryView({
   }
 
   function renderBody() {
-
     if (!isAuthenticated) {
       return (
         <div className="guest-notice">
@@ -303,14 +317,10 @@ export function MyLibraryView({
       );
     }
 
-    if (status === "loading" && entries.length === 0) {
-      return <div className="empty-state">Загрузка…</div>;
-    }
-
+    if (status === "loading" && entries.length === 0) return <div className="empty-state">Загрузка…</div>;
     if (status === "error") {
       return <p className="my-library-error">Не удалось загрузить библиотеку. Попробуйте обновить страницу.</p>;
     }
-
     if (status === "empty") {
       return (
         <div className="guest-notice">
@@ -322,12 +332,6 @@ export function MyLibraryView({
       );
     }
 
-    // getBookById re-reads through the shared catalog store (same
-    // pattern LibraryView.tsx uses) rather than trusting a separate
-    // copy -- a row whose Work failed to resolve (e.g. a transient
-    // fetch error) is skipped rather than rendered as a broken tile;
-    // it will simply reappear once fetchAndMergeWorksByIds succeeds on
-    // a later load.
     const books: Array<{ entry: LibraryEntry; book: CatalogBook }> = entries
       .map(entry => {
         const book = getBookById(entry.workId);
@@ -345,12 +349,6 @@ export function MyLibraryView({
             onOpen={bookId => onOpenBookDetail(
               bookId,
               snapshot(),
-              // USER LIBRARY PHASE (requirement #9): seeds Book Detail's
-              // language/edition selection with the last-read edition,
-              // so "Продолжить чтение" (choosing this card again) lands
-              // on the same edition rather than a re-derived default --
-              // still just a seed, not a Reader bypass (see
-              // BookDetailView's own comment on initialEdition).
               entry.lastEditionId && entry.lastLanguage
                 ? { editionId: entry.lastEditionId, language: entry.lastLanguage }
                 : null
@@ -359,14 +357,11 @@ export function MyLibraryView({
         ))}
       </BookGrid>
     );
-
   }
 
   return (
     <ShellPage onBack={onBack} eyebrow="Аккаунт" title="Моя библиотека">
-
       {renderPersonalShelf()}
-
       <h2 className="my-library-catalog-heading">Книги AN.KI</h2>
 
       {isAuthenticated && (
@@ -387,8 +382,6 @@ export function MyLibraryView({
       )}
 
       {renderBody()}
-
     </ShellPage>
   );
-
 }
