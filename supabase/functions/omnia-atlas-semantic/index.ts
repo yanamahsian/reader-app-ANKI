@@ -17,6 +17,12 @@ type SemanticEntity = {
   confidence: number;
 };
 
+type AllowanceReservation = {
+  bucket: string;
+  monthPeriodStart: string;
+  hourPeriodStart: string;
+};
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -90,8 +96,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch (error) {
     const message = safeError(error);
     console.error("Atlas semantic extraction failed:", message);
-    await Promise.all(claimed.map(source => failSource(supabaseUrl, serviceRoleKey, userId, source, message)));
-    return jsonResponse({ status: "error", error: "semantic_extraction_failed" }, 502);
+
+    await Promise.all(
+      claimed.map(source => failSource(supabaseUrl, serviceRoleKey, userId, source, message))
+    );
+
+    const refunded = await refundAiAllowance(
+      supabaseUrl,
+      serviceRoleKey,
+      userId,
+      allowance.reservation
+    ).catch(error => {
+      console.error("Atlas semantic allowance refund failed:", safeError(error));
+      return false;
+    });
+
+    if (!refunded) {
+      console.error("Atlas semantic allowance refund was not applied for failed extraction");
+    }
+
+    const remaining = await pendingCount(supabaseUrl, serviceRoleKey, userId)
+      .catch(() => claimed.length);
+
+    return jsonResponse({
+      status: "error",
+      error: "semantic_extraction_failed",
+      failed: claimed.length,
+      remaining
+    }, 502);
   }
 
   const sourceResults = Array.isArray(parsed.sources) ? parsed.sources : [];
@@ -155,7 +187,10 @@ async function consumeAiAllowance(
   supabaseUrl: string,
   anonKey: string,
   authorization: string
-): Promise<{ ok: true } | { ok: false; response: Response }> {
+): Promise<
+  | { ok: true; reservation: AllowanceReservation }
+  | { ok: false; response: Response }
+> {
   let response: Response;
   try {
     response = await fetchWithTimeout(`${supabaseUrl}/rest/v1/rpc/consume_ai_allowance`, {
@@ -180,8 +215,28 @@ async function consumeAiAllowance(
     plan?: string | null;
     bucket?: string | null;
     resets_at?: string | null;
+    month_period_start?: string | null;
+    hour_period_start?: string | null;
   };
-  if (result.allowed) return { ok: true };
+
+  if (result.allowed) {
+    if (!result.bucket || !result.month_period_start || !result.hour_period_start) {
+      return {
+        ok: false,
+        response: jsonResponse({ status: "error", error: "entitlement_service_unavailable" }, 503)
+      };
+    }
+
+    return {
+      ok: true,
+      reservation: {
+        bucket: result.bucket,
+        monthPeriodStart: result.month_period_start,
+        hourPeriodStart: result.hour_period_start
+      }
+    };
+  }
+
   if (result.reason === "monthly_limit_reached" || result.reason === "hourly_limit_reached") {
     return {
       ok: false,
@@ -194,7 +249,27 @@ async function consumeAiAllowance(
       }, 429)
     };
   }
+
   return { ok: false, response: jsonResponse({ status: "error", error: "entitlement_service_unavailable" }, 503) };
+}
+
+async function refundAiAllowance(
+  supabaseUrl: string,
+  serviceKey: string,
+  userId: string,
+  reservation: AllowanceReservation
+): Promise<boolean> {
+  return serviceRpc<boolean>(
+    supabaseUrl,
+    serviceKey,
+    "refund_ai_allowance_for_user",
+    {
+      p_user_id: userId,
+      p_bucket: reservation.bucket,
+      p_month_period_start: reservation.monthPeriodStart,
+      p_hour_period_start: reservation.hourPeriodStart
+    }
+  );
 }
 
 async function callOpenAI(apiKey: string, sources: unknown[]): Promise<string> {
