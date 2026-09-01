@@ -1,0 +1,40 @@
+name: Paddle Sandbox Token Gate
+
+on:
+  push:
+    branches: [paddle-0014-token-gate]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify production workflow Paddle env
+        run: |
+          grep -Fq 'VITE_PADDLE_ENV: sandbox' .github/workflows/main.yml
+          grep -Fq 'VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9' .github/workflows/main.yml
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build with exact production Paddle env
+        env:
+          VITE_PADDLE_ENV: sandbox
+          VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9
+        run: npm run build
+
+      - name: Verify Paddle token is baked into bundle
+        run: |
+          test -f dist/index.html
+          grep -R -Fq 'test_e66a8f24d3ad650a9cd1de261a9' dist
