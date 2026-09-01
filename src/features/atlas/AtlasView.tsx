@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import { useAuth } from "../../auth/supabaseAuth";
 import { fetchAndMergeWorksByIds, listLibrary, type LibraryEntry } from "../../api/userLibrary";
 import { listAnnotationsForUser, type Annotation } from "../../api/annotations";
+import { listAtlasMemorySignals, type AtlasMemorySignal } from "../../api/atlasMemory";
 import {
   createThoughtThread,
   deleteThoughtThread,
@@ -24,11 +25,11 @@ import { AtlasQuestionsSection } from "./AtlasQuestionsSection";
 import { AtlasContradictionsSection } from "./AtlasContradictionsSection";
 import { AtlasUnfinishedLinesSection } from "./AtlasUnfinishedLinesSection";
 import { AtlasOverview, type AtlasSectionId } from "./AtlasOverview";
+import {
+  AtlasPersistentMemorySection,
+  isVisibleAtlasMemorySignal
+} from "./AtlasPersistentMemorySection";
 
-// ATLAS PRODUCT INTEGRATION v1: a small, reusable back-link every section
-// below the overview/index shares, so the visitor always has a way back to
-// the top of Atlas without a second global navigation surface. Reuses
-// existing notes-card-actions/text-link classes -- no new CSS.
 function AtlasBackToOverviewLink({ onClick }: { onClick: () => void }) {
   return (
     <div className="notes-card-actions">
@@ -50,6 +51,7 @@ interface AtlasState {
   entries: LibraryEntry[];
   annotations: Annotation[];
   threads: ThoughtThread[];
+  memorySignals: AtlasMemorySignal[];
   activeBooks: Book[];
   connections: AtlasConnection[];
 }
@@ -58,6 +60,7 @@ const EMPTY_ATLAS: AtlasState = {
   entries: [],
   annotations: [],
   threads: [],
+  memorySignals: [],
   activeBooks: [],
   connections: []
 };
@@ -75,11 +78,6 @@ function normalizeOptional(value: string): string | null {
   return trimmed.length ? trimmed : null;
 }
 
-// ATLAS PRODUCT INTEGRATION v1 spec section 8: a Thread is "open" for the
-// overview/index purely as a UI-only summary -- question non-empty AND
-// synthesisNote empty, both trimmed. This does not create any new server
-// state and must not be confused with (or try to replicate) the separate,
-// server-side Unfinished Lines candidate-selection logic in omnia-ai.
 function isThreadOpen(thread: ThoughtThread): boolean {
   const hasQuestion = Boolean(thread.question && thread.question.trim().length > 0);
   const hasSynthesis = Boolean(thread.synthesisNote && thread.synthesisNote.trim().length > 0);
@@ -100,13 +98,6 @@ export function AtlasView({
   const [unavailableId, setUnavailableId] = useState<string | null>(null);
 
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
-  // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: the updated_at snapshot the
-  // editor was opened at -- the token replaceThoughtThread() must echo
-  // back unchanged. Deliberately set ONLY by openEditThread() and
-  // handleLoadLatestThreadVersion() below, never by loadAtlas()/
-  // refreshThreads() while the editor is open: the whole point is that
-  // this stays frozen at the version the visitor actually started editing
-  // from, even if atlas.threads itself refreshes in the background.
   const [editingThreadExpectedUpdatedAt, setEditingThreadExpectedUpdatedAt] = useState<string | null>(null);
   const [isThreadComposerOpen, setThreadComposerOpen] = useState(false);
   const [threadTitle, setThreadTitle] = useState("");
@@ -116,18 +107,9 @@ export function AtlasView({
   const [isSavingThread, setSavingThread] = useState(false);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
-  // True only for the specific "someone else changed this Thread since
-  // you opened it" failure -- gates the "Загрузить актуальную версию"
-  // action below. Every other save failure (auth/thread-unavailable/
-  // annotation-unavailable/generic) shows threadError the same way it
-  // always has, with the composer left open and nothing discarded.
   const [isThreadConflict, setThreadConflict] = useState(false);
   const [isLoadingLatestThread, setLoadingLatestThread] = useState(false);
 
-  // ATLAS PRODUCT INTEGRATION v1: in-page navigation only -- no new router,
-  // no window.location.hash. Every existing section stays on this same
-  // route/view; these refs just let the new overview/index scroll the
-  // visitor to an existing section, and let each section scroll back up.
   const overviewRef = useRef<HTMLDivElement | null>(null);
   const threadsRef = useRef<HTMLDivElement | null>(null);
   const unfinishedRef = useRef<HTMLDivElement | null>(null);
@@ -169,18 +151,21 @@ export function AtlasView({
       setError(null);
 
       try {
-        // Reading Memory and explicit Thought Threads are independent personal inputs.
-        // Automatic Atlas connections remain metadata-only in buildAtlasConnections().
-        const [entries, annotations, threads] = await Promise.all([
+        const [entries, annotations, threads, memorySignals] = await Promise.all([
           listLibrary(),
           listAnnotationsForUser(),
-          listThoughtThreads()
+          listThoughtThreads(),
+          listAtlasMemorySignals()
         ]);
 
         const activeEntries = entries.filter(entry => entry.status === "reading" || entry.status === "finished");
         const libraryWorkIds = activeEntries.map(entry => entry.workId);
-        const memoryWorkIds = annotations.map(annotation => annotation.workId);
-        const workIds = Array.from(new Set([...libraryWorkIds, ...memoryWorkIds]));
+        const annotationWorkIds = annotations.map(annotation => annotation.workId);
+        const memorySignalWorkIds = memorySignals
+          .filter(isVisibleAtlasMemorySignal)
+          .map(signal => signal.workId)
+          .filter((workId): workId is string => Boolean(workId));
+        const workIds = Array.from(new Set([...libraryWorkIds, ...annotationWorkIds, ...memorySignalWorkIds]));
 
         await fetchAndMergeWorksByIds(workIds);
 
@@ -194,6 +179,7 @@ export function AtlasView({
           entries,
           annotations,
           threads,
+          memorySignals,
           activeBooks,
           connections: buildAtlasConnections(activeBooks)
         });
@@ -217,20 +203,20 @@ export function AtlasView({
     [atlas.annotations]
   );
 
+  const visibleMemorySignals = useMemo(
+    () => atlas.memorySignals.filter(isVisibleAtlasMemorySignal),
+    [atlas.memorySignals]
+  );
+
   const readingCount = atlas.entries.filter(entry => entry.status === "reading").length;
   const finishedCount = atlas.entries.filter(entry => entry.status === "finished").length;
   const wantToReadCount = atlas.entries.filter(entry => entry.status === "want_to_read").length;
-  const memoryWorkCount = new Set(atlas.annotations.map(annotation => annotation.workId)).size;
-  const recentMemory = atlas.annotations.slice(0, 12);
+  const memoryWorkCount = new Set(
+    visibleMemorySignals.map(signal => signal.workId).filter((workId): workId is string => Boolean(workId))
+  ).size;
   const openThreadsCount = atlas.threads.filter(isThreadOpen).length;
   const connectionsStrongCount = atlas.connections.filter(connection => connection.strength === "strong").length;
 
-  // Shared exact-reopen gate: the same jurisdiction-aware check
-  // (resolveEditionFile -> toReaderBook) used by every Atlas surface that
-  // reopens a saved fragment. Returns whether the Edition was actually
-  // openable so a caller with its own layout (e.g. AtlasQuestionsSection's
-  // evidence cards) can show its own unavailable state, without a second
-  // Reader-opening mechanism anywhere in Atlas.
   function resolveAndOpenMemory(annotation: Annotation): boolean {
     const book = getBookById(annotation.workId);
     const resolved = book
@@ -250,21 +236,6 @@ export function AtlasView({
     setUnavailableId(resolveAndOpenMemory(annotation) ? null : annotation.id);
   }
 
-  // CORRECTION: Unfinished Lines specifically surfaces NEW annotations --
-  // ones that may have been saved (in Reader, another tab, ...) after this
-  // Atlas tab's own annotationById snapshot was built. A plain
-  // annotationById.get() lookup would then falsely report a real, existing
-  // annotation as "unavailable" just because this tab hadn't fetched it
-  // yet, even though production omnia-ai's atlas-unfinished-lines action
-  // itself read it straight from the visitor's own current Reading Memory.
-  //
-  // This does ONE best-effort refresh before giving up, and still funnels
-  // through the exact same resolveAndOpenMemory() -> resolveEditionFile ->
-  // toReaderBook -> onOpenAnnotationInReader path every other Atlas
-  // surface uses -- no second Reader-opening mechanism. A refresh failure
-  // (or the annotation genuinely not existing) returns false so the caller
-  // can show its own unavailable state; it never touches any Thread and
-  // never discards whatever result the caller is currently displaying.
   async function resolveAndOpenMemoryById(annotationId: string): Promise<boolean> {
     const existing = annotationById.get(annotationId);
     if (existing) return resolveAndOpenMemory(existing);
@@ -284,15 +255,10 @@ export function AtlasView({
       try {
         await fetchAndMergeWorksByIds([found.workId]);
       } catch (mergeError) {
-        // Still attempt to open below -- resolveAndOpenMemory() itself
-        // safely returns false if the book truly cannot be resolved.
         console.error("Atlas: merging Work for exact reopen failed:", mergeError);
       }
     }
 
-    // So a second click on the same (still-stale-until-now) card resolves
-    // instantly via the fast path above, and so the fragment now actually
-    // renders in this tab's own lists rather than staying invisible.
     setAtlas(current =>
       current.annotations.some(candidate => candidate.id === found.id)
         ? current
@@ -328,22 +294,10 @@ export function AtlasView({
 
   function openEditThread(thread: ThoughtThread): void {
     setEditingThreadId(thread.id);
-    // Captured once, here -- see this state's own declaration comment for
-    // why it must not track later atlas.threads refreshes.
     setEditingThreadExpectedUpdatedAt(thread.updatedAt);
     setThreadTitle(thread.title);
     setThreadQuestion(thread.question ?? "");
     setThreadSynthesis(thread.synthesisNote ?? "");
-    // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1 correction: thread.annotationIds
-    // IS Thread membership -- it must be taken as-is, never filtered through
-    // this tab's annotationById lookup. atlas.annotations and atlas.threads
-    // come from two separate reads (Promise.all in loadAtlas is not a single
-    // transactional snapshot), so an id can legitimately be missing from
-    // annotationById here even though the server still considers it part of
-    // this Thread. Filtering it out would silently drop it from
-    // selectedAnnotationIds while editingThreadExpectedUpdatedAt still
-    // matches the current DB version, so the very next save could delete it
-    // with no OCC conflict at all.
     setSelectedAnnotationIds([...thread.annotationIds]);
     setThreadError(null);
     setThreadConflict(false);
@@ -357,8 +311,11 @@ export function AtlasView({
   }
 
   async function refreshThreads(): Promise<void> {
-    const threads = await listThoughtThreads();
-    setAtlas(current => ({ ...current, threads }));
+    const [threads, memorySignals] = await Promise.all([
+      listThoughtThreads(),
+      listAtlasMemorySignals()
+    ]);
+    setAtlas(current => ({ ...current, threads, memorySignals }));
   }
 
   async function handleSaveThread(): Promise<void> {
@@ -387,17 +344,12 @@ export function AtlasView({
     try {
       if (editingThreadId) {
         if (!editingThreadExpectedUpdatedAt) {
-          // Defensive only -- openEditThread() always sets this together
-          // with editingThreadId, so this should be unreachable. Fail the
-          // same way a real conflict would rather than ever sending a
-          // replace with no version token at all.
           throw new ThoughtThreadReplaceError("conflict", "Отсутствует версия нити для сохранения.");
         }
         await replaceThoughtThread(editingThreadId, input, editingThreadExpectedUpdatedAt);
       } else {
         await createThoughtThread(input);
       }
-      // Success is shown only after a confirmed server write and a fresh RLS-backed read.
       await refreshThreads();
       resetThreadComposer();
     } catch (saveError) {
@@ -406,12 +358,6 @@ export function AtlasView({
       if (saveError instanceof ThoughtThreadReplaceError) {
         switch (saveError.kind) {
           case "conflict":
-            // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: this is the whole
-            // point of this feature -- never silently merge, never
-            // auto-discard the visitor's in-progress edit. The composer
-            // stays open, title/question/synthesis/selectedAnnotationIds
-            // are untouched, and the visitor explicitly decides via
-            // handleLoadLatestThreadVersion() below.
             setThreadConflict(true);
             setThreadError(
               "Эта нить изменилась в другом месте. Загрузите актуальную версию перед повторным сохранением."
@@ -437,38 +383,24 @@ export function AtlasView({
     }
   }
 
-  // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1: the visitor's explicit
-  // response to a save conflict -- fetches a fresh, RLS-backed read of
-  // this exact Thread and replaces the composer's fields with it,
-  // including a fresh editingThreadExpectedUpdatedAt so the next save
-  // attempt is based on the version actually just loaded. Deliberately
-  // never called automatically -- only this one button click discards the
-  // visitor's unsaved local edits, and only after they were already shown
-  // the conflict message.
   async function handleLoadLatestThreadVersion(): Promise<void> {
     if (!editingThreadId) return;
 
     setLoadingLatestThread(true);
     try {
-      // Fresh, RLS-backed reads of both Threads and annotations -- not a
-      // single transactional snapshot, but close enough in time that we can
-      // also refresh the annotation cards this conflict may be about (e.g.
-      // a fragment Reader appended in another tab), on top of the
-      // membership fix below which does not depend on this succeeding.
-      const [threads, annotations] = await Promise.all([listThoughtThreads(), listAnnotationsForUser()]);
+      const [threads, annotations, memorySignals] = await Promise.all([
+        listThoughtThreads(),
+        listAnnotationsForUser(),
+        listAtlasMemorySignals()
+      ]);
       const fresh = threads.find(candidate => candidate.id === editingThreadId);
 
       if (!fresh) {
-        // Deleted elsewhere in the meantime -- nothing left to reload.
         resetThreadComposer();
         setThreadError("Эта нить мысли больше не существует.");
         return;
       }
 
-      // Bring in any books behind the freshly-loaded annotations that this
-      // tab's catalog doesn't already know about, so new fragment cards can
-      // render a title/author instead of "Книга больше не найдена". Minimal
-      // on purpose -- this is not a full Atlas reload.
       const unknownWorkIds = Array.from(
         new Set(annotations.map(annotation => annotation.workId).filter(workId => !getBookById(workId)))
       );
@@ -479,22 +411,12 @@ export function AtlasView({
       setThreadTitle(fresh.title);
       setThreadQuestion(fresh.question ?? "");
       setThreadSynthesis(fresh.synthesisNote ?? "");
-      // THOUGHT THREAD OPTIMISTIC CONCURRENCY v1 correction: same invariant
-      // as openEditThread() above -- fresh.annotationIds IS the server's
-      // Thread membership and must be kept as-is. Filtering it through the
-      // annotation objects we just fetched (or the stale ones from before)
-      // would silently drop any id the annotations read didn't happen to
-      // return, then this becomes the new "expected" save baseline and the
-      // very next save deletes that id with no conflict -- the exact bug
-      // this reload action exists to fix, just reproduced one level deeper.
-      // If an id is genuinely gone (annotation actually deleted), the
-      // server's own AK002 on the next save is what surfaces that -- not a
-      // silent client-side drop here.
       setSelectedAnnotationIds([...fresh.annotationIds]);
       setEditingThreadExpectedUpdatedAt(fresh.updatedAt);
       setAtlas(current => ({
         ...current,
         annotations,
+        memorySignals,
         threads: current.threads.map(candidate => (candidate.id === fresh.id ? fresh : candidate))
       }));
       setThreadConflict(false);
@@ -548,6 +470,7 @@ export function AtlasView({
             <AtlasOverview
               booksCount={atlas.activeBooks.length}
               fragmentsCount={atlas.annotations.length}
+              memorySignalsCount={visibleMemorySignals.length}
               memoryWorkCount={memoryWorkCount}
               threadsCount={atlas.threads.length}
               openThreadsCount={openThreadsCount}
@@ -787,57 +710,20 @@ export function AtlasView({
             <AtlasBackToOverviewLink onClick={scrollToOverview} />
           </div>
 
-          <section ref={memoryRef} className="notes-group" aria-label="Личная память чтения">
-            <header className="notes-group-header">
-              <div>
-                <p className="eyebrow">Memory</p>
-                <h2 className="notes-group-title">Ваши сохранённые мысли</h2>
-                <p className="notes-group-author">Последние фрагменты, которые вы решили не потерять.</p>
-              </div>
-            </header>
-
-            {recentMemory.length === 0 ? (
-              <GuestNotice message="Atlas строится из фрагментов, которые вы сохраняете во время реального чтения. Сохраните первую мысль в Reader — она появится здесь." />
-            ) : (
-              <div className="notes-group-items">
-                {recentMemory.map(annotation => {
-                  const book = getBookById(annotation.workId);
-                  return (
-                    <article key={annotation.id} className="notes-card">
-                      <p className="notes-card-edition">
-                        {book?.title ?? "Книга больше не найдена"}
-                        {book?.authorName ? ` · ${book.authorName}` : ""}
-                      </p>
-                      <blockquote className="notes-card-quote">{annotation.quoteText}</blockquote>
-                      {annotation.noteText && <p className="notes-card-note">{annotation.noteText}</p>}
-                      <div className="notes-card-actions">
-                        {book && (
-                          <button type="button" className="text-link" onClick={() => onOpenBookDetail(annotation.workId)}>
-                            Открыть книгу
-                          </button>
-                        )}
-                        <button type="button" className="text-link" onClick={() => handleOpenMemory(annotation)}>
-                          Вернуться к фрагменту
-                        </button>
-                      </div>
-                      {unavailableId === annotation.id && (
-                        <p className="book-detail-unavailable">
-                          Это издание сейчас недоступно в вашей юрисдикции.
-                        </p>
-                      )}
-                      <p className="notes-card-date">{formatDate(annotation.updatedAt)}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-
+          <section ref={memoryRef} className="notes-group" aria-label="Постоянная память Atlas">
+            <AtlasPersistentMemorySection
+              signals={atlas.memorySignals}
+              annotationById={annotationById}
+              unavailableAnnotationId={unavailableId}
+              onOpenBookDetail={onOpenBookDetail}
+              onOpenAnnotation={handleOpenMemory}
+            />
             <AtlasBackToOverviewLink onClick={scrollToOverview} />
           </section>
 
           {wantToReadCount > 0 && (
             <p className="settings-section-note">
-              Ещё {wantToReadCount} книг в «Хочу прочитать» сами по себе пока не влияют на Atlas: книга входит в интеллектуальную историю, когда чтение началось или в ней появилась сохранённая мысль.
+              Ещё {wantToReadCount} книг в «Хочу прочитать» сохраняются в аккаунте, но сами по себе не считаются интеллектуальной историей Atlas: книга входит в активную память, когда чтение началось, появилась закладка или сохранённая мысль.
             </p>
           )}
 
@@ -890,9 +776,9 @@ export function AtlasView({
             <AtlasBackToOverviewLink onClick={scrollToOverview} />
           </section>
 
-          {(readingCount > 0 || finishedCount > 0) && (
+          {(readingCount > 0 || finishedCount > 0 || visibleMemorySignals.length > 0) && (
             <p className="settings-section-note">
-              Сейчас в библиотеке: читаете — {readingCount}, завершено — {finishedCount}. Книг с личной памятью — {memoryWorkCount}.
+              Сейчас в библиотеке: читаете — {readingCount}, завершено — {finishedCount}. В постоянной памяти — {visibleMemorySignals.length} сигналов по {memoryWorkCount} книгам.
             </p>
           )}
         </>
