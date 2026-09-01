@@ -1,17 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AtlasSemanticIndexError,
+  listAtlasSemanticEvidence,
   loadAtlasSemanticGraph,
   runAtlasSemanticIndex,
   type AtlasSemanticConcept,
+  type AtlasSemanticEvidence,
   type AtlasSemanticIndexResult,
   type AtlasSemanticRelationship
 } from "../../api/atlasSemantic";
+import type { Annotation } from "../../api/annotations";
+import { listThoughtThreads, type ThoughtThread } from "../../api/thoughtThreads";
+import { getBookById } from "../../catalog";
 import { GuestNotice } from "../shared/GuestNotice";
 
 interface SemanticGraphState {
   concepts: AtlasSemanticConcept[];
   relationships: AtlasSemanticRelationship[];
+}
+
+interface AtlasSemanticGraphSectionProps {
+  annotationById: Map<string, Annotation>;
+  unavailableAnnotationId: string | null;
+  onOpenAnnotation: (annotation: Annotation) => void;
 }
 
 function entityTypeLabel(type: AtlasSemanticConcept["entityType"]): string {
@@ -43,13 +54,36 @@ function formatReset(iso: string | null): string | null {
   }
 }
 
-export function AtlasSemanticGraphSection() {
+function formatEvidenceDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function confidenceLabel(value: number): string {
+  const normalized = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  return `${Math.round(normalized * 100)}% уверенности`;
+}
+
+export function AtlasSemanticGraphSection({
+  annotationById,
+  unavailableAnnotationId,
+  onOpenAnnotation
+}: AtlasSemanticGraphSectionProps) {
   const [graph, setGraph] = useState<SemanticGraphState>({ concepts: [], relationships: [] });
   const [indexResult, setIndexResult] = useState<AtlasSemanticIndexResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [indexing, setIndexing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
+  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<AtlasSemanticEvidence[]>([]);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [threadById, setThreadById] = useState<Map<string, ThoughtThread>>(new Map());
+  const evidenceRequest = useRef(0);
 
   async function refresh(runIndex: boolean, cancelled?: () => boolean): Promise<void> {
     if (runIndex) {
@@ -95,6 +129,7 @@ export function AtlasSemanticGraphSection() {
     });
     return () => {
       cancelled = true;
+      evidenceRequest.current += 1;
     };
   }, []);
 
@@ -124,7 +159,156 @@ export function AtlasSemanticGraphSection() {
       .slice(0, 12);
   }, [graph.relationships, conceptById]);
 
+  const selectedConcept = selectedConceptId ? conceptById.get(selectedConceptId) ?? null : null;
   const remaining = indexResult?.remaining ?? 0;
+
+  async function toggleEvidence(concept: AtlasSemanticConcept): Promise<void> {
+    if (selectedConceptId === concept.id) {
+      evidenceRequest.current += 1;
+      setSelectedConceptId(null);
+      setSelectedEvidence([]);
+      setThreadById(new Map());
+      setEvidenceError(null);
+      setEvidenceLoading(false);
+      return;
+    }
+
+    const requestId = evidenceRequest.current + 1;
+    evidenceRequest.current = requestId;
+    setSelectedConceptId(concept.id);
+    setSelectedEvidence([]);
+    setThreadById(new Map());
+    setEvidenceError(null);
+    setEvidenceLoading(true);
+
+    try {
+      const evidence = await listAtlasSemanticEvidence(concept.id);
+      let threads = new Map<string, ThoughtThread>();
+
+      if (evidence.some(item => item.sourceType === "thread")) {
+        const loadedThreads = await listThoughtThreads();
+        threads = new Map(loadedThreads.map(thread => [thread.id, thread]));
+      }
+
+      if (evidenceRequest.current !== requestId) return;
+      setSelectedEvidence(evidence);
+      setThreadById(threads);
+    } catch (error) {
+      console.error("Atlas semantic evidence load failed:", error);
+      if (evidenceRequest.current === requestId) {
+        setEvidenceError("Не удалось загрузить доказательства этого смыслового узла.");
+      }
+    } finally {
+      if (evidenceRequest.current === requestId) setEvidenceLoading(false);
+    }
+  }
+
+  function renderAnnotationEvidence(evidence: AtlasSemanticEvidence) {
+    const annotation = annotationById.get(evidence.sourceId) ?? null;
+    const workId = annotation?.workId ?? evidence.workId;
+    const book = workId ? getBookById(workId) : null;
+
+    return (
+      <article key={evidence.id} className="notes-card">
+        <p className="eyebrow">Цитата / заметка</p>
+        {book && (
+          <p className="notes-card-edition">
+            {book.title}{book.authorName ? ` · ${book.authorName}` : ""}
+          </p>
+        )}
+
+        {annotation ? (
+          <>
+            <blockquote className="notes-card-quote">{annotation.quoteText}</blockquote>
+            {annotation.noteText && <p className="notes-card-note">{annotation.noteText}</p>}
+          </>
+        ) : evidence.excerpt ? (
+          <blockquote className="notes-card-quote">{evidence.excerpt}</blockquote>
+        ) : (
+          <p className="settings-section-note">Исходный фрагмент больше недоступен в локальной выборке Atlas.</p>
+        )}
+
+        {evidence.excerpt && annotation && (
+          <p className="settings-section-note"><strong>Почему Atlas связал:</strong> {evidence.excerpt}</p>
+        )}
+
+        <p className="settings-section-note">
+          {confidenceLabel(evidence.confidence)} · {formatEvidenceDate(evidence.sourceRevisionAt)}
+        </p>
+
+        {annotation && (
+          <div className="notes-card-actions">
+            <button type="button" className="text-link" onClick={() => onOpenAnnotation(annotation)}>
+              Вернуться к точному фрагменту
+            </button>
+          </div>
+        )}
+
+        {annotation && unavailableAnnotationId === annotation.id && (
+          <p className="book-detail-unavailable">
+            Это издание сейчас недоступно в вашей юрисдикции.
+          </p>
+        )}
+      </article>
+    );
+  }
+
+  function renderThreadEvidence(evidence: AtlasSemanticEvidence) {
+    const thread = threadById.get(evidence.sourceId) ?? null;
+    const threadAnnotations = thread
+      ? thread.annotationIds
+          .map(id => annotationById.get(id))
+          .filter((annotation): annotation is Annotation => Boolean(annotation))
+      : [];
+
+    return (
+      <article key={evidence.id} className="notes-card">
+        <p className="eyebrow">Thought Thread</p>
+        <h3 className="plan-card-name">{thread?.title ?? "Нить мысли"}</h3>
+
+        {thread?.question && (
+          <p className="settings-section-note"><strong>Вопрос:</strong> {thread.question}</p>
+        )}
+        {thread?.synthesisNote && <p className="notes-card-note">{thread.synthesisNote}</p>}
+        {evidence.excerpt && (
+          <p className="settings-section-note"><strong>Почему Atlas связал:</strong> {evidence.excerpt}</p>
+        )}
+
+        <p className="settings-section-note">
+          {confidenceLabel(evidence.confidence)} · {formatEvidenceDate(evidence.sourceRevisionAt)}
+        </p>
+
+        {threadAnnotations.length > 0 && (
+          <div className="notes-group-items">
+            {threadAnnotations.map(annotation => {
+              const book = getBookById(annotation.workId);
+              return (
+                <div key={`${evidence.id}-${annotation.id}`} className="notes-card">
+                  {book && (
+                    <p className="notes-card-edition">
+                      {book.title}{book.authorName ? ` · ${book.authorName}` : ""}
+                    </p>
+                  )}
+                  <blockquote className="notes-card-quote">{annotation.quoteText}</blockquote>
+                  {annotation.noteText && <p className="notes-card-note">{annotation.noteText}</p>}
+                  <div className="notes-card-actions">
+                    <button type="button" className="text-link" onClick={() => onOpenAnnotation(annotation)}>
+                      Вернуться к точному фрагменту
+                    </button>
+                  </div>
+                  {unavailableAnnotationId === annotation.id && (
+                    <p className="book-detail-unavailable">
+                      Это издание сейчас недоступно в вашей юрисдикции.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </article>
+    );
+  }
 
   return (
     <div className="notes-group" aria-label="Смысловая карта Atlas">
@@ -166,17 +350,66 @@ export function AtlasSemanticGraphSection() {
           </div>
 
           <div className="notes-group-items">
-            {topConcepts.map(concept => (
-              <article key={concept.id} className="notes-card">
-                <p className="eyebrow">{entityTypeLabel(concept.entityType)}</p>
-                <h3 className="plan-card-name">{concept.labelRu}</h3>
-                <p className="settings-section-note">
-                  {concept.sourceCount} {sourceForm(concept.sourceCount)} · {concept.evidenceCount} {evidenceForm(concept.evidenceCount)}
-                  {concept.workCount > 0 ? ` · ${concept.workCount} книг` : ""}
-                </p>
-              </article>
-            ))}
+            {topConcepts.map(concept => {
+              const expanded = selectedConceptId === concept.id;
+              const targetId = `atlas-semantic-evidence-${concept.id}`;
+              return (
+                <article key={concept.id} className="notes-card">
+                  <p className="eyebrow">{entityTypeLabel(concept.entityType)}</p>
+                  <h3 className="plan-card-name">{concept.labelRu}</h3>
+                  <p className="settings-section-note">
+                    {concept.sourceCount} {sourceForm(concept.sourceCount)} · {concept.evidenceCount} {evidenceForm(concept.evidenceCount)}
+                    {concept.workCount > 0 ? ` · ${concept.workCount} книг` : ""}
+                  </p>
+                  <div className="notes-card-actions">
+                    <button
+                      type="button"
+                      className="text-link"
+                      aria-expanded={expanded}
+                      aria-controls={targetId}
+                      onClick={() => void toggleEvidence(concept)}
+                    >
+                      {expanded ? "Скрыть доказательства" : "Показать доказательства"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
+
+          {selectedConcept && (
+            <section
+              id={`atlas-semantic-evidence-${selectedConcept.id}`}
+              className="notes-group"
+              aria-label={`Доказательства концепта ${selectedConcept.labelRu}`}
+            >
+              <header className="notes-group-header">
+                <div>
+                  <p className="eyebrow">Evidence</p>
+                  <h3 className="notes-group-title">Почему «{selectedConcept.labelRu}» существует в Atlas</h3>
+                  <p className="notes-group-author">
+                    Здесь только исходные цитаты, заметки и Thought Threads, на которых основан этот узел. Из цитаты можно вернуться в точное место Reader.
+                  </p>
+                </div>
+              </header>
+
+              {evidenceLoading ? (
+                <GuestNotice message="Загружаем доказательства смыслового узла…" />
+              ) : evidenceError ? (
+                <GuestNotice message={evidenceError} />
+              ) : selectedEvidence.length === 0 ? (
+                <GuestNotice message="Для этого узла сейчас нет доступных доказательств. Если исходная память была изменена или удалена, Atlas очистит связь при следующей индексации." />
+              ) : (
+                <div className="notes-group-items">
+                  {selectedEvidence.map(evidence =>
+                    evidence.sourceType === "annotation"
+                      ? renderAnnotationEvidence(evidence)
+                      : renderThreadEvidence(evidence)
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
           {topRelationships.length > 0 && (
             <>
