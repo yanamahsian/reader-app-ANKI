@@ -2,6 +2,7 @@ import type { AtlasMemorySignal } from "../../api/atlasMemory";
 import type { Annotation } from "../../api/annotations";
 import { getBookById } from "../../catalog";
 import { GuestNotice } from "../shared/GuestNotice";
+import { AtlasConceptGraphSection } from "./AtlasConceptGraphSection";
 
 interface AtlasPersistentMemorySectionProps {
   signals: AtlasMemorySignal[];
@@ -180,6 +181,8 @@ export function AtlasPersistentMemorySection({
           В постоянной памяти сейчас {visible.length} сигналов. Здесь показаны последние {recent.length}; полная история остаётся в аккаунте и доступна Atlas как источник дальнейшей интеллектуальной памяти.
         </p>
       )}
+
+      <AtlasConceptGraphSection />
     </>
   );
 }
