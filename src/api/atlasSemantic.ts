@@ -98,7 +98,8 @@ export class AtlasSemanticIndexError extends Error {
       | "service_unavailable"
       | "extraction_failed",
     message: string,
-    public readonly resetAt: string | null = null
+    public readonly resetAt: string | null = null,
+    public readonly remaining: number = 0
   ) {
     super(message);
     this.name = "AtlasSemanticIndexError";
@@ -185,19 +186,26 @@ export async function runAtlasSemanticIndex(): Promise<AtlasSemanticIndexResult>
     };
   }
 
+  const remaining = Number.isFinite(body.remaining) ? Number(body.remaining) : 0;
+
   if (response.status === 401 || body.error === "auth_required") {
-    throw new AtlasSemanticIndexError("auth_required", "Сессия истекла. Войдите снова.");
+    throw new AtlasSemanticIndexError("auth_required", "Сессия истекла. Войдите снова.", null, remaining);
   }
   if (response.status === 429 && body.error === "ai_monthly_limit_reached") {
-    throw new AtlasSemanticIndexError("monthly_limit", "Месячный лимит Atlas AI исчерпан.", body.resetAt ?? null);
+    throw new AtlasSemanticIndexError("monthly_limit", "Месячный лимит Atlas AI исчерпан.", body.resetAt ?? null, remaining);
   }
   if (response.status === 429 && body.error === "ai_hourly_limit_reached") {
-    throw new AtlasSemanticIndexError("hourly_limit", "Часовой лимит Atlas AI исчерпан.", body.resetAt ?? null);
+    throw new AtlasSemanticIndexError("hourly_limit", "Часовой лимит Atlas AI исчерпан.", body.resetAt ?? null, remaining);
   }
   if (body.error === "semantic_extraction_failed") {
-    throw new AtlasSemanticIndexError("extraction_failed", "Не удалось проиндексировать новую память Atlas.");
+    throw new AtlasSemanticIndexError(
+      "extraction_failed",
+      "Не удалось проиндексировать новую память Atlas. Повторная попытка не будет повторно списывать квоту за неудавшийся вызов.",
+      null,
+      remaining
+    );
   }
-  throw new AtlasSemanticIndexError("service_unavailable", "Смысловая индексация Atlas временно недоступна.");
+  throw new AtlasSemanticIndexError("service_unavailable", "Смысловая индексация Atlas временно недоступна.", null, remaining);
 }
 
 async function fetchPaged<T>(endpoint: string, order: string, filters = ""): Promise<T[]> {
