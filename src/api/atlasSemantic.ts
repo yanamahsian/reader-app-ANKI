@@ -2,10 +2,12 @@ import { getValidAccessToken, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../
 
 const FUNCTION_ENDPOINT = `${SUPABASE_URL}/functions/v1/omnia-atlas-semantic`;
 const CONCEPTS_ENDPOINT = `${SUPABASE_URL}/rest/v1/atlas_semantic_concepts`;
+const EVIDENCE_ENDPOINT = `${SUPABASE_URL}/rest/v1/atlas_semantic_evidence`;
 const RELATIONSHIPS_ENDPOINT = `${SUPABASE_URL}/rest/v1/atlas_semantic_relationships`;
 const PAGE_SIZE = 500;
 
 export type AtlasSemanticEntityType = "concept" | "person";
+export type AtlasSemanticSourceType = "annotation" | "thread";
 
 export interface AtlasSemanticConcept {
   id: string;
@@ -18,6 +20,17 @@ export interface AtlasSemanticConcept {
   workCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
+}
+
+export interface AtlasSemanticEvidence {
+  id: string;
+  conceptId: string;
+  sourceType: AtlasSemanticSourceType;
+  sourceId: string;
+  workId: string | null;
+  excerpt: string | null;
+  confidence: number;
+  sourceRevisionAt: string;
 }
 
 export interface AtlasSemanticRelationship {
@@ -51,6 +64,17 @@ interface ConceptRow {
   work_count: number;
   first_seen_at: string;
   last_seen_at: string;
+}
+
+interface EvidenceRow {
+  id: string;
+  concept_id: string;
+  source_type: AtlasSemanticSourceType;
+  source_id: string;
+  work_id: string | null;
+  excerpt: string | null;
+  confidence: number;
+  source_revision_at: string;
 }
 
 interface RelationshipRow {
@@ -103,6 +127,19 @@ function fromConceptRow(row: ConceptRow): AtlasSemanticConcept {
     workCount: row.work_count,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at
+  };
+}
+
+function fromEvidenceRow(row: EvidenceRow): AtlasSemanticEvidence {
+  return {
+    id: row.id,
+    conceptId: row.concept_id,
+    sourceType: row.source_type,
+    sourceId: row.source_id,
+    workId: row.work_id,
+    excerpt: row.excerpt,
+    confidence: row.confidence,
+    sourceRevisionAt: row.source_revision_at
   };
 }
 
@@ -163,14 +200,15 @@ export async function runAtlasSemanticIndex(): Promise<AtlasSemanticIndexResult>
   throw new AtlasSemanticIndexError("service_unavailable", "Смысловая индексация Atlas временно недоступна.");
 }
 
-async function fetchPaged<T>(endpoint: string, order: string): Promise<T[]> {
+async function fetchPaged<T>(endpoint: string, order: string, filters = ""): Promise<T[]> {
   const headers = await authHeaders();
   const rows: T[] = [];
   let offset = 0;
+  const prefix = filters ? `${filters}&` : "";
 
   while (true) {
     const response = await fetch(
-      `${endpoint}?select=*&order=${order}&limit=${PAGE_SIZE}&offset=${offset}`,
+      `${endpoint}?${prefix}select=*&order=${order}&limit=${PAGE_SIZE}&offset=${offset}`,
       { headers }
     );
     if (!response.ok) {
@@ -193,6 +231,16 @@ export async function listAtlasSemanticConcepts(): Promise<AtlasSemanticConcept[
     "source_count.desc,evidence_count.desc,work_count.desc,last_seen_at.desc"
   );
   return rows.map(fromConceptRow);
+}
+
+export async function listAtlasSemanticEvidence(conceptId: string): Promise<AtlasSemanticEvidence[]> {
+  if (!conceptId.trim()) return [];
+  const rows = await fetchPaged<EvidenceRow>(
+    EVIDENCE_ENDPOINT,
+    "source_revision_at.desc,confidence.desc",
+    `concept_id=eq.${encodeURIComponent(conceptId)}`
+  );
+  return rows.map(fromEvidenceRow);
 }
 
 export async function listAtlasSemanticRelationships(): Promise<AtlasSemanticRelationship[]> {
