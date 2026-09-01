@@ -43,6 +43,9 @@ const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy
 const AUTH_ENDPOINT = `${SUPABASE_URL}/auth/v1`;
 const SESSION_KEY = "anki_auth_session";
 
+// Explicit production redirect for signup email confirmation.
+const SIGNUP_CONFIRMATION_REDIRECT_URL = "https://yanamahsian.github.io/reader-app-ANKI/";
+
 export interface AuthUser {
   id: string;
   email: string | null;
@@ -172,7 +175,10 @@ export interface SignUpResult {
 
 export async function signUp(email: string, password: string): Promise<SignUpResult> {
 
-  const { status, data } = await gotrueFetch("/signup", { email, password });
+  const { status, data } = await gotrueFetch(
+    `/signup?redirect_to=${encodeURIComponent(SIGNUP_CONFIRMATION_REDIRECT_URL)}`,
+    { email, password }
+  );
 
   if (status >= 400) {
     throw new Error(extractErrorMessage(data, "Не удалось создать аккаунт."));
