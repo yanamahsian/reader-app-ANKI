@@ -1,5 +1,6 @@
 import type { Book } from "./engine/types";
 import { isPersonalEpubBook } from "../../api/personalEpubLibrary";
+import { isPersonalFb2Book } from "../../api/personalFb2Library";
 import { isPersonalPdfBook } from "../../api/personalPdfLibrary";
 
 const OPEN_EVENT = "anki:open-personal-book";
@@ -7,7 +8,7 @@ const ACTIVE_SESSION_KEY = "anki-active-personal-book-v2";
 const LEGACY_EPUB_SESSION_KEY = "anki-active-personal-epub-v1";
 
 export function isPersonalImportedBook(book: Book): boolean {
-  return isPersonalEpubBook(book) || isPersonalPdfBook(book);
+  return isPersonalEpubBook(book) || isPersonalPdfBook(book) || isPersonalFb2Book(book);
 }
 
 export function requestOpenPersonalBook(book: Book): void {
