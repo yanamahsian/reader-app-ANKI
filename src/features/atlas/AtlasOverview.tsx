@@ -5,7 +5,6 @@
 // server-side atlas_memory_signals substrate; this component remains purely
 // presentational and never runs AI just to populate its index.
 import { useMemo } from "react";
-import { AtlasConceptGraphSection } from "./AtlasConceptGraphSection";
 
 export type AtlasSectionId = "threads" | "unfinished" | "questions" | "contradictions" | "memory" | "connections";
 
@@ -156,8 +155,6 @@ export function AtlasOverview({
           </div>
         </div>
       </section>
-
-      <AtlasConceptGraphSection />
 
       <section className="notes-group" aria-label="Разделы Atlas">
         <header className="notes-group-header">
