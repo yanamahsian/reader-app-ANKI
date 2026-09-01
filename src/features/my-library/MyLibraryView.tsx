@@ -5,6 +5,7 @@ import { LibraryBookCard } from "../shared/LibraryBookCard";
 import { getBookById } from "../../catalog";
 import type { Book as CatalogBook } from "../../catalog/types";
 import type { Book as ReaderBook } from "../reader/engine/types";
+import { requestOpenPersonalEpub } from "../reader/personalEpubBridge";
 import { useAuth } from "../../auth/supabaseAuth";
 import { fetchAndMergeWorksByIds, listLibrary } from "../../api/userLibrary";
 import type { LibraryEntry, LibraryStatus } from "../../api/userLibrary";
@@ -44,10 +45,10 @@ interface MyLibraryViewProps {
     state: MyLibraryRestoreState,
     initialEdition: { editionId: string; language: string } | null
   ) => void;
-  // Personal EPUBs bypass Book Detail because they have no catalog Work or
-  // rights/Edition choice. App routes this Book straight into the existing
-  // Reader and returns to My Library when Reader exits.
-  onOpenPersonalBook: (book: ReaderBook) => void;
+  // Optional injection kept for isolated stories/tests. Production uses the
+  // top-level personal EPUB bridge so Reader can replace AppShell without
+  // making App's mature navigation state own device-local files.
+  onOpenPersonalBook?: (book: ReaderBook) => void;
   // Routes a signed-out visitor to the existing auth home (Profile) --
   // same destination AccountMenu and BookDetailView's own
   // "Добавить в библиотеку" already use (requirement #4).
@@ -101,6 +102,7 @@ export function MyLibraryView({
 
   const requestIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const openPersonalBook = onOpenPersonalBook ?? requestOpenPersonalEpub;
 
   // Personal EPUBs are intentionally independent of auth in v1. The file is
   // stored in this browser's IndexedDB and never uploaded to AN.KI/Supabase.
@@ -181,7 +183,7 @@ export function MyLibraryView({
       const imported = await importPersonalEpub(file);
       setPersonalBooks(current => [imported, ...current.filter(book => book.id !== imported.id)]);
       setPersonalStatus("ready");
-      onOpenPersonalBook(toPersonalEpubBook(imported));
+      openPersonalBook(toPersonalEpubBook(imported));
     } catch (error) {
       console.error("personal EPUB import failed:", error);
       setPersonalError(personalEpubErrorMessage(error));
@@ -259,7 +261,7 @@ export function MyLibraryView({
                 <button
                   type="button"
                   className="personal-epub-open"
-                  onClick={() => onOpenPersonalBook(toPersonalEpubBook(book))}
+                  onClick={() => openPersonalBook(toPersonalEpubBook(book))}
                 >
                   <span className="personal-epub-format">EPUB · Личный файл</span>
                   <span className="personal-epub-title">{book.title}</span>
