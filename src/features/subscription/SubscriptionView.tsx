@@ -475,6 +475,13 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
       return { label: "Бесплатный план", disabled: true, loading: false, variant: "primary", onClick: null };
     }
 
+    if (planDef.id === "academy") {
+      if (currentPlanId === "academy") {
+        return { label: "Текущий план", disabled: true, loading: false, variant: "primary", onClick: null };
+      }
+      return { label: "Скоро", disabled: true, loading: false, variant: "secondary", onClick: null };
+    }
+
     if (!isAuthenticated) {
       return {
         label: "Войти и оформить подписку",

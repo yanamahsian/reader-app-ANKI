@@ -200,6 +200,11 @@ async function handleCheckout(user: AuthenticatedUser, body: Record<string, unkn
   if (!isPlan(plan)) {
     return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
   }
+  // Academy remains visible as the future top tier, but recurring Academy
+  // checkout is intentionally disabled until the Academy product layer is live.
+  if (plan === "academy") {
+    return jsonResponse({ status: "error", error: "plan_not_available" }, 409);
+  }
   if (!isInterval(interval)) {
     return jsonResponse({ status: "error", error: "invalid_interval", message: "interval must be month or year" }, 400);
   }
@@ -357,6 +362,9 @@ async function handleChangeSubscription(
 
   if (!isPlan(targetPlan)) {
     return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
+  }
+  if (targetPlan === "academy") {
+    return jsonResponse({ status: "error", error: "plan_not_available" }, 409);
   }
   if (!isInterval(targetInterval)) {
     return jsonResponse({ status: "error", error: "invalid_interval", message: "interval must be month or year" }, 400);
