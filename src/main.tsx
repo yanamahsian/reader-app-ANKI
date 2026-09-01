@@ -8,6 +8,7 @@ import {
   readActivePersonalBook,
   subscribeToPersonalBookOpen
 } from "./features/reader/personalEpubBridge";
+import { installReaderPreferences } from "./features/reader/readerPreferences";
 import "./styles/global.css";
 
 const rootElement = document.getElementById("root");
@@ -16,9 +17,15 @@ if (!rootElement) {
   throw new Error("Root element #root not found");
 }
 
+// readerEngine.ts is intentionally imperative DOM. Install one additive bridge
+// at app bootstrap so every Reader instance — catalog or device-local — gets
+// the same persistent typography controls without duplicating settings state in
+// App navigation or rewriting the mature engine.
+installReaderPreferences();
+
 // Device-local imports are not catalog Works/Editions. Keep App mounted under
 // the dedicated Reader so My Library navigation state survives while a local
-// EPUB/PDF temporarily takes over the reading surface.
+// EPUB/PDF/FB2 temporarily takes over the reading surface.
 function RootApp() {
   const [personalBook, setPersonalBook] = useState<Book | null>(() => readActivePersonalBook());
 
