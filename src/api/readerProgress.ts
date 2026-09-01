@@ -14,6 +14,7 @@ const TABLE_ENDPOINT = `${SUPABASE_URL}/rest/v1/reader_progress`;
 
 export interface ReaderRemoteState {
   position: number | null;
+  positionUpdatedAt: string | null;
   bookmarks: Bookmark[];
 }
 
@@ -34,24 +35,31 @@ async function authHeaders(extra?: Record<string, string>): Promise<Record<strin
   };
 }
 
-async function fetchPosition(editionId: string): Promise<number | null> {
+async function fetchPosition(editionId: string): Promise<{
+  page: number | null;
+  updatedAt: string | null;
+}> {
   const headers = await authHeaders();
-  if (!headers) return null;
+  if (!headers) return { page: null, updatedAt: null };
 
   try {
     const response = await fetch(
-      `${TABLE_ENDPOINT}?edition_id=eq.${encodeURIComponent(editionId)}&select=page&limit=1`,
+      `${TABLE_ENDPOINT}?edition_id=eq.${encodeURIComponent(editionId)}` +
+      `&select=page,updated_at&limit=1`,
       { headers }
     );
     if (!response.ok) {
       console.error("reader_progress fetch failed:", response.status, await response.text().catch(() => ""));
-      return null;
+      return { page: null, updatedAt: null };
     }
-    const rows = (await response.json()) as Array<{ page: number }>;
-    return rows[0]?.page ?? null;
+    const rows = (await response.json()) as Array<{ page: number; updated_at: string }>;
+    const row = rows[0];
+    return row
+      ? { page: row.page, updatedAt: row.updated_at }
+      : { page: null, updatedAt: null };
   } catch (error) {
     console.error("reader_progress fetch failed:", error);
-    return null;
+    return { page: null, updatedAt: null };
   }
 }
 
@@ -59,24 +67,32 @@ export async function fetchProgress(editionId: string): Promise<ReaderRemoteStat
   // Personal imports are not public.editions rows. Never query catalog-owned
   // progress/bookmark tables for them, even if the reader is signed in.
   if (isDeviceLocalImport(editionId)) {
-    return { position: null, bookmarks: [] };
+    return { position: null, positionUpdatedAt: null, bookmarks: [] };
   }
 
   const [position, bookmarks] = await Promise.all([
     fetchPosition(editionId),
     fetchBookmarks(editionId)
   ]);
-  return { position, bookmarks };
+  return {
+    position: position.page,
+    positionUpdatedAt: position.updatedAt,
+    bookmarks
+  };
 }
 
-export async function saveProgress(editionId: string, page: number): Promise<void> {
+export async function saveProgress(
+  editionId: string,
+  page: number,
+  updatedAt = new Date().toISOString()
+): Promise<void> {
   if (isDeviceLocalImport(editionId)) return;
 
   const session = getSession();
   if (!session) return;
 
   const headers = await authHeaders({ "Prefer": "resolution=merge-duplicates,return=minimal" });
-  if (!headers) return;
+  if (!headers) throw new Error("reader_progress save failed: missing authenticated session");
 
   const response = await fetch(`${TABLE_ENDPOINT}?on_conflict=user_id,edition_id`, {
     method: "POST",
@@ -85,11 +101,11 @@ export async function saveProgress(editionId: string, page: number): Promise<voi
       user_id: session.user.id,
       edition_id: editionId,
       page,
-      updated_at: new Date().toISOString()
+      updated_at: updatedAt
     })
   });
 
   if (!response.ok) {
-    console.error("reader_progress save failed:", response.status, await response.text().catch(() => ""));
+    throw new Error(`reader_progress save failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
 }
