@@ -1,0 +1,62 @@
+name: Paddle 0014 Assembly Gate
+
+on:
+  push:
+    branches: [paddle-0014-assembler]
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout assembler branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct immutable inputs
+        run: |
+          cat .integration/paddle-0013.part.* | base64 -d | gzip -d > /tmp/0013.patch
+          cat .integration/paddle-0014.part.* | base64 -d | gzip -d > /tmp/apply_0014.py
+          test -s /tmp/0013.patch
+          test -s /tmp/apply_0014.py
+          python -m py_compile /tmp/apply_0014.py
+
+      - name: Assemble 0013 plus 0014 on current product baseline
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git reset --hard 45cac0ab3a296f3e6ae3accdb71e66f2a75287b9
+          git am /tmp/0013.patch
+          python /tmp/apply_0014.py
+          git add src supabase
+          git diff --cached --check
+          git commit -m "Fix Paddle lifecycle edge cases and sandbox mapping (0014)"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Real frontend build gate
+        env:
+          VITE_PADDLE_ENV: sandbox
+          VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9
+        run: |
+          npm run build
+          test -f dist/index.html
+
+      - name: Verify clean delivery shape
+        run: |
+          git status --short
+          git diff --check 45cac0ab3a296f3e6ae3accdb71e66f2a75287b9..HEAD
+          git diff --name-only 45cac0ab3a296f3e6ae3accdb71e66f2a75287b9..HEAD
+
+      - name: Publish clean ready branch
+        run: |
+          git push origin HEAD:refs/heads/paddle-subscription-lifecycle-v1-ready --force
