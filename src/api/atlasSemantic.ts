@@ -198,12 +198,16 @@ export async function runAtlasSemanticIndex(): Promise<AtlasSemanticIndexResult>
     throw new AtlasSemanticIndexError("hourly_limit", "Часовой лимит Atlas AI исчерпан.", body.resetAt ?? null, remaining);
   }
   if (body.error === "semantic_extraction_failed") {
-    throw new AtlasSemanticIndexError(
-      "extraction_failed",
-      "Не удалось проиндексировать новую память Atlas. Повторная попытка не будет повторно списывать квоту за неудавшийся вызов.",
-      null,
-      remaining
-    );
+    // The failed upstream call has already been refunded by the Edge Function.
+    // Return retry state instead of throwing it away so the existing
+    // "Продолжить анализ" control remains available without a page reload.
+    return {
+      processed: 0,
+      stale: 0,
+      failed: Number.isFinite(body.failed) ? Number(body.failed) : 1,
+      remaining,
+      indexed: false
+    };
   }
   throw new AtlasSemanticIndexError("service_unavailable", "Смысловая индексация Atlas временно недоступна.", null, remaining);
 }
