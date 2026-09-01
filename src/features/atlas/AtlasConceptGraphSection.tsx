@@ -70,16 +70,16 @@ interface LoadedGraph {
 }
 
 interface AtlasConceptGraphSectionProps {
-  annotationById: Map<string, Annotation>;
-  unavailableAnnotationId: string | null;
-  onOpenAnnotation: (annotation: Annotation) => void;
+  annotationById?: Map<string, Annotation>;
+  unavailableAnnotationId?: string | null;
+  onOpenAnnotation?: (annotation: Annotation) => void;
 }
 
 export function AtlasConceptGraphSection({
   annotationById,
   unavailableAnnotationId,
   onOpenAnnotation
-}: AtlasConceptGraphSectionProps) {
+}: AtlasConceptGraphSectionProps = {}) {
   const [graph, setGraph] = useState<LoadedGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
