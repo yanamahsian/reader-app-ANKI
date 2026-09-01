@@ -1,0 +1,150 @@
+.personal-library-section {
+  margin-bottom: 34px;
+  padding-bottom: 30px;
+  border-bottom: 1px solid var(--home-border);
+}
+
+.personal-library-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 22px;
+  margin-bottom: 12px;
+}
+
+.personal-library-heading {
+  margin: 0;
+  font-family: "Cormorant Garamond", serif;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+.personal-library-copy {
+  max-width: 720px;
+  margin: 0 0 20px;
+  color: var(--home-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.personal-library-file-input {
+  display: none;
+}
+
+.personal-library-error {
+  margin: 0 0 18px;
+  color: #d89a9a;
+  font-size: 13px;
+}
+
+.personal-library-loading,
+.personal-library-empty {
+  margin: 0;
+  color: var(--home-muted);
+  font-size: 13px;
+}
+
+.personal-epub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.personal-epub-card {
+  min-width: 0;
+  border: 1px solid var(--home-border);
+  background: color-mix(in srgb, var(--home-panel) 78%, transparent);
+}
+
+.personal-epub-open {
+  width: 100%;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 22px 20px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--home-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.personal-epub-open:hover,
+.personal-epub-open:focus-visible {
+  background: color-mix(in srgb, var(--home-panel) 90%, white 2%);
+}
+
+.personal-epub-format {
+  color: var(--home-gold);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.personal-epub-title {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--home-text);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 23px;
+  font-weight: 500;
+  line-height: 1.08;
+  text-overflow: ellipsis;
+}
+
+.personal-epub-author,
+.personal-epub-meta {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--home-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-epub-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px 12px;
+}
+
+.personal-epub-delete {
+  border: 0;
+  background: transparent;
+  color: var(--home-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.personal-epub-delete:hover,
+.personal-epub-delete:focus-visible {
+  color: var(--home-text);
+}
+
+.my-library-catalog-heading {
+  margin: 0 0 18px;
+  font-family: "Cormorant Garamond", serif;
+  font-size: 28px;
+  font-weight: 500;
+}
+
+@media (max-width: 700px) {
+  .personal-library-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .personal-library-head .primary-button {
+    width: 100%;
+  }
+
+  .personal-epub-grid {
+    grid-template-columns: 1fr;
+  }
+}
