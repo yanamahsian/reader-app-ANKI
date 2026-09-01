@@ -4,6 +4,7 @@
 // constructing the synchronous ProgressStore used by readerEngine.ts.
 import type { Bookmark } from "../features/reader/engine/types";
 import { fetchBookmarks } from "./readerBookmarks";
+import { isPersonalEpubBookId } from "./personalEpubLibrary";
 import { getValidAccessToken, getSession } from "../auth/supabaseAuth";
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "../auth/supabaseAuth";
 
@@ -52,6 +53,14 @@ async function fetchPosition(editionId: string): Promise<number | null> {
 // synchronous Reader state in parallel. This avoids serial network latency and
 // lets readerEngine.ts keep its existing getPosition/getBookmarks contract.
 export async function fetchProgress(editionId: string): Promise<ReaderRemoteState> {
+  // A personal EPUB is not a row in public.editions and must never be sent to
+  // the catalog-progress tables just because its owner happens to be signed in.
+  // createSupabaseProgressStore() recognizes the same id prefix and delegates
+  // the actual position/bookmark state to the existing local store.
+  if (isPersonalEpubBookId(editionId)) {
+    return { position: null, bookmarks: [] };
+  }
+
   const [position, bookmarks] = await Promise.all([
     fetchPosition(editionId),
     fetchBookmarks(editionId)
@@ -64,6 +73,8 @@ export async function fetchProgress(editionId: string): Promise<ReaderRemoteStat
 // single idempotent call, never a duplicate row. Fire-and-forget from
 // readerEngine.ts's point of view so page turns never wait on network I/O.
 export async function saveProgress(editionId: string, page: number): Promise<void> {
+
+  if (isPersonalEpubBookId(editionId)) return;
 
   const session = getSession();
   if (!session) return;
