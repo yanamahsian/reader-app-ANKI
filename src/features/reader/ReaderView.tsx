@@ -4,13 +4,17 @@ import type { LoadedDocument } from "./engine/formats/types";
 import { createReaderEngine, type ReaderEngine } from "./engine/readerEngine";
 import { detectLoader } from "./engine/formats/detect";
 import { searchLoadedDocument, type InBookSearchResult } from "./engine/inBookSearch";
+import { computeAnchorFromRange } from "./engine/highlightAnchor";
 import { createLocalStorageStore } from "./progressStore/localStorageStore";
 import { createSupabaseProgressStore } from "./progressStore/supabaseProgressStore";
 import { createSupabaseAnnotationStore } from "./annotationStore";
 import { createSupabaseThoughtThreadBridge } from "./threadBridge";
 import { getSession } from "../../auth/supabaseAuth";
 import { fetchProgress } from "../../api/readerProgress";
+import { revealPassage } from "../../api/reveal";
+import { AIEntitlementError, describeAIEntitlementErrorRu } from "../../api/aiEntitlements";
 import "./readerSearch.css";
+import "./readerReveal.css";
 
 // NOTES + HIGHLIGHTS PHASE: set only when arriving here from the Notes
 // screen ("open this exact quote") -- App.tsx clears/omits it for every
@@ -27,6 +31,20 @@ interface ReaderViewProps {
   book: Book;
   onExit: () => void;
   navigationTarget?: ReaderNavigationTarget | null;
+}
+
+interface RevealFlatPage {
+  rawText: string;
+  chapterTitle: string | null;
+}
+
+function flattenForReveal(document: LoadedDocument): RevealFlatPage[] {
+  return document.chapters.flatMap(chapter =>
+    chapter.pages.map(page => ({
+      rawText: page.rawText,
+      chapterTitle: chapter.title
+    }))
+  );
 }
 
 function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: string): void {
@@ -96,19 +114,19 @@ function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: s
 
 }
 
-// Thin React wrapper. All reader behaviour — pagination, selection,
-// action sheet, touch/keyboard nav — lives in readerEngine.ts, a plain
-// vanilla TypeScript module. This component only mounts a container
-// for it and calls its public API (open/destroy); React never reaches
-// into the engine's internal DOM except for the additive in-book-search
-// bridge below, which uses the engine's existing public page slider as
-// its navigation surface instead of creating a second page state.
+// Thin React wrapper. All mature reader behaviour — pagination, selection,
+// action sheet, touch/keyboard nav — stays in readerEngine.ts. The two
+// additive tools that need document-wide context (in-book Search and Reveal)
+// live here and navigate/read through the engine's already-rendered DOM and
+// canonical page slider instead of introducing a second page state.
 export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ReaderEngine | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDocumentRef = useRef<Promise<LoadedDocument> | null>(null);
+  const revealAbortRef = useRef<AbortController | null>(null);
+  const revealCacheRef = useRef<Map<string, string>>(new Map());
   const activeBookIdRef = useRef(book.id);
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -119,6 +137,12 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchHasRun, setSearchHasRun] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [revealSelection, setRevealSelection] = useState("");
+  const [revealAnswer, setRevealAnswer] = useState("");
+  const [revealLoading, setRevealLoading] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -139,6 +163,139 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
 
   }, []);
 
+  async function loadToolDocument(): Promise<LoadedDocument> {
+    let documentPromise = searchDocumentRef.current;
+    if (!documentPromise) {
+      documentPromise = detectLoader(book).load(book);
+      searchDocumentRef.current = documentPromise;
+    }
+
+    try {
+      return await documentPromise;
+    } catch (error) {
+      if (searchDocumentRef.current === documentPromise) searchDocumentRef.current = null;
+      throw error;
+    }
+  }
+
+  async function runReveal(
+    text: string,
+    range: Range | null,
+    viewer: HTMLElement,
+    container: HTMLElement
+  ): Promise<void> {
+    const selectedText = text.trim();
+    if (!selectedText) return;
+
+    const requestedBookId = book.id;
+    setRevealSelection(selectedText);
+    setRevealAnswer("");
+    setRevealError(null);
+    setRevealLoading(true);
+    setRevealOpen(true);
+
+    revealAbortRef.current?.abort();
+    const controller = new AbortController();
+    revealAbortRef.current = controller;
+
+    try {
+      const document = await loadToolDocument();
+      if (activeBookIdRef.current !== requestedBookId) return;
+
+      const flatPages = flattenForReveal(document);
+      if (!flatPages.length) throw new Error("Reveal document has no pages");
+
+      const slider = container.querySelector<HTMLInputElement>(".reader-progress-slider");
+      const requestedPage = Number(slider?.value ?? 0);
+      const pageIndex = Number.isFinite(requestedPage)
+        ? Math.max(0, Math.min(Math.trunc(requestedPage), flatPages.length - 1))
+        : 0;
+      const page = flatPages[pageIndex];
+
+      let selectionStart: number | null = null;
+      if (range) {
+        try {
+          selectionStart = computeAnchorFromRange(viewer, page.rawText, range)?.startOffset ?? null;
+        } catch {
+          selectionStart = null;
+        }
+      }
+
+      if (selectionStart === null) {
+        const fallbackIndex = page.rawText.indexOf(selectedText);
+        selectionStart = fallbackIndex >= 0 ? fallbackIndex : null;
+      }
+
+      // Reveal receives only text that PRECEDES the selected passage. It never
+      // gets future pages, and it never gets text after the selection on the
+      // current page. This makes spoiler safety a data boundary in addition to
+      // a prompt instruction.
+      const precedingPages = flatPages
+        .slice(Math.max(0, pageIndex - 3), pageIndex)
+        .map(item => item.rawText)
+        .join("\n\n");
+      const currentPageBefore = selectionStart === null
+        ? ""
+        : page.rawText.slice(Math.max(0, selectionStart - 7000), selectionStart);
+      const contextBefore = `${precedingPages}\n\n${currentPageBefore}`.trim().slice(-14000);
+
+      const cacheKey = [
+        requestedBookId,
+        pageIndex,
+        selectedText,
+        contextBefore.slice(-3000)
+      ].join("::");
+      const cached = revealCacheRef.current.get(cacheKey);
+      if (cached) {
+        setRevealAnswer(cached);
+        return;
+      }
+
+      const answer = await revealPassage(
+        {
+          text: selectedText,
+          language: "ru",
+          contextBefore,
+          book: {
+            title: book.title,
+            author: book.author?.trim() || null,
+            year: book.year === undefined ? null : String(book.year),
+            sourceLanguage: book.language?.trim() || null,
+            chapterTitle: page.chapterTitle,
+            pageIndex,
+            totalPages: flatPages.length
+          }
+        },
+        controller.signal
+      );
+
+      if (activeBookIdRef.current !== requestedBookId) return;
+      revealCacheRef.current.set(cacheKey, answer);
+      setRevealAnswer(answer);
+    } catch (error) {
+      if ((error as Error).name === "AbortError") return;
+      if (activeBookIdRef.current !== requestedBookId) return;
+      if (error instanceof AIEntitlementError) {
+        setRevealError(describeAIEntitlementErrorRu(error.kind));
+      } else {
+        console.error("Reader Reveal failed:", error);
+        setRevealError("Не удалось получить контекст Reveal.");
+      }
+    } finally {
+      if (activeBookIdRef.current === requestedBookId && revealAbortRef.current === controller) {
+        setRevealLoading(false);
+        revealAbortRef.current = null;
+      }
+    }
+  }
+
+  function closeReveal(): void {
+    revealAbortRef.current?.abort();
+    revealAbortRef.current = null;
+    setRevealLoading(false);
+    setRevealOpen(false);
+  }
+
   useEffect(() => {
 
     if (!containerRef.current) return;
@@ -146,6 +303,9 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
 
     activeBookIdRef.current = book.id;
     searchDocumentRef.current = null;
+    revealAbortRef.current?.abort();
+    revealAbortRef.current = null;
+    revealCacheRef.current.clear();
     setSearchOpen(false);
     setSearchQuery("");
     setSearchResults([]);
@@ -154,18 +314,21 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
     setSearchLoading(false);
     setSearchHasRun(false);
     setSearchError(null);
+    setRevealOpen(false);
+    setRevealSelection("");
+    setRevealAnswer("");
+    setRevealLoading(false);
+    setRevealError(null);
 
     // USER LIBRARY PHASE: book.id is now an Edition id (see
     // toReaderBook.ts's own comment on this). A signed-in visitor gets
-    // a Supabase-backed store, seeded with their saved position for
-    // THIS edition, fetched here -- before the store is constructed and
-    // before engine.open() is called -- because ProgressStore.
-    // getPosition() must stay synchronous (readerEngine.ts's open() uses
-    // it immediately; changing that contract is out of scope). A guest
-    // visitor's path is completely unchanged: createLocalStorageStore()
-    // synchronously, same as every prior phase.
+    // a Supabase-backed store, seeded with their saved position and
+    // account-synced bookmarks before engine.open() keeps its synchronous
+    // ProgressStore contract. Guests keep the localStorage store.
     let cancelled = false;
     let searchButton: HTMLButtonElement | null = null;
+    let revealButton: HTMLButtonElement | null = null;
+    let revealSelectionListener: (() => void) | null = null;
 
     async function setUpReader() {
 
@@ -174,29 +337,14 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
         ? createSupabaseProgressStore(book.id, await fetchProgress(book.id))
         : createLocalStorageStore();
 
-      // NOTES + HIGHLIGHTS PHASE: real, Supabase-backed annotations only
-      // for a signed-in visitor opening a real catalog Edition (book.workId
-      // present -- see Book.workId's own comment on when it's absent).
-      // Everyone else gets null, and readerEngine.ts's own runSave() falls
-      // back to the pre-existing guest Fragment mechanism unchanged.
       const annotationStore = session && book.workId
         ? createSupabaseAnnotationStore(session.user.id, book.workId, book.id)
         : null;
 
-      // READER -> THOUGHT THREAD BRIDGE v1: same gate as annotationStore,
-      // on purpose -- "Добавить в нить" only ever appears once a real
-      // Supabase annotation exists to add, so there is never a case where
-      // this needs to be non-null while annotationStore is null. Guest /
-      // no-workId visitors get null here exactly like annotationStore,
-      // and readerEngine.ts never renders the Thread picker when this is
-      // null (see its own comment).
       const threadBridge = session && book.workId
         ? createSupabaseThoughtThreadBridge()
         : null;
 
-      // The visitor could have navigated away (book changed, or this
-      // view unmounted) while fetchProgress() above was in flight --
-      // don't build/open an engine for a book that's no longer current.
       if (cancelled) return;
 
       const engine = createReaderEngine({
@@ -209,12 +357,6 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
 
       engineRef.current = engine;
 
-      // IN-BOOK SEARCH v1: additive control inside the existing Reader
-      // toolbar. Search itself stays in this React wrapper so the mature
-      // vanilla readerEngine.ts page/selection/highlight machinery does
-      // not need to be rewritten. Result navigation goes through the
-      // engine's existing progress slider input event, preserving the
-      // single canonical page index and the existing progress-save path.
       const overlayActions = container.querySelector<HTMLElement>(".reader-overlay-actions");
       if (overlayActions) {
         searchButton = document.createElement("button");
@@ -226,12 +368,46 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
         overlayActions.prepend(searchButton);
       }
 
-      // NOTES + HIGHLIGHTS PHASE: navigationTarget (set only when arriving
-      // from Notes -> "open this exact quote") opens on the annotation's
-      // own page instead of the ordinary saved position -- readerEngine.ts's
-      // own open()/renderPage() make sure this does NOT overwrite
-      // reader_progress just because an old quote was opened (see their
-      // own comments on suppressNextProgressSave).
+      // Reveal is additive to the existing mature selection toolbar. The
+      // SelectionController still owns selection UI and its Translate /
+      // Explain / Save actions; this bridge only remembers the same current
+      // selection and adds one fourth action without rewriting that controller.
+      const viewer = container.querySelector<HTMLElement>(".viewer-text");
+      const selectionToolbar = document.querySelector<HTMLElement>(".selection-toolbar");
+      let revealSelectedText = "";
+      let revealSelectedRange: Range | null = null;
+
+      if (viewer && selectionToolbar) {
+        revealSelectionListener = () => {
+          const currentSelection = window.getSelection();
+          if (!currentSelection || currentSelection.rangeCount === 0) return;
+          const anchorNode = currentSelection.anchorNode;
+          const selectedText = currentSelection.toString().trim();
+          if (!anchorNode || !selectedText || !viewer.contains(anchorNode)) return;
+          revealSelectedText = selectedText;
+          revealSelectedRange = currentSelection.getRangeAt(0).cloneRange();
+        };
+        document.addEventListener("selectionchange", revealSelectionListener);
+
+        revealButton = document.createElement("button");
+        revealButton.type = "button";
+        revealButton.className = "reader-reveal-trigger";
+        revealButton.textContent = "Reveal";
+        revealButton.setAttribute("aria-label", "Reveal — показать скрытый контекст фрагмента");
+        revealButton.addEventListener("click", () => {
+          selectionToolbar.style.display = "none";
+          const text = revealSelectedText;
+          const range = revealSelectedRange?.cloneRange() ?? null;
+          if (!text.trim()) return;
+          void runReveal(text, range, viewer, container);
+        });
+
+        const saveButton = Array.from(selectionToolbar.querySelectorAll("button"))
+          .find(button => button.textContent?.trim() === "Сохранить");
+        if (saveButton) selectionToolbar.insertBefore(revealButton, saveButton);
+        else selectionToolbar.appendChild(revealButton);
+      }
+
       const openOptions = navigationTarget
         ? { initialPageOverride: navigationTarget.pageIndex, focusAnnotationId: navigationTarget.annotationId }
         : undefined;
@@ -248,6 +424,10 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
     return () => {
       cancelled = true;
       searchButton?.remove();
+      revealButton?.remove();
+      if (revealSelectionListener) document.removeEventListener("selectionchange", revealSelectionListener);
+      revealAbortRef.current?.abort();
+      revealAbortRef.current = null;
       engineRef.current?.destroy();
       engineRef.current = null;
       searchDocumentRef.current = null;
@@ -277,32 +457,13 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
     setSearchTruncated(false);
 
     try {
-
-      let documentPromise = searchDocumentRef.current;
-
-      // The search index is loaded lazily on the first actual search.
-      // Most visitors never pay a second parse/fetch at all; when they do,
-      // the browser can normally satisfy the same book URL from cache.
-      if (!documentPromise) {
-        documentPromise = detectLoader(book).load(book);
-        searchDocumentRef.current = documentPromise;
-      }
-
-      let document: LoadedDocument;
-      try {
-        document = await documentPromise;
-      } catch (error) {
-        if (searchDocumentRef.current === documentPromise) searchDocumentRef.current = null;
-        throw error;
-      }
-
+      const document = await loadToolDocument();
       if (activeBookIdRef.current !== requestedBookId) return;
 
       const response = searchLoadedDocument(document, query);
       setSearchResults(response.results);
       setSearchTotalMatches(response.totalMatches);
       setSearchTruncated(response.truncated);
-
     } catch (error) {
       console.error("in-book search failed:", error);
       if (activeBookIdRef.current === requestedBookId) {
@@ -445,6 +606,48 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
                 </button>
               ))}
             </div>
+          </section>
+        </div>
+      )}
+
+      {revealOpen && (
+        <div
+          className="reader-reveal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeReveal();
+          }}
+        >
+          <section
+            className="reader-reveal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reveal"
+            onKeyDown={event => {
+              event.stopPropagation();
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeReveal();
+              }
+            }}
+          >
+            <div className="reader-reveal-head">
+              <h2 className="reader-reveal-title">Reveal</h2>
+              <button type="button" className="ghost-btn" onClick={closeReveal}>
+                Закрыть
+              </button>
+            </div>
+
+            <blockquote className="reader-reveal-selection">{revealSelection}</blockquote>
+
+            {revealLoading && (
+              <p className="reader-reveal-status" aria-live="polite">Ищем недостающий контекст…</p>
+            )}
+            {!revealLoading && revealError && (
+              <p className="reader-reveal-status error" aria-live="polite">{revealError}</p>
+            )}
+            {!revealLoading && !revealError && revealAnswer && (
+              <div className="reader-reveal-answer" aria-live="polite">{revealAnswer}</div>
+            )}
           </section>
         </div>
       )}
