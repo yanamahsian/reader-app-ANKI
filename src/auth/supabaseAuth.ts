@@ -43,8 +43,9 @@ const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_X2hZ6bXgj5HHSSZQPiXYsw_mhF5NHpy
 const AUTH_ENDPOINT = `${SUPABASE_URL}/auth/v1`;
 const SESSION_KEY = "anki_auth_session";
 
-// Explicit production redirect for signup email confirmation.
-const SIGNUP_CONFIRMATION_REDIRECT_URL = "https://yanamahsian.github.io/reader-app-ANKI/";
+// Use a concrete file path so the existing /reader-app-ANKI/** allow-list
+// matches this redirect unambiguously on GitHub Pages.
+const SIGNUP_CONFIRMATION_REDIRECT_URL = "https://yanamahsian.github.io/reader-app-ANKI/index.html";
 
 export interface AuthUser {
   id: string;
@@ -109,6 +110,99 @@ function setSession(session: AuthSession | null): void {
   }
   notify();
 }
+
+function decodeJwtUser(accessToken: string): AuthUser | null {
+  try {
+    const payloadPart = accessToken.split(".")[1];
+    if (!payloadPart) return null;
+    const base64 = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(padded)) as { sub?: unknown; email?: unknown };
+    if (typeof payload.sub !== "string") return null;
+    return {
+      id: payload.sub,
+      email: typeof payload.email === "string" ? payload.email : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function cleanAuthRedirectUrl(): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.hash = "";
+  if (url.pathname.endsWith("/index.html")) {
+    url.pathname = url.pathname.slice(0, -"index.html".length);
+  }
+  window.history.replaceState(null, document.title, `${url.pathname}${url.search}`);
+}
+
+async function validateRedirectSession(session: AuthSession): Promise<void> {
+  try {
+    const response = await fetch(`${AUTH_ENDPOINT}/user`, {
+      headers: {
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": `Bearer ${session.accessToken}`
+      }
+    });
+    if (!response.ok) {
+      if (currentSession?.accessToken === session.accessToken) setSession(null);
+      return;
+    }
+    const user = await response.json().catch(() => null) as { id?: unknown; email?: unknown } | null;
+    if (!user || typeof user.id !== "string") {
+      if (currentSession?.accessToken === session.accessToken) setSession(null);
+      return;
+    }
+    if (currentSession?.accessToken === session.accessToken) {
+      setSession({
+        ...session,
+        user: {
+          id: user.id,
+          email: typeof user.email === "string" ? user.email : session.user.email
+        }
+      });
+    }
+  } catch {
+    // Keep the freshly issued session on transient network failure.
+    // The normal authenticated API path will validate it on use.
+  }
+}
+
+function consumeAuthRedirectHash(): void {
+  if (typeof window === "undefined" || !window.location.hash) return;
+
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const accessToken = params.get("access_token");
+  const refreshToken = params.get("refresh_token");
+  if (!accessToken || !refreshToken) return;
+
+  const user = decodeJwtUser(accessToken);
+  const expiresAtSeconds = Number(params.get("expires_at"));
+  const expiresInSeconds = Number(params.get("expires_in"));
+
+  if (!user) {
+    cleanAuthRedirectUrl();
+    return;
+  }
+
+  const session: AuthSession = {
+    accessToken,
+    refreshToken,
+    expiresAt:
+      Number.isFinite(expiresAtSeconds) && expiresAtSeconds > 0
+        ? expiresAtSeconds * 1000
+        : Date.now() + (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds : 3600) * 1000,
+    user
+  };
+
+  setSession(session);
+  cleanAuthRedirectUrl();
+  void validateRedirectSession(session);
+}
+
+consumeAuthRedirectHash();
 
 export function getSession(): AuthSession | null {
   return currentSession;
@@ -218,6 +312,7 @@ export async function signOut(): Promise<void> {
   // fails -- a visitor pressing "Выйти" must never be left looking
   // signed-out while this tab silently still holds a working token.
   setSession(null);
+  if (typeof window !== "undefined" && window.location.hash) cleanAuthRedirectUrl();
 
   if (!session) return;
 
