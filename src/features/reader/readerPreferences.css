@@ -1,0 +1,236 @@
+.reader-view {
+  --reader-paragraph-spacing: 1.25em;
+}
+
+.reader-view .viewer-text p {
+  margin-bottom: var(--reader-paragraph-spacing, 1.25em) !important;
+}
+
+.reader-preferences-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(5px);
+}
+
+.reader-preferences-panel {
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow: auto;
+  border: 1px solid var(--reader-border);
+  background: var(--reader-sheet);
+  color: var(--reader-text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.reader-preferences-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--reader-border);
+  background: var(--reader-sheet);
+}
+
+.reader-preferences-title {
+  margin: 0;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.reader-preferences-body {
+  display: grid;
+  gap: 24px;
+  padding: 22px 20px 24px;
+}
+
+.reader-preferences-group {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.reader-preferences-label,
+.reader-preferences-group legend {
+  margin: 0;
+  padding: 0;
+  color: var(--reader-meta);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.reader-preferences-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  align-items: center;
+  gap: 14px;
+}
+
+.reader-preferences-range {
+  width: 100%;
+  accent-color: var(--reader-gold);
+}
+
+.reader-preferences-value {
+  color: var(--reader-text);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-preferences-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reader-preferences-options.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.reader-preferences-option {
+  position: relative;
+  min-height: 42px;
+}
+
+.reader-preferences-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.reader-preferences-option span {
+  height: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  border: 1px solid var(--reader-border);
+  background: var(--reader-button);
+  color: var(--reader-text);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.reader-preferences-option input:focus-visible + span {
+  outline: 1px solid var(--reader-gold);
+  outline-offset: 2px;
+}
+
+.reader-preferences-option input:checked + span {
+  border-color: var(--reader-gold-soft);
+  box-shadow: inset 0 0 0 1px var(--reader-gold-soft);
+}
+
+.reader-preferences-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.reader-preferences-reset {
+  border: 0;
+  background: transparent;
+  color: var(--reader-meta);
+  font-size: 11px;
+}
+
+.reader-preferences-reset:hover,
+.reader-preferences-reset:focus-visible {
+  color: var(--reader-text);
+}
+
+@media (max-width: 760px) {
+  .reader-overlay-top {
+    gap: 8px;
+  }
+
+  .reader-overlay-actions {
+    max-width: calc(100vw - 116px) !important;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .reader-overlay-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .reader-overlay-actions > button {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding-inline: 10px;
+    white-space: nowrap;
+  }
+
+  .reader-overlay-actions > button[aria-label="Уменьшить шрифт"],
+  .reader-overlay-actions > button[aria-label="Увеличить шрифт"],
+  .reader-overlay-actions > button[aria-label="Сменить тему чтения"] {
+    display: none !important;
+  }
+
+  .reader-preferences-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .reader-preferences-panel {
+    width: 100%;
+    max-height: min(82dvh, 760px);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .reader-preferences-options,
+  .reader-preferences-options.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reader-view .reader-shell {
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+  }
+
+  .reader-view .reader-bottom-bar {
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@media (max-width: 420px) {
+  .reader-preferences-head {
+    padding-inline: 16px;
+  }
+
+  .reader-preferences-body {
+    padding-inline: 16px;
+  }
+
+  .reader-preferences-title {
+    font-size: 24px;
+  }
+}
