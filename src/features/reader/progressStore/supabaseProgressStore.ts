@@ -3,6 +3,7 @@ import type { Bookmark } from "../engine/types";
 import { createLocalStorageStore } from "./localStorageStore";
 import { saveProgress, type ReaderRemoteState } from "../../../api/readerProgress";
 import { isPersonalEpubBookId } from "../../../api/personalEpubLibrary";
+import { isPersonalFb2BookId } from "../../../api/personalFb2Library";
 import { isPersonalPdfBookId } from "../../../api/personalPdfLibrary";
 import {
   deleteBookmark as deleteRemoteBookmark,
@@ -10,7 +11,9 @@ import {
 } from "../../../api/readerBookmarks";
 
 function isDeviceLocalImport(editionId: string): boolean {
-  return isPersonalEpubBookId(editionId) || isPersonalPdfBookId(editionId);
+  return isPersonalEpubBookId(editionId)
+    || isPersonalPdfBookId(editionId)
+    || isPersonalFb2BookId(editionId);
 }
 
 // Authenticated Reader state keeps the mature synchronous ProgressStore
