@@ -3,6 +3,7 @@ import type { Book } from "../types";
 import type { EpubSection } from "epubjs";
 import type { FormatLoader, LoadedDocument, LoadedChapter } from "./types";
 import { normalizeBook, paginateText, formatPage } from "../pagination";
+import { isPersonalEpubUrl, loadPersonalEpubArrayBuffer } from "../../../../api/personalEpubLibrary";
 
 // Section#load() in epub.js resolves to the section's documentElement,
 // not the Document itself. Accept either shape defensively so this
@@ -34,13 +35,21 @@ export const epubLoader: FormatLoader = {
 
   async load(book: Book): Promise<LoadedDocument> {
 
-    const response = await fetch(book.url);
+    let arrayBuffer: ArrayBuffer;
 
-    if (!response.ok) {
-      throw new Error(`Book loading failed: HTTP ${response.status}`);
+    if (isPersonalEpubUrl(book.url)) {
+      // Personal imports never become network URLs. The EPUB bytes live in
+      // IndexedDB on this device and are resolved only when Reader needs them.
+      arrayBuffer = await loadPersonalEpubArrayBuffer(book.url);
+    } else {
+      const response = await fetch(book.url);
+
+      if (!response.ok) {
+        throw new Error(`Book loading failed: HTTP ${response.status}`);
+      }
+
+      arrayBuffer = await response.arrayBuffer();
     }
-
-    const arrayBuffer = await response.arrayBuffer();
 
     const epub = new ePub(arrayBuffer);
     await epub.ready;
@@ -102,6 +111,8 @@ export const epubLoader: FormatLoader = {
       });
 
     }
+
+    epub.destroy();
 
     if (chapters.length === 0) {
       throw new Error(
