@@ -18,9 +18,9 @@
 --     dependency in that direction, and supabase/functions/omnia-ai/
 --     index.ts is not edited by this task at all (see instruction 35/44).
 --   * It does not hardcode Paddle price ids, product ids, or plan/price
---     mapping into SQL. That mapping is server-owned CONFIGURATION living
---     in the paddle-checkout/paddle-webhook Edge Functions' own environment
---     variables (PADDLE_*_PRICE_ID), never inferred here from a client
+--     mapping into SQL. That mapping is server-owned CONFIGURATION in the
+--     paddle-checkout/paddle-webhook Edge Function source (Sandbox ids are
+--     public configuration, not secrets), never inferred here from a client
 --     payload, product name, or amount.
 --
 -- TWO NEW LAYERS, DELIBERATELY KEPT SEPARATE:
@@ -489,7 +489,16 @@ begin
   -- whichever row currently reflects live/retrying access, else fall back
   -- to the most recently updated row so a lapsed subscriber still sees
   -- their last known state rather than nothing.
-  select plan, billing_interval, status, current_period_end, cancel_at_period_end
+  select
+    plan,
+    billing_interval,
+    status,
+    current_period_end,
+    cancel_at_period_end,
+    coalesce(
+      provider_payload #>> '{data,scheduled_change,action}',
+      provider_payload #>> '{scheduled_change,action}'
+    ) as scheduled_change_action
     into v_row
   from public.billing_subscriptions
   where user_id = v_user_id
@@ -506,6 +515,7 @@ begin
       'status', null,
       'renews_at', null,
       'cancel_at_period_end', false,
+      'scheduled_change_action', null,
       'provider', 'paddle',
       'manage_subscription_available', false
     );
@@ -518,6 +528,7 @@ begin
     'status', v_row.status,
     'renews_at', v_row.current_period_end,
     'cancel_at_period_end', v_row.cancel_at_period_end,
+    'scheduled_change_action', v_row.scheduled_change_action,
     'provider', 'paddle',
     'manage_subscription_available', v_row.status in ('active', 'trialing', 'past_due')
   );
@@ -619,7 +630,16 @@ begin
     raise exception 'Authentication required' using errcode = 'AK010';
   end if;
 
-  select provider_subscription_id, plan, billing_interval
+  select
+    provider_subscription_id,
+    plan,
+    billing_interval,
+    status,
+    cancel_at_period_end,
+    coalesce(
+      provider_payload #>> '{data,scheduled_change,action}',
+      provider_payload #>> '{scheduled_change,action}'
+    ) as scheduled_change_action
     into v_row
   from public.billing_subscriptions
   where user_id = v_user_id
@@ -634,7 +654,10 @@ begin
   return jsonb_build_object(
     'subscription_id', v_row.provider_subscription_id,
     'plan', v_row.plan,
-    'billing_interval', v_row.billing_interval
+    'billing_interval', v_row.billing_interval,
+    'status', v_row.status,
+    'cancel_at_period_end', v_row.cancel_at_period_end,
+    'scheduled_change_action', v_row.scheduled_change_action
   );
 end;
 $$;

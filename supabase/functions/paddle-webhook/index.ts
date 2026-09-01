@@ -126,24 +126,22 @@ interface PaddlePriceMapEntry {
   billingInterval: "month" | "year";
 }
 
-// Server-owned, config-driven price_id -> (plan, interval) mapping --
-// NEVER inferred from a client payload, a Paddle product/price NAME, or an
-// amount (instruction 7). Read fresh per request (Deno.env.get is cheap
-// and this keeps the function trivially testable without a module-load-
-// time env dependency).
+// Server-owned Sandbox price mapping. Price ids are public configuration,
+// not secrets; keeping them in audited source removes six unnecessary
+// deployment secrets and guarantees checkout + webhook use the same active
+// Sandbox catalog. Live Paddle will receive an explicit separate mapping
+// before live billing is enabled.
+const SANDBOX_PRICE_MAP: ReadonlyArray<[string, PaddlePriceMapEntry]> = [
+  ["pri_01m1bdfve9y0eypfww3mvq1z2w", { plan: "library", billingInterval: "month" }],
+  ["pri_01m1bdnbxqzv2bbczyvyc8r3pq", { plan: "library", billingInterval: "year" }],
+  ["pri_01m1bey5pzb7k4c5pgc3t8x9jb", { plan: "atlas", billingInterval: "month" }],
+  ["pri_01m1bf3jkjev2ffawnhvr9qews", { plan: "atlas", billingInterval: "year" }],
+  ["pri_01m1bf97e8sj4szp0sr2hk449h", { plan: "academy", billingInterval: "month" }],
+  ["pri_01m1bfehx66qcx8spr3d5mzhfp", { plan: "academy", billingInterval: "year" }],
+];
+
 function buildPriceMap(): Map<string, PaddlePriceMapEntry> {
-  const map = new Map<string, PaddlePriceMapEntry>();
-  const add = (envVar: string, plan: PaddlePriceMapEntry["plan"], billingInterval: PaddlePriceMapEntry["billingInterval"]) => {
-    const priceId = Deno.env.get(envVar);
-    if (priceId) map.set(priceId, { plan, billingInterval });
-  };
-  add("PADDLE_LIBRARY_MONTHLY_PRICE_ID", "library", "month");
-  add("PADDLE_LIBRARY_ANNUAL_PRICE_ID", "library", "year");
-  add("PADDLE_ATLAS_MONTHLY_PRICE_ID", "atlas", "month");
-  add("PADDLE_ATLAS_ANNUAL_PRICE_ID", "atlas", "year");
-  add("PADDLE_ACADEMY_MONTHLY_PRICE_ID", "academy", "month");
-  add("PADDLE_ACADEMY_ANNUAL_PRICE_ID", "academy", "year");
-  return map;
+  return new Map(SANDBOX_PRICE_MAP);
 }
 
 // Constant-time comparison for the HMAC digest -- avoids leaking how many

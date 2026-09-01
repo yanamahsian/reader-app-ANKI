@@ -284,6 +284,7 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
       .then(snapshot => {
         if (cancelled) return;
         setBillingState({ status: "loaded", snapshot });
+        if (snapshot.billingInterval) setBillingInterval(snapshot.billingInterval);
       })
       .catch(loadError => {
         if (cancelled) return;
@@ -484,7 +485,14 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
       };
     }
 
-    if (planDef.id === currentPlanId) {
+    const loadedBilling = billingState.status === "loaded" ? billingState.snapshot : null;
+    const samePlanDifferentInterval =
+      planDef.id === currentPlanId &&
+      loadedBilling?.hasSubscription === true &&
+      loadedBilling.billingInterval !== null &&
+      loadedBilling.billingInterval !== billingInterval;
+
+    if (planDef.id === currentPlanId && !samePlanDifferentInterval) {
       return { label: "Текущий план", disabled: true, loading: false, variant: "primary", onClick: null };
     }
 
@@ -495,6 +503,26 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
       // second, parallel checkout instead of routing to the Portal
       // (instruction 21-22).
       return { label: "Загрузка…", disabled: true, loading: false, variant: "primary", onClick: null };
+    }
+
+    if (loadedBilling?.status === "past_due") {
+      return {
+        label: "Сначала восстановите оплату",
+        disabled: true,
+        loading: false,
+        variant: "secondary",
+        onClick: null
+      };
+    }
+
+    if (loadedBilling?.cancelAtPeriodEnd || loadedBilling?.scheduledChangeAction) {
+      return {
+        label: "Сначала измените запланированное действие",
+        disabled: true,
+        loading: false,
+        variant: "secondary",
+        onClick: null
+      };
     }
 
     const manageAvailable = billingState.status === "loaded" && billingState.snapshot.manageSubscriptionAvailable;
@@ -511,11 +539,12 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
     if (manageAvailable) {
       const isUpgrade = (PLAN_RANK[planDef.id] ?? 0) > (PLAN_RANK[currentPlanId ?? "free"] ?? 0);
       const changingThisPlan = pendingPlanId === planDef.id;
+      const intervalLabel = billingInterval === "year" ? "Перейти на годовую оплату" : "Перейти на помесячную оплату";
       return {
-        label: isUpgrade ? `Улучшить до ${planDef.name}` : `Перейти на ${planDef.name}`,
+        label: samePlanDifferentInterval ? intervalLabel : isUpgrade ? `Улучшить до ${planDef.name}` : `Перейти на ${planDef.name}`,
         disabled: changingThisPlan,
         loading: changingThisPlan,
-        variant: isUpgrade ? "primary" : "secondary",
+        variant: samePlanDifferentInterval || isUpgrade ? "primary" : "secondary",
         onClick: () => void handleChangePlan(planDef.id as PaddlePlan)
       };
     }
@@ -572,6 +601,9 @@ export function SubscriptionView({ onBack, onRequireSignIn }: SubscriptionViewPr
                 : null}
             {billingState.snapshot.status === "past_due" && (
               <> · есть проблема с последним платежом, Paddle повторит попытку — доступ пока сохраняется</>
+            )}
+            {!billingState.snapshot.cancelAtPeriodEnd && billingState.snapshot.scheduledChangeAction && (
+              <> · запланировано действие: {billingState.snapshot.scheduledChangeAction}</>
             )}
           </p>
           {billingState.snapshot.manageSubscriptionAvailable && (

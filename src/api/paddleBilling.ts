@@ -28,7 +28,7 @@
 //      getMyEntitlementSnapshot instead of trusting this call's success).
 import { getValidAccessToken, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../auth/supabaseAuth";
 
-export type BillingErrorKind = "auth_required" | "service_unavailable" | "invalid_request" | "generic";
+export type BillingErrorKind = "auth_required" | "service_unavailable" | "invalid_request" | "payment_recovery_required" | "scheduled_change_active" | "generic";
 
 export class BillingError extends Error {
   readonly kind: BillingErrorKind;
@@ -48,6 +48,10 @@ export function describeBillingErrorRu(kind: BillingErrorKind): string {
       return "Сервис оплаты сейчас недоступен. Попробуйте снова чуть позже.";
     case "invalid_request":
       return "Не удалось оформить выбранный план.";
+    case "payment_recovery_required":
+      return "Сначала восстановите оплату в управлении подпиской, затем измените план.";
+    case "scheduled_change_active":
+      return "Сначала отмените или завершите запланированное изменение подписки в Paddle.";
     case "generic":
       return "Не удалось выполнить запрос.";
   }
@@ -84,6 +88,7 @@ export interface BillingSnapshot {
   status: string | null;
   renewsAt: string | null;
   cancelAtPeriodEnd: boolean;
+  scheduledChangeAction: string | null;
   provider: "paddle";
   manageSubscriptionAvailable: boolean;
 }
@@ -107,6 +112,7 @@ function parseBillingSnapshot(body: unknown): BillingSnapshot | null {
   if (!isNullOrString(record.status)) return null;
   if (!isNullOrString(record.renews_at)) return null;
   if (typeof record.cancel_at_period_end !== "boolean") return null;
+  if (!isNullOrString(record.scheduled_change_action)) return null;
   if (record.provider !== "paddle") return null;
   if (typeof record.manage_subscription_available !== "boolean") return null;
 
@@ -117,6 +123,7 @@ function parseBillingSnapshot(body: unknown): BillingSnapshot | null {
     status: record.status as string | null,
     renewsAt: record.renews_at as string | null,
     cancelAtPeriodEnd: record.cancel_at_period_end,
+    scheduledChangeAction: record.scheduled_change_action as string | null,
     provider: "paddle",
     manageSubscriptionAvailable: record.manage_subscription_available
   };
@@ -394,10 +401,12 @@ export async function changeSubscriptionPlan(
     } catch {
       body = null;
     }
-    // 404 (no_active_subscription) and 400 (invalid_plan/invalid_interval/
-    // already_on_plan) are both real, distinguishable client-facing
-    // outcomes -- surfaced as invalid_request so SubscriptionView can show
-    // an honest message rather than the generic service_unavailable one.
+    if (response.status === 409 && body?.error === "payment_recovery_required") {
+      throw new BillingError("payment_recovery_required", body.error);
+    }
+    if (response.status === 409 && body?.error === "scheduled_change_active") {
+      throw new BillingError("scheduled_change_active", body.error);
+    }
     if (response.status === 404 || response.status === 400) {
       throw new BillingError("invalid_request", body?.error ?? body?.message ?? undefined);
     }

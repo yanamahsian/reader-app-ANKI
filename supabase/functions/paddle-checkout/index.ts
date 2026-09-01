@@ -53,11 +53,11 @@
 // checkout, or read a portal session, for an arbitrary other user
 // (instruction 14, §37 Checkout A/F).
 //
-// PLAN/PRICE MAPPING (action:"checkout" only) -- server-owned,
-// config-driven, identical convention to paddle-webhook's own
-// buildPriceMap: PADDLE_{PLAN}_{MONTH|ANNUAL}_PRICE_ID environment
-// variables are the single source of truth. The client sends only {plan,
-// interval} (e.g. "atlas","year") -- never a price_id -- so there is no
+// PLAN/PRICE MAPPING (action:"checkout" only) -- server-owned and
+// Sandbox-specific. The six active Sandbox price ids are audited constants
+// in this function and paddle-webhook; they are public configuration, not
+// secrets. The client sends only {plan, interval} (e.g. "atlas","year") --
+// never a price_id -- so there is no
 // way for a client payload to select an arbitrary Paddle price even
 // though Paddle's own client-side Checkout SDK would technically accept
 // one if handed one directly (instruction 15, §37 Checkout E). "free" is
@@ -86,12 +86,10 @@
 // subscriptions row at all (never subscribed) gets a clear "no_
 // subscription" error, never a Paddle API call.
 //
-// SANDBOX-FIRST (instruction 5): PADDLE_ENV selects the Paddle API base
-// URL (sandbox-api.paddle.com vs api.paddle.com, confirmed against
-// developer.paddle.com/api-reference/transactions/overview). Defaults to
-// sandbox when unset or unrecognised -- this function never silently
-// upgrades itself to live credentials; going live is an explicit env
-// change the user makes separately, not a code branch here.
+// SANDBOX-FIRST (instruction 5): this deployment is intentionally pinned
+// to sandbox-api.paddle.com. Live Paddle uses a separate account/catalog and
+// will require an explicit code/config rollout with live price ids; this
+// Sandbox function cannot silently switch itself to production.
 //
 // SECRETS: PADDLE_API_KEY is read from the environment and used only in
 // this function's own server-to-server calls to Paddle -- it is never
@@ -125,32 +123,33 @@ function isInterval(value: unknown): value is Interval {
   return value === "month" || value === "year";
 }
 
-// Same server-owned mapping convention as paddle-webhook's buildPriceMap
-// -- deliberately not shared as an imported module between the two
-// functions (Edge Functions each deploy independently; a shared env-var
-// naming CONTRACT is the actual source of truth here, not shared code).
-function resolvePriceId(plan: Plan, interval: Interval): string | null {
-  const envVar =
-    plan === "library"
-      ? interval === "month"
-        ? "PADDLE_LIBRARY_MONTHLY_PRICE_ID"
-        : "PADDLE_LIBRARY_ANNUAL_PRICE_ID"
-      : plan === "atlas"
-        ? interval === "month"
-          ? "PADDLE_ATLAS_MONTHLY_PRICE_ID"
-          : "PADDLE_ATLAS_ANNUAL_PRICE_ID"
-        : interval === "month"
-          ? "PADDLE_ACADEMY_MONTHLY_PRICE_ID"
-          : "PADDLE_ACADEMY_ANNUAL_PRICE_ID";
-  return Deno.env.get(envVar) ?? null;
+// 0014 SANDBOX GATE: price ids are server-owned configuration but are not
+// secrets. Keep the six currently-active Sandbox ids in audited source so
+// deployment needs only the real secrets (PADDLE_API_KEY and, for the
+// webhook function, PADDLE_WEBHOOK_SECRET). Live Paddle has a separate
+// catalog and will get a deliberate live mapping before production billing
+// is enabled; this Sandbox function can never silently switch environments.
+const SANDBOX_PRICE_IDS: Record<Plan, Record<Interval, string>> = {
+  library: {
+    month: "pri_01m1bdfve9y0eypfww3mvq1z2w",
+    year: "pri_01m1bdnbxqzv2bbczyvyc8r3pq",
+  },
+  atlas: {
+    month: "pri_01m1bey5pzb7k4c5pgc3t8x9jb",
+    year: "pri_01m1bf3jkjev2ffawnhvr9qews",
+  },
+  academy: {
+    month: "pri_01m1bf97e8sj4szp0sr2hk449h",
+    year: "pri_01m1bfehx66qcx8spr3d5mzhfp",
+  },
+};
+
+function resolvePriceId(plan: Plan, interval: Interval): string {
+  return SANDBOX_PRICE_IDS[plan][interval];
 }
 
 function paddleApiBaseUrl(): string {
-  const env = (Deno.env.get("PADDLE_ENV") ?? "sandbox").trim().toLowerCase();
-  // Fail-safe default: anything other than exactly "production" is treated
-  // as sandbox. This function never infers "production" from the mere
-  // presence of a value -- it must be spelled out exactly.
-  return env === "production" ? "https://api.paddle.com" : "https://sandbox-api.paddle.com";
+  return "https://sandbox-api.paddle.com";
 }
 
 interface AuthenticatedUser {
@@ -311,12 +310,19 @@ const PLAN_RANK: Record<Plan, number> = { library: 1, atlas: 2, academy: 3 };
 //     changes; `prorated_immediately` is valid for both frequency and
 //     plan changes, so it is the only mode usable for that combination.
 function chooseProrationMode(
+  currentStatus: string,
   currentPlan: Plan,
   currentInterval: Interval,
   targetPlan: Plan,
   targetInterval: Interval,
-): "prorated_immediately" | "prorated_next_billing_period" {
+): "do_not_bill" | "prorated_immediately" | "prorated_next_billing_period" {
+  // Paddle requires do_not_bill while a subscription is trialing. The item
+  // change itself still applies; no charge is created during the trial.
+  if (currentStatus === "trialing") return "do_not_bill";
   if (targetInterval !== currentInterval) return "prorated_immediately";
+  // `prorated_next_billing_period` defers only the resulting proration
+  // charge/credit to the next renewal; it does NOT defer the item/plan
+  // replacement itself.
   return PLAN_RANK[targetPlan] >= PLAN_RANK[currentPlan]
     ? "prorated_immediately"
     : "prorated_next_billing_period";
@@ -395,8 +401,13 @@ async function handleChangeSubscription(
   const subscriptionId = snapshot && typeof snapshot.subscription_id === "string" ? snapshot.subscription_id : null;
   const currentPlan = snapshot && isPlan(snapshot.plan) ? snapshot.plan : null;
   const currentInterval = snapshot && isInterval(snapshot.billing_interval) ? snapshot.billing_interval : null;
+  const currentStatus = snapshot && typeof snapshot.status === "string" ? snapshot.status : null;
+  const cancelAtPeriodEnd = Boolean(snapshot?.cancel_at_period_end);
+  const scheduledChangeAction = snapshot && typeof snapshot.scheduled_change_action === "string"
+    ? snapshot.scheduled_change_action
+    : null;
 
-  if (!subscriptionId || !currentPlan || !currentInterval) {
+  if (!subscriptionId || !currentPlan || !currentInterval || !currentStatus) {
     // No active subscription to change -- e.g. a Free visitor, or one
     // whose prior subscription already ended. This action never falls
     // back to creating a new checkout; the frontend already has
@@ -408,7 +419,21 @@ async function handleChangeSubscription(
     return jsonResponse({ status: "error", error: "already_on_plan" }, 400);
   }
 
-  const prorationBillingMode = chooseProrationMode(currentPlan, currentInterval, targetPlan, targetInterval);
+  if (currentStatus === "past_due") {
+    return jsonResponse({ status: "error", error: "payment_recovery_required" }, 409);
+  }
+
+  if (cancelAtPeriodEnd || scheduledChangeAction) {
+    return jsonResponse({ status: "error", error: "scheduled_change_active" }, 409);
+  }
+
+  const prorationBillingMode = chooseProrationMode(
+    currentStatus,
+    currentPlan,
+    currentInterval,
+    targetPlan,
+    targetInterval,
+  );
 
   let paddleResponse: Response;
   try {
