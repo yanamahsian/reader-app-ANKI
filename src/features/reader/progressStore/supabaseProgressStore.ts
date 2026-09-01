@@ -2,6 +2,7 @@ import type { ProgressStore } from "./progressStore";
 import type { Bookmark } from "../engine/types";
 import { createLocalStorageStore } from "./localStorageStore";
 import { saveProgress, type ReaderRemoteState } from "../../../api/readerProgress";
+import { isPersonalEpubBookId } from "../../../api/personalEpubLibrary";
 import {
   deleteBookmark as deleteRemoteBookmark,
   saveBookmark as saveRemoteBookmark
@@ -18,6 +19,13 @@ export function createSupabaseProgressStore(
 ): ProgressStore {
 
   const local = createLocalStorageStore();
+
+  // Personal imports are deliberately device-local in v1. They have no row in
+  // public.editions, so even a signed-in visitor must use the exact same local
+  // progress/bookmark implementation as a guest for these books. This avoids
+  // fake catalog Edition ids, FK violations, and misleading cross-device sync.
+  if (isPersonalEpubBookId(editionId)) return local;
+
   let cachedPosition = initialState.position;
   let cachedBookmarks = initialState.bookmarks
     .filter(bookmark => bookmark.bookId === editionId)
