@@ -134,7 +134,12 @@ export function AtlasSemanticGraphSection({
       setIndexMessage(null);
       try {
         const result = await runAtlasSemanticIndex();
-        if (!cancelled?.()) setIndexResult(result);
+        if (!cancelled?.()) {
+          setIndexResult(result);
+          if (result.failed > 0 && !result.indexed) {
+            setIndexMessage("Новый пакет Atlas не удалось проиндексировать. Квота за неудавшийся AI-вызов возвращена; можно повторить анализ.");
+          }
+        }
       } catch (error) {
         if (!cancelled?.()) {
           if (error instanceof AtlasSemanticIndexError) {
@@ -247,12 +252,17 @@ export function AtlasSemanticGraphSection({
 
       const leftOutsideExact = leftItems.filter(item => !exactSharedKeys.has(sourceKey(item)));
       const rightOutsideExact = rightItems.filter(item => !exactSharedKeys.has(sourceKey(item)));
-      const hasIndependentWorkEvidence = leftOutsideExact.length > 0 || rightOutsideExact.length > 0;
+
+      // "Общая книга" is shown only when BOTH concepts have evidence in the
+      // work outside the exact source(s) already presented above. Otherwise
+      // repeating those same items would falsely describe one shared quote as
+      // independent confirmation inside the book.
+      if (leftOutsideExact.length === 0 || rightOutsideExact.length === 0) continue;
 
       sharedWorks.push({
         workId,
-        left: hasIndependentWorkEvidence ? leftOutsideExact : leftItems,
-        right: hasIndependentWorkEvidence ? rightOutsideExact : rightItems
+        left: leftOutsideExact,
+        right: rightOutsideExact
       });
     }
 
@@ -581,7 +591,7 @@ export function AtlasSemanticGraphSection({
           {book ? `${book.title}${book.authorName ? ` · ${book.authorName}` : ""}` : proof.workId}
         </h3>
         <p className="settings-section-note">
-          Эти узлы не обязательно находятся в одной цитате: Atlas видит, что оба независимо возникают в памяти одной и той же книги.
+          Оба узла имеют отдельные evidence в памяти этой книги, помимо уже показанных общих источников.
         </p>
         <div className="notes-group-items">
           {proof.left.slice(0, 3).map(item => renderCompactWorkEvidence(item, leftConcept))}
