@@ -1,4 +1,4 @@
-import { useAuth } from "../auth/supabaseAuth";
+import { signOut, useAuth } from "../auth/supabaseAuth";
 
 export type AccountShellView =
   | "profile"
@@ -36,6 +36,11 @@ export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
     onClose();
   }
 
+  async function handleSignOut(): Promise<void> {
+    await signOut();
+    onClose();
+  }
+
   return (
     <>
       <div className="account-menu-backdrop" onClick={onClose} />
@@ -70,6 +75,9 @@ export function AccountMenu({ isOpen, onClose, onNavigate }: AccountMenuProps) {
           <button type="button" role="menuitem" onClick={() => go("subscription")}>Подписка</button>
           <button type="button" role="menuitem" onClick={() => go("settings")}>Настройки</button>
           <button type="button" role="menuitem" onClick={() => go("support")}>Помощь и поддержка</button>
+          {isAuthenticated && (
+            <button type="button" role="menuitem" onClick={() => void handleSignOut()}>Выйти</button>
+          )}
         </div>
 
       </div>
