@@ -1,22 +1,18 @@
-// USER LIBRARY PHASE: edition-specific reading position for an
-// authenticated visitor, backed by public.reader_progress (see
-// supabase/sql/user_library_and_reader_progress.sql for the schema/RLS,
-// and that migration's own comment for why this is edition-scoped and
-// kept separate from user_library). Same PostgREST + RLS shape as
-// src/api/userLibrary.ts -- no Edge Function, auth.uid() = user_id does
-// all the real restricting.
-//
-// This is consumed by src/features/reader/progressStore/
-// supabaseProgressStore.ts, NOT by readerEngine.ts directly --
-// readerEngine.ts only ever talks to the ProgressStore interface (see
-// that interface's own comment: "the reader engine never changes"), and
-// that contract is honored here: this file, and the store built on top
-// of it, are new, but readerEngine.ts itself has zero changes in this
-// phase.
+// Authenticated Reader bootstrap state. Reading position remains in
+// public.reader_progress; account-synced bookmarks live in
+// public.reader_bookmarks. ReaderView awaits this bootstrap once before
+// constructing the synchronous ProgressStore used by readerEngine.ts.
+import type { Bookmark } from "../features/reader/engine/types";
+import { fetchBookmarks } from "./readerBookmarks";
 import { getValidAccessToken, getSession } from "../auth/supabaseAuth";
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "../auth/supabaseAuth";
 
 const TABLE_ENDPOINT = `${SUPABASE_URL}/rest/v1/reader_progress`;
+
+export interface ReaderRemoteState {
+  position: number | null;
+  bookmarks: Bookmark[];
+}
 
 async function authHeaders(extra?: Record<string, string>): Promise<Record<string, string> | null> {
   const token = await getValidAccessToken();
@@ -29,13 +25,7 @@ async function authHeaders(extra?: Record<string, string>): Promise<Record<strin
   };
 }
 
-// Returns null both when there is genuinely no saved position AND when
-// the visitor isn't (or is no longer) authenticated -- the caller
-// (supabaseProgressStore) only ever calls this while it already knows a
-// session exists, so the two cases don't need to be told apart here; a
-// missing/expired session simply behaves like "no saved position yet"
-// rather than throwing mid-read.
-export async function fetchProgress(editionId: string): Promise<number | null> {
+async function fetchPosition(editionId: string): Promise<number | null> {
 
   const headers = await authHeaders();
   if (!headers) return null;
@@ -58,16 +48,21 @@ export async function fetchProgress(editionId: string): Promise<number | null> {
 
 }
 
+// Keep the public name used by ReaderView, but bootstrap both pieces of
+// synchronous Reader state in parallel. This avoids serial network latency and
+// lets readerEngine.ts keep its existing getPosition/getBookmarks contract.
+export async function fetchProgress(editionId: string): Promise<ReaderRemoteState> {
+  const [position, bookmarks] = await Promise.all([
+    fetchPosition(editionId),
+    fetchBookmarks(editionId)
+  ]);
+  return { position, bookmarks };
+}
+
 // Upsert on (user_id, edition_id) -- ON CONFLICT DO UPDATE via
 // PostgREST's merge-duplicates resolution, so every page turn is a
-// single idempotent call, never a duplicate row (the table's own unique
-// constraint is the backstop either way -- see the migration). Fire-
-// and-forget from the caller's point of view (readerEngine.ts's own
-// renderPage already calls progressStore.savePosition synchronously on
-// every page turn; making this awaited there would mean every page turn
-// waits on a network round trip, which is not an acceptable regression
-// to reading responsiveness) -- failures are logged, never thrown, by
-// the caller (see supabaseProgressStore.ts).
+// single idempotent call, never a duplicate row. Fire-and-forget from
+// readerEngine.ts's point of view so page turns never wait on network I/O.
 export async function saveProgress(editionId: string, page: number): Promise<void> {
 
   const session = getSession();
