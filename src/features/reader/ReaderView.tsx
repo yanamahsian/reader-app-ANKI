@@ -41,11 +41,15 @@ function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: s
     .sort((a, b) => b.length - a.length)[0] ?? "";
 
   const candidates = Array.from(new Set([exact, longestToken].filter(Boolean)));
-  const walker = document.createTreeWalker(viewer, NodeFilter.SHOW_TEXT);
 
   for (const candidate of candidates) {
 
     const needle = candidate.toLocaleLowerCase();
+    // A fresh walker is required for every candidate. The exact phrase can
+    // legitimately span multiple DOM text nodes (for example around a saved
+    // highlight); reusing an exhausted walker would prevent the token fallback
+    // from ever examining the page.
+    const walker = document.createTreeWalker(viewer, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
 
     while (node) {
@@ -113,6 +117,7 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
   const [searchTotalMatches, setSearchTotalMatches] = useState(0);
   const [searchTruncated, setSearchTruncated] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchHasRun, setSearchHasRun] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -147,6 +152,7 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
     setSearchTotalMatches(0);
     setSearchTruncated(false);
     setSearchLoading(false);
+    setSearchHasRun(false);
     setSearchError(null);
 
     // USER LIBRARY PHASE: book.id is now an Edition id (see
@@ -257,12 +263,14 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
       setSearchResults([]);
       setSearchTotalMatches(0);
       setSearchTruncated(false);
+      setSearchHasRun(false);
       setSearchError(null);
       return;
     }
 
     const requestedBookId = book.id;
     setSearchLoading(true);
+    setSearchHasRun(true);
     setSearchError(null);
     setSearchResults([]);
     setSearchTotalMatches(0);
@@ -377,7 +385,14 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
                 className="reader-search-input"
                 type="search"
                 value={searchQuery}
-                onChange={event => setSearchQuery(event.target.value)}
+                onChange={event => {
+                  setSearchQuery(event.target.value);
+                  setSearchResults([]);
+                  setSearchTotalMatches(0);
+                  setSearchTruncated(false);
+                  setSearchHasRun(false);
+                  setSearchError(null);
+                }}
                 placeholder="Слово или фраза"
                 autoComplete="off"
                 spellCheck={false}
@@ -398,8 +413,8 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
             >
               {searchLoading && "Ищем по книге…"}
               {!searchLoading && searchError}
-              {!searchLoading && !searchError && searchQuery.trim() && searchTotalMatches === 0 && searchResults.length === 0 && "Совпадений нет."}
-              {!searchLoading && !searchError && searchTotalMatches > 0 && (
+              {!searchLoading && !searchError && searchHasRun && searchTotalMatches === 0 && "Совпадений нет."}
+              {!searchLoading && !searchError && searchHasRun && searchTotalMatches > 0 && (
                 searchTruncated
                   ? `Найдено: ${searchTotalMatches}. Показаны первые ${searchResults.length}.`
                   : `Найдено: ${searchTotalMatches}.`
