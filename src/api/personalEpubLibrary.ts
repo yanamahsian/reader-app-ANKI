@@ -111,11 +111,16 @@ async function inspectEpub(buffer: ArrayBuffer): Promise<{ title: string | null;
 
   try {
     await epub.ready;
-    const metadata = await epub.loaded.metadata as {
-      title?: unknown;
-      creator?: unknown;
-      language?: unknown;
+    // epub.js exposes book.loaded.metadata at runtime, but its bundled
+    // TypeScript declaration omits that property from EpubLoaded.
+    const loaded = epub.loaded as unknown as {
+      metadata: Promise<{
+        title?: unknown;
+        creator?: unknown;
+        language?: unknown;
+      }>;
     };
+    const metadata = await loaded.metadata;
 
     let spineItems = 0;
     epub.spine.each(() => {
