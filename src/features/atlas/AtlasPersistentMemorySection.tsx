@@ -182,7 +182,11 @@ export function AtlasPersistentMemorySection({
         </p>
       )}
 
-      <AtlasConceptGraphSection />
+      <AtlasConceptGraphSection
+        annotationById={annotationById}
+        unavailableAnnotationId={unavailableAnnotationId}
+        onOpenAnnotation={onOpenAnnotation}
+      />
     </>
   );
 }
