@@ -2,6 +2,7 @@ import { getValidAccessToken } from "../auth/supabaseAuth";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../auth/supabaseAuth";
 
 const TABLE_ENDPOINT = `${SUPABASE_URL}/rest/v1/atlas_memory_signals`;
+const PAGE_SIZE = 500;
 
 export type AtlasMemorySignalType =
   | "library"
@@ -86,20 +87,32 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
-export async function listAtlasMemorySignals(limit = 180): Promise<AtlasMemorySignal[]> {
-  const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+// Atlas is long-lived memory, so do not silently truncate it at a UI-friendly
+// number. PostgREST is read in bounded pages while RLS still restricts every
+// page to the authenticated visitor's own rows. The UI itself can choose how
+// many recent signals to render after receiving the complete durable set.
+export async function listAtlasMemorySignals(): Promise<AtlasMemorySignal[]> {
   const headers = await authHeaders();
-  const response = await fetch(
-    `${TABLE_ENDPOINT}?select=*&order=occurred_at.desc&limit=${safeLimit}`,
-    { headers }
-  );
+  const signals: AtlasMemorySignal[] = [];
+  let offset = 0;
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    console.error(`atlas memory list failed (${response.status}):`, detail);
-    throw new Error("Не удалось загрузить постоянную память Atlas.");
+  while (true) {
+    const response = await fetch(
+      `${TABLE_ENDPOINT}?select=*&order=occurred_at.desc&limit=${PAGE_SIZE}&offset=${offset}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.error(`atlas memory list failed (${response.status}):`, detail);
+      throw new Error("Не удалось загрузить постоянную память Atlas.");
+    }
+
+    const rows = (await response.json()) as AtlasMemorySignalRow[];
+    signals.push(...rows.map(fromRow));
+    if (rows.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
   }
 
-  const rows = (await response.json()) as AtlasMemorySignalRow[];
-  return rows.map(fromRow);
+  return signals;
 }
