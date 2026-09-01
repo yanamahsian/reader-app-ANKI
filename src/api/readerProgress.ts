@@ -5,6 +5,7 @@
 import type { Bookmark } from "../features/reader/engine/types";
 import { fetchBookmarks } from "./readerBookmarks";
 import { isPersonalEpubBookId } from "./personalEpubLibrary";
+import { isPersonalFb2BookId } from "./personalFb2Library";
 import { isPersonalPdfBookId } from "./personalPdfLibrary";
 import { getValidAccessToken, getSession } from "../auth/supabaseAuth";
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "../auth/supabaseAuth";
@@ -17,7 +18,9 @@ export interface ReaderRemoteState {
 }
 
 function isDeviceLocalImport(editionId: string): boolean {
-  return isPersonalEpubBookId(editionId) || isPersonalPdfBookId(editionId);
+  return isPersonalEpubBookId(editionId)
+    || isPersonalPdfBookId(editionId)
+    || isPersonalFb2BookId(editionId);
 }
 
 async function authHeaders(extra?: Record<string, string>): Promise<Record<string, string> | null> {
