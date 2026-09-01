@@ -8,6 +8,7 @@ import {
 } from "../../api/atlasGraph";
 import { genres, movements, themes } from "../../catalog";
 import { GuestNotice } from "../shared/GuestNotice";
+import { AtlasSemanticGraphSection } from "./AtlasSemanticGraphSection";
 
 const themeLabels = new Map(themes.map(term => [term.id, term.label]));
 const genreLabels = new Map(genres.map(term => [term.id, term.label]));
@@ -121,95 +122,99 @@ export function AtlasConceptGraphSection() {
   }, [graph?.relationships, conceptById]);
 
   return (
-    <section className="notes-group" aria-label="Постоянный граф концептов Atlas">
-      <header className="notes-group-header">
-        <div>
-          <p className="eyebrow">Concept Graph</p>
-          <h2 className="notes-group-title">Постоянные концепты и связи</h2>
-          <p className="notes-group-author">
-            Atlas материализует темы, жанры, направления и авторов из реально прочитанных книг и связывает их через накопленную историю чтения. Этот слой строится детерминированно по проверяемым метаданным — без AI-догадок по тексту заметок.
-          </p>
-        </div>
-      </header>
-
-      {loading ? (
-        <GuestNotice message="Обновляем постоянный граф Atlas…" />
-      ) : error ? (
-        <GuestNotice message={error} />
-      ) : !graph || graph.state.activeWorkCount === 0 || topConcepts.length === 0 ? (
-        <GuestNotice message="Граф появится после реального чтения книги, в которой есть структурированные темы, жанр, направление или автор." />
-      ) : (
-        <>
-          <div className="subscription-blocks">
-            <div className="subscription-block">
-              <h2>{graph.state.activeWorkCount}</h2>
-              <p className="settings-section-note">{booksForm(graph.state.activeWorkCount)} в графе</p>
-            </div>
-            <div className="subscription-block">
-              <h2>{graph.state.conceptCount}</h2>
-              <p className="settings-section-note">постоянных концептов</p>
-            </div>
-            <div className="subscription-block">
-              <h2>{graph.state.relationshipCount}</h2>
-              <p className="settings-section-note">постоянных связей</p>
-            </div>
-            <div className="subscription-block">
-              <h2>{graph.state.sourceSignalCount}</h2>
-              <p className="settings-section-note">{signalsForm(graph.state.sourceSignalCount)} памяти</p>
-            </div>
+    <>
+      <section className="notes-group" aria-label="Постоянный граф концептов Atlas">
+        <header className="notes-group-header">
+          <div>
+            <p className="eyebrow">Concept Graph</p>
+            <h2 className="notes-group-title">Постоянные концепты и связи</h2>
+            <p className="notes-group-author">
+              Atlas материализует темы, жанры, направления и авторов из реально прочитанных книг и связывает их через накопленную историю чтения. Этот слой строится детерминированно по проверяемым метаданным — без AI-догадок по тексту заметок.
+            </p>
           </div>
+        </header>
 
-          <div className="notes-group-items">
-            {topConcepts.map(concept => (
-              <article key={concept.id} className="notes-card">
-                <p className="eyebrow">{typeLabel(concept.conceptType)}</p>
-                <h3 className="plan-card-name">{conceptLabel(concept)}</h3>
-                <p className="settings-section-note">
-                  {concept.workCount} {booksForm(concept.workCount)} · {concept.evidenceCount} {signalsForm(concept.evidenceCount)}
-                </p>
-              </article>
-            ))}
-          </div>
-
-          {topRelationships.length > 0 && (
-            <>
-              <header className="notes-group-header">
-                <div>
-                  <p className="eyebrow">Relationships</p>
-                  <h3 className="notes-group-title">Устойчивые связи</h3>
-                  <p className="notes-group-author">
-                    В приоритете связи, которые повторяются в нескольких книгах вашей истории чтения; если таких ещё нет, показываются первые связи внутри уже прочитанных работ.
-                  </p>
-                </div>
-              </header>
-
-              <div className="notes-group-items">
-                {topRelationships.map(relationship => {
-                  const left = conceptById.get(relationship.leftConceptId)!;
-                  const right = conceptById.get(relationship.rightConceptId)!;
-                  return (
-                    <article key={relationship.id} className="notes-card">
-                      <p className="eyebrow">
-                        {relationship.sharedWorkCount >= 2 ? "Повторяющаяся связь" : "Связь"}
-                      </p>
-                      <h3 className="plan-card-name">
-                        {conceptLabel(left)} ↔ {conceptLabel(right)}
-                      </h3>
-                      <p className="settings-section-note">
-                        {relationship.sharedWorkCount} {booksForm(relationship.sharedWorkCount)} · {relationship.evidenceCount} {signalsForm(relationship.evidenceCount)}
-                      </p>
-                    </article>
-                  );
-                })}
+        {loading ? (
+          <GuestNotice message="Обновляем постоянный граф Atlas…" />
+        ) : error ? (
+          <GuestNotice message={error} />
+        ) : !graph || graph.state.activeWorkCount === 0 || topConcepts.length === 0 ? (
+          <GuestNotice message="Граф появится после реального чтения книги, в которой есть структурированные темы, жанр, направление или автор." />
+        ) : (
+          <>
+            <div className="subscription-blocks">
+              <div className="subscription-block">
+                <h2>{graph.state.activeWorkCount}</h2>
+                <p className="settings-section-note">{booksForm(graph.state.activeWorkCount)} в графе</p>
               </div>
-            </>
-          )}
+              <div className="subscription-block">
+                <h2>{graph.state.conceptCount}</h2>
+                <p className="settings-section-note">постоянных концептов</p>
+              </div>
+              <div className="subscription-block">
+                <h2>{graph.state.relationshipCount}</h2>
+                <p className="settings-section-note">постоянных связей</p>
+              </div>
+              <div className="subscription-block">
+                <h2>{graph.state.sourceSignalCount}</h2>
+                <p className="settings-section-note">{signalsForm(graph.state.sourceSignalCount)} памяти</p>
+              </div>
+            </div>
 
-          <p className="settings-section-note">
-            Показаны наиболее устойчивые узлы и связи. Полный граф хранится в аккаунте и пересобирается только когда меняется постоянная память чтения.
-          </p>
-        </>
-      )}
-    </section>
+            <div className="notes-group-items">
+              {topConcepts.map(concept => (
+                <article key={concept.id} className="notes-card">
+                  <p className="eyebrow">{typeLabel(concept.conceptType)}</p>
+                  <h3 className="plan-card-name">{conceptLabel(concept)}</h3>
+                  <p className="settings-section-note">
+                    {concept.workCount} {booksForm(concept.workCount)} · {concept.evidenceCount} {signalsForm(concept.evidenceCount)}
+                  </p>
+                </article>
+              ))}
+            </div>
+
+            {topRelationships.length > 0 && (
+              <>
+                <header className="notes-group-header">
+                  <div>
+                    <p className="eyebrow">Relationships</p>
+                    <h3 className="notes-group-title">Устойчивые связи</h3>
+                    <p className="notes-group-author">
+                      В приоритете связи, которые повторяются в нескольких книгах вашей истории чтения; если таких ещё нет, показываются первые связи внутри уже прочитанных работ.
+                    </p>
+                  </div>
+                </header>
+
+                <div className="notes-group-items">
+                  {topRelationships.map(relationship => {
+                    const left = conceptById.get(relationship.leftConceptId)!;
+                    const right = conceptById.get(relationship.rightConceptId)!;
+                    return (
+                      <article key={relationship.id} className="notes-card">
+                        <p className="eyebrow">
+                          {relationship.sharedWorkCount >= 2 ? "Повторяющаяся связь" : "Связь"}
+                        </p>
+                        <h3 className="plan-card-name">
+                          {conceptLabel(left)} ↔ {conceptLabel(right)}
+                        </h3>
+                        <p className="settings-section-note">
+                          {relationship.sharedWorkCount} {booksForm(relationship.sharedWorkCount)} · {relationship.evidenceCount} {signalsForm(relationship.evidenceCount)}
+                        </p>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <p className="settings-section-note">
+              Показаны наиболее устойчивые узлы и связи. Полный граф хранится в аккаунте и пересобирается только когда меняется постоянная память чтения.
+            </p>
+          </>
+        )}
+      </section>
+
+      <AtlasSemanticGraphSection />
+    </>
   );
 }
