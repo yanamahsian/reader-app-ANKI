@@ -1,4 +1,4 @@
-name: Paddle 0014 Assembly Gate
+name: Paddle 0014 Final Academy Gate
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  assemble:
+  correct:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout assembler branch
@@ -16,47 +16,38 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct immutable inputs
+      - name: Stage correction script
         run: |
-          cat .integration/paddle-0013.part.* | base64 -d | gzip -d > /tmp/0013.patch
-          cat .integration/paddle-0014.part.* | base64 -d | gzip -d > /tmp/apply_0014.py
-          test -s /tmp/0013.patch
-          test -s /tmp/apply_0014.py
-          python -m py_compile /tmp/apply_0014.py
+          test -f .integration/disable_academy.py
+          cp .integration/disable_academy.py /tmp/disable_academy.py
+          python -m py_compile /tmp/disable_academy.py
 
-      - name: Assemble 0013 plus 0014 on current product baseline
+      - name: Apply correction to current ready branch
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git reset --hard 45cac0ab3a296f3e6ae3accdb71e66f2a75287b9
-          git am /tmp/0013.patch
-          python /tmp/apply_0014.py
-          git add src supabase
-          git diff --cached --check
-          git commit -m "Fix Paddle lifecycle edge cases and sandbox mapping (0014)"
+          git checkout -B paddle-subscription-lifecycle-v1-ready origin/paddle-subscription-lifecycle-v1-ready
+          python /tmp/disable_academy.py
+          git diff --check
+          grep -Fq 'if (planDef.id === "academy")' src/features/subscription/SubscriptionView.tsx
+          test "$(grep -F 'error: "plan_not_available"' supabase/functions/paddle-checkout/index.ts | wc -l)" -eq 2
 
       - name: Install dependencies
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Real frontend build gate
+      - name: Build with exact production Paddle env
         env:
           VITE_PADDLE_ENV: sandbox
           VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9
         run: |
           npm run build
           test -f dist/index.html
+          grep -R -Fq 'test_e66a8f24d3ad650a9cd1de261a9' dist
 
-      - name: Verify clean delivery shape
+      - name: Commit and publish corrected ready branch
         run: |
-          git status --short
-          git diff --check 45cac0ab3a296f3e6ae3accdb71e66f2a75287b9..HEAD
-          git diff --name-only 45cac0ab3a296f3e6ae3accdb71e66f2a75287b9..HEAD
-
-      - name: Publish clean ready branch
-        run: |
-          git push origin HEAD:refs/heads/paddle-subscription-lifecycle-v1-ready --force
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/features/subscription/SubscriptionView.tsx supabase/functions/paddle-checkout/index.ts
+          git diff --cached --quiet && exit 1 || true
+          git commit -m "Disable Academy recurring checkout until product launch"
+          git push origin HEAD:refs/heads/paddle-subscription-lifecycle-v1-ready
