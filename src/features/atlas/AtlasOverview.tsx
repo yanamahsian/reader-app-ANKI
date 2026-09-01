@@ -1,21 +1,9 @@
 // ATLAS PRODUCT INTEGRATION v1: the product shell that sits above Atlas's
 // already-working features (Thought Threads, Unfinished Lines, Cross-Book
-// Questions, Contradictions, Reading Memory, Automatic Connections) --
-// nothing here is a new AI capability. It exists so opening Atlas reads as
-// one intellectual map of the visitor's own reading rather than a long
-// column of independent tools.
-//
-// Purely presentational: props in, JSX out. Every number shown here is
-// already-loaded local Atlas state (Library + annotations + Threads +
-// deterministic metadata connections) -- this component makes no request
-// of its own, and in particular never calls atlas-question,
-// atlas-contradictions, or atlas-unfinished-lines. Those stay explicit,
-// paid user actions gated behind their own existing sections' own
-// buttons; a real result count for them would require calling the AI just
-// to populate an index, which is exactly what this component must never
-// do. That's why their two entries below carry a short description of
-// what the action does instead of a number -- never a fabricated "0" or a
-// stale count from a different session.
+// Questions, Contradictions, Reading Memory, Automatic Connections).
+// Persistent Atlas Memory v1 adds a durable signal count sourced from the
+// server-side atlas_memory_signals substrate; this component remains purely
+// presentational and never runs AI just to populate its index.
 import { useMemo } from "react";
 
 export type AtlasSectionId = "threads" | "unfinished" | "questions" | "contradictions" | "memory" | "connections";
@@ -23,6 +11,7 @@ export type AtlasSectionId = "threads" | "unfinished" | "questions" | "contradic
 export interface AtlasOverviewProps {
   booksCount: number;
   fragmentsCount: number;
+  memorySignalsCount: number;
   memoryWorkCount: number;
   threadsCount: number;
   openThreadsCount: number;
@@ -31,11 +20,6 @@ export interface AtlasOverviewProps {
   onNavigate: (section: AtlasSectionId) => void;
 }
 
-// Standard Russian count-form selection (one / few / many) -- the same
-// algorithm src/features/collections/pluralize.ts already applies to
-// "книга/книги/книг" specifically; generalized here so this component can
-// apply it to every noun it needs (фрагмент, нить, связь, ...) without a
-// cross-feature import for what is, underneath, one well-known formula.
 function ruCount(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
@@ -50,6 +34,10 @@ function booksWord(n: number): string {
 
 function fragmentsWord(n: number): string {
   return ruCount(n, "фрагмент", "фрагмента", "фрагментов");
+}
+
+function signalsWord(n: number): string {
+  return ruCount(n, "сигнал", "сигнала", "сигналов");
 }
 
 function threadsWord(n: number): string {
@@ -74,6 +62,7 @@ interface IndexEntry {
 export function AtlasOverview({
   booksCount,
   fragmentsCount,
+  memorySignalsCount,
   memoryWorkCount,
   threadsCount,
   openThreadsCount,
@@ -114,11 +103,11 @@ export function AtlasOverview({
       {
         id: "memory",
         eyebrow: "Memory",
-        title: "Сохранённые мысли",
+        title: "Память чтения",
         description:
-          fragmentsCount === 0
-            ? "Пока нет сохранённых фрагментов -- они появятся, как только вы что-то сохраните во время чтения."
-            : `${fragmentsCount} ${fragmentsWord(fragmentsCount)} · ${memoryWorkCount} ${booksWord(memoryWorkCount)}`
+          memorySignalsCount === 0
+            ? "Память начнёт расти, когда появится реальное чтение, закладка, сохранённый фрагмент или нить мысли."
+            : `${memorySignalsCount} ${signalsWord(memorySignalsCount)} памяти · ${fragmentsCount} ${fragmentsWord(fragmentsCount)} · ${memoryWorkCount} ${booksWord(memoryWorkCount)}`
       },
       {
         id: "connections",
@@ -130,13 +119,21 @@ export function AtlasOverview({
             : `${connectionsCount} ${connectionsWord(connectionsCount)}${connectionsStrongCount > 0 ? ` · ${connectionsStrongCount} ${strongWord(connectionsStrongCount)}` : ""}`
       }
     ];
-  }, [threadsCount, openThreadsCount, fragmentsCount, memoryWorkCount, connectionsCount, connectionsStrongCount]);
+  }, [
+    threadsCount,
+    openThreadsCount,
+    memorySignalsCount,
+    fragmentsCount,
+    memoryWorkCount,
+    connectionsCount,
+    connectionsStrongCount
+  ]);
 
   return (
     <>
       <section className="notes-group" aria-label="Обзор Atlas">
         <p className="settings-section-note">
-          Atlas собирается из вашей библиотеки, сохранённых фрагментов и явных нитей мысли -- без предположений и фонового анализа. Ниже -- то, что Atlas уже видит в вашей истории чтения, и разделы, которые можно открыть.
+          Atlas теперь опирается на постоянную память чтения: сервер сохраняет проверяемые сигналы из реального чтения, библиотеки, закладок, заметок и нитей мысли. Здесь нет фоновых догадок или автоматически выдуманных концептов — только то, что действительно произошло в AN.KI.
         </p>
 
         <div className="subscription-blocks">
@@ -145,8 +142,8 @@ export function AtlasOverview({
             <p className="settings-section-note">{booksCount === 0 ? "книг пока нет" : `${booksWord(booksCount)} в Atlas`}</p>
           </div>
           <div className="subscription-block">
-            <h2>{fragmentsCount}</h2>
-            <p className="settings-section-note">{fragmentsCount === 0 ? "фрагментов пока нет" : `сохранённых ${fragmentsWord(fragmentsCount)}`}</p>
+            <h2>{memorySignalsCount}</h2>
+            <p className="settings-section-note">{memorySignalsCount === 0 ? "память пока пуста" : `${signalsWord(memorySignalsCount)} памяти`}</p>
           </div>
           <div className="subscription-block">
             <h2>{threadsCount}</h2>
