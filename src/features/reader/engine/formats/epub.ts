@@ -52,80 +52,89 @@ export const epubLoader: FormatLoader = {
     }
 
     const epub = new ePub(arrayBuffer);
-    await epub.ready;
 
-    const navigation = await epub.loaded.navigation;
-    const tocByHref = new Map<string, string>();
+    try {
+      await epub.ready;
 
-    for (const item of navigation.toc) {
-      tocByHref.set(item.href.split("#")[0], item.label.trim());
-    }
+      const navigation = await epub.loaded.navigation;
+      const tocByHref = new Map<string, string>();
 
-    const sections: EpubSection[] = [];
-    epub.spine.each(section => sections.push(section));
-
-    // The EPUB was opened from an ArrayBuffer, so section URLs point
-    // inside the zip archive. Section#load() must therefore receive
-    // the Book's archive-aware loader instead of falling back to the
-    // network-only default request helper.
-    const bookLoad = epub.load.bind(epub);
-
-    const chapters: LoadedChapter[] = [];
-    let loadFailures = 0;
-    let emptyAfterLoad = 0;
-
-    for (const item of sections) {
-
-      let content: Element;
-
-      try {
-        content = await item.load(bookLoad);
-      } catch (error) {
-        console.error(`epubLoader: failed to load spine section "${item.href}"`, error);
-        loadFailures++;
-        continue;
+      for (const item of navigation.toc) {
+        tocByHref.set(item.href.split("#")[0], item.label.trim());
       }
 
-      const text = normalizeBook(extractReadableText(content));
+      const sections: EpubSection[] = [];
+      epub.spine.each(section => sections.push(section));
 
-      item.unload();
+      // The EPUB was opened from an ArrayBuffer, so section URLs point
+      // inside the zip archive. Section#load() must therefore receive
+      // the Book's archive-aware loader instead of falling back to the
+      // network-only default request helper.
+      const bookLoad = epub.load.bind(epub);
 
-      if (!text.length) {
-        emptyAfterLoad++;
-        continue;
+      const chapters: LoadedChapter[] = [];
+      let loadFailures = 0;
+      let emptyAfterLoad = 0;
+
+      for (const item of sections) {
+
+        let content: Element;
+
+        try {
+          content = await item.load(bookLoad);
+        } catch (error) {
+          console.error(`epubLoader: failed to load spine section "${item.href}"`, error);
+          loadFailures++;
+          continue;
+        }
+
+        try {
+          const text = normalizeBook(extractReadableText(content));
+
+          if (!text.length) {
+            emptyAfterLoad++;
+            continue;
+          }
+
+          const rawPages = paginateText(text);
+
+          if (!rawPages.length) {
+            emptyAfterLoad++;
+            continue;
+          }
+
+          chapters.push({
+            title: findChapterTitle(item.href, tocByHref),
+            pages: rawPages.map(rawText => ({
+              html: formatPage(rawText),
+              rawText
+            }))
+          });
+        } finally {
+          // Release each loaded spine section even if extraction/pagination
+          // throws for malformed content.
+          item.unload();
+        }
+
       }
 
-      const rawPages = paginateText(text);
-
-      if (!rawPages.length) {
-        emptyAfterLoad++;
-        continue;
+      if (chapters.length === 0) {
+        throw new Error(
+          `epubLoader: parsed "${book.title}" but produced zero readable chapters ` +
+          `(${sections.length} spine sections discovered, ${loadFailures} failed to load, ` +
+          `${emptyAfterLoad} loaded with no extractable text).`
+        );
       }
 
-      chapters.push({
-        title: findChapterTitle(item.href, tocByHref),
-        pages: rawPages.map(rawText => ({
-          html: formatPage(rawText),
-          rawText
-        }))
-      });
-
+      return {
+        hasRealChapters: true,
+        chapters
+      };
+    } finally {
+      // Personal EPUBs are untrusted input. Always tear down epub.js/JSZip,
+      // including malformed navigation/spine/content failure paths.
+      epub.destroy();
     }
-
-    epub.destroy();
-
-    if (chapters.length === 0) {
-      throw new Error(
-        `epubLoader: parsed "${book.title}" but produced zero readable chapters ` +
-        `(${sections.length} spine sections discovered, ${loadFailures} failed to load, ` +
-        `${emptyAfterLoad} loaded with no extractable text).`
-      );
-    }
-
-    return {
-      hasRealChapters: true,
-      chapters
-    };
 
   }
 
