@@ -13,10 +13,20 @@ import {
   deletePersonalEpub,
   importPersonalEpub,
   listPersonalEpubs,
+  PersonalEpubImportError,
   personalEpubErrorMessage,
   toPersonalEpubBook,
   type PersonalEpubSummary
 } from "../../api/personalEpubLibrary";
+import {
+  deletePersonalFb2,
+  importPersonalFb2,
+  listPersonalFb2s,
+  PersonalFb2ImportError,
+  personalFb2ErrorMessage,
+  toPersonalFb2Book,
+  type PersonalFb2Summary
+} from "../../api/personalFb2Library";
 import {
   deletePersonalPdf,
   importPersonalPdf,
@@ -65,11 +75,19 @@ type PersonalStatus = "loading" | "ready" | "error";
 
 type PersonalItem =
   | { kind: "epub"; id: string; addedAt: number; summary: PersonalEpubSummary }
-  | { kind: "pdf"; id: string; addedAt: number; summary: PersonalPdfSummary };
+  | { kind: "pdf"; id: string; addedAt: number; summary: PersonalPdfSummary }
+  | { kind: "fb2"; id: string; addedAt: number; summary: PersonalFb2Summary };
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} МБ`;
+}
+
+function personalImportErrorMessage(error: unknown): string {
+  if (error instanceof PersonalPdfImportError) return personalPdfErrorMessage(error);
+  if (error instanceof PersonalFb2ImportError) return personalFb2ErrorMessage(error);
+  if (error instanceof PersonalEpubImportError) return personalEpubErrorMessage(error);
+  return "Не удалось обработать книгу. Попробуйте другой файл.";
 }
 
 export function MyLibraryView({
@@ -87,6 +105,7 @@ export function MyLibraryView({
 
   const [personalEpubs, setPersonalEpubs] = useState<PersonalEpubSummary[]>([]);
   const [personalPdfs, setPersonalPdfs] = useState<PersonalPdfSummary[]>([]);
+  const [personalFb2s, setPersonalFb2s] = useState<PersonalFb2Summary[]>([]);
   const [personalStatus, setPersonalStatus] = useState<PersonalStatus>("loading");
   const [personalError, setPersonalError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -98,30 +117,28 @@ export function MyLibraryView({
 
   const personalItems = useMemo<PersonalItem[]>(() => [
     ...personalEpubs.map(summary => ({ kind: "epub" as const, id: summary.id, addedAt: summary.addedAt, summary })),
-    ...personalPdfs.map(summary => ({ kind: "pdf" as const, id: summary.id, addedAt: summary.addedAt, summary }))
-  ].sort((left, right) => right.addedAt - left.addedAt), [personalEpubs, personalPdfs]);
+    ...personalPdfs.map(summary => ({ kind: "pdf" as const, id: summary.id, addedAt: summary.addedAt, summary })),
+    ...personalFb2s.map(summary => ({ kind: "fb2" as const, id: summary.id, addedAt: summary.addedAt, summary }))
+  ].sort((left, right) => right.addedAt - left.addedAt), [personalEpubs, personalPdfs, personalFb2s]);
 
   useEffect(() => {
     let active = true;
     setPersonalStatus("loading");
     setPersonalError(null);
 
-    Promise.all([listPersonalEpubs(), listPersonalPdfs()])
-      .then(([epubs, pdfs]) => {
+    Promise.all([listPersonalEpubs(), listPersonalPdfs(), listPersonalFb2s()])
+      .then(([epubs, pdfs, fb2s]) => {
         if (!active) return;
         setPersonalEpubs(epubs);
         setPersonalPdfs(pdfs);
+        setPersonalFb2s(fb2s);
         setPersonalStatus("ready");
       })
       .catch(error => {
         if (!active) return;
         console.error("personal library load failed:", error);
         setPersonalStatus("error");
-        setPersonalError(
-          error instanceof PersonalPdfImportError
-            ? personalPdfErrorMessage(error)
-            : personalEpubErrorMessage(error)
-        );
+        setPersonalError(personalImportErrorMessage(error));
       });
 
     return () => {
@@ -177,18 +194,18 @@ export function MyLibraryView({
         const imported = await importPersonalPdf(file);
         setPersonalPdfs(current => [imported, ...current.filter(book => book.id !== imported.id)]);
         openPersonalBook(toPersonalPdfBook(imported));
+      } else if (lowerName.endsWith(".fb2")) {
+        const imported = await importPersonalFb2(file);
+        setPersonalFb2s(current => [imported, ...current.filter(book => book.id !== imported.id)]);
+        openPersonalBook(toPersonalFb2Book(imported));
       } else {
-        setPersonalError("Сейчас поддерживаются EPUB и PDF.");
+        setPersonalError("Сейчас поддерживаются EPUB, PDF и FB2.");
       }
 
       setPersonalStatus("ready");
     } catch (error) {
       console.error("personal book import failed:", error);
-      setPersonalError(
-        error instanceof PersonalPdfImportError
-          ? personalPdfErrorMessage(error)
-          : personalEpubErrorMessage(error)
-      );
+      setPersonalError(personalImportErrorMessage(error));
       setPersonalStatus("ready");
     } finally {
       setImporting(false);
@@ -199,33 +216,36 @@ export function MyLibraryView({
     const title = item.summary.title;
     if (!window.confirm(`Удалить «${title}» с этого устройства?`)) return;
 
-    setDeletingPersonalId(item.id);
+    setDeletingPersonalId(`${item.kind}:${item.id}`);
     setPersonalError(null);
 
     try {
       if (item.kind === "epub") {
         await deletePersonalEpub(item.id);
         setPersonalEpubs(current => current.filter(book => book.id !== item.id));
-      } else {
+      } else if (item.kind === "pdf") {
         await deletePersonalPdf(item.id);
         setPersonalPdfs(current => current.filter(book => book.id !== item.id));
+      } else {
+        await deletePersonalFb2(item.id);
+        setPersonalFb2s(current => current.filter(book => book.id !== item.id));
       }
     } catch (error) {
       console.error("personal book delete failed:", error);
-      setPersonalError(
-        item.kind === "pdf" ? personalPdfErrorMessage(error) : personalEpubErrorMessage(error)
-      );
+      setPersonalError(personalImportErrorMessage(error));
     } finally {
       setDeletingPersonalId(null);
     }
   }
 
   function openPersonalItem(item: PersonalItem): void {
-    openPersonalBook(
-      item.kind === "epub"
-        ? toPersonalEpubBook(item.summary)
-        : toPersonalPdfBook(item.summary)
-    );
+    if (item.kind === "epub") {
+      openPersonalBook(toPersonalEpubBook(item.summary));
+    } else if (item.kind === "pdf") {
+      openPersonalBook(toPersonalPdfBook(item.summary));
+    } else {
+      openPersonalBook(toPersonalFb2Book(item.summary));
+    }
   }
 
   function renderPersonalShelf() {
@@ -245,7 +265,7 @@ export function MyLibraryView({
             ref={fileInputRef}
             className="personal-library-file-input"
             type="file"
-            accept=".epub,.pdf,application/epub+zip,application/pdf"
+            accept=".epub,.pdf,.fb2,application/epub+zip,application/pdf,application/x-fictionbook+xml,text/xml,application/xml"
             onChange={event => {
               const file = event.currentTarget.files?.[0] ?? null;
               event.currentTarget.value = "";
@@ -255,7 +275,7 @@ export function MyLibraryView({
         </div>
 
         <p className="personal-library-copy">
-          EPUB и PDF сохраняются только в этом браузере и не загружаются на сервер. Прогресс и закладки личных книг тоже остаются на устройстве.
+          EPUB, PDF и FB2 сохраняются только в этом браузере и не загружаются на сервер. Прогресс и закладки личных книг тоже остаются на устройстве.
         </p>
 
         {personalError && <p className="personal-library-error">{personalError}</p>}
@@ -264,7 +284,7 @@ export function MyLibraryView({
           <p className="personal-library-error">Не удалось открыть локальную библиотеку.</p>
         )}
         {personalStatus === "ready" && personalItems.length === 0 && (
-          <p className="personal-library-empty">Здесь появятся EPUB и PDF, которые вы добавите с устройства.</p>
+          <p className="personal-library-empty">Здесь появятся EPUB, PDF и FB2, которые вы добавите с устройства.</p>
         )}
 
         {personalItems.length > 0 && (
@@ -272,9 +292,10 @@ export function MyLibraryView({
             {personalItems.map(item => {
               const summary = item.summary;
               const pdfMeta = item.kind === "pdf" ? ` · ${item.summary.pageCount} стр.` : "";
+              const deletionKey = `${item.kind}:${item.id}`;
 
               return (
-                <article key={`${item.kind}:${item.id}`} className="personal-epub-card">
+                <article key={deletionKey} className="personal-epub-card">
                   <button type="button" className="personal-epub-open" onClick={() => openPersonalItem(item)}>
                     <span className="personal-epub-format">{item.kind.toUpperCase()} · Личный файл</span>
                     <span className="personal-epub-title">{summary.title}</span>
@@ -288,10 +309,10 @@ export function MyLibraryView({
                     <button
                       type="button"
                       className="personal-epub-delete"
-                      disabled={deletingPersonalId === item.id}
+                      disabled={deletingPersonalId === deletionKey}
                       onClick={() => void handleDeletePersonalItem(item)}
                     >
-                      {deletingPersonalId === item.id ? "Удаление…" : "Удалить с устройства"}
+                      {deletingPersonalId === deletionKey ? "Удаление…" : "Удалить с устройства"}
                     </button>
                   </div>
                 </article>
