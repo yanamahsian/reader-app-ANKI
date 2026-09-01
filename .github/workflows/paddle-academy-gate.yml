@@ -1,0 +1,106 @@
+name: Paddle Academy Availability Gate
+
+on:
+  push:
+    branches: [paddle-0014-token-gate]
+
+permissions:
+  contents: write
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gate branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Switch to ready branch
+        run: git checkout -B paddle-subscription-lifecycle-v1-ready origin/paddle-subscription-lifecycle-v1-ready
+
+      - name: Disable Academy recurring checkout in UI and server
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          ui = Path('src/features/subscription/SubscriptionView.tsx')
+          text = ui.read_text()
+          needle = '''    if (!isAuthenticated) {
+          return {
+        label: "Войти и оформить подписку",'''
+          replacement = '''    if (planDef.id === "academy") {
+      if (currentPlanId === "academy") {
+        return { label: "Текущий план", disabled: true, loading: false, variant: "primary", onClick: null };
+      }
+      return { label: "Скоро", disabled: true, loading: false, variant: "secondary", onClick: null };
+    }
+
+    if (!isAuthenticated) {
+      return {
+        label: "Войти и оформить подписку",'''
+          if needle not in text:
+              raise SystemExit('SubscriptionView insertion point not found')
+          text = text.replace(needle, replacement, 1)
+          ui.write_text(text)
+
+          server = Path('supabase/functions/paddle-checkout/index.ts')
+          text = server.read_text()
+          needle1 = '''  if (!isPlan(plan)) {
+    return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
+  }
+  if (!isInterval(interval)) {'''
+          replacement1 = '''  if (!isPlan(plan)) {
+    return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
+  }
+  // Academy remains visible as the future top tier, but recurring Academy
+  // checkout is intentionally disabled until the Academy product layer is live.
+  if (plan === "academy") {
+    return jsonResponse({ status: "error", error: "plan_not_available" }, 409);
+  }
+  if (!isInterval(interval)) {'''
+          if needle1 not in text:
+              raise SystemExit('handleCheckout insertion point not found')
+          text = text.replace(needle1, replacement1, 1)
+
+          needle2 = '''  if (!isPlan(targetPlan)) {
+    return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
+  }
+  if (!isInterval(targetInterval)) {'''
+          replacement2 = '''  if (!isPlan(targetPlan)) {
+    return jsonResponse({ status: "error", error: "invalid_plan", message: "plan must be library, atlas, or academy" }, 400);
+  }
+  if (targetPlan === "academy") {
+    return jsonResponse({ status: "error", error: "plan_not_available" }, 409);
+  }
+  if (!isInterval(targetInterval)) {'''
+          if needle2 not in text:
+              raise SystemExit('handleChangeSubscription insertion point not found')
+          text = text.replace(needle2, replacement2, 1)
+          server.write_text(text)
+          PY
+
+      - name: Verify correction shape
+        run: |
+          grep -Fq 'if (planDef.id === "academy")' src/features/subscription/SubscriptionView.tsx
+          test "$(grep -F 'error: "plan_not_available"' supabase/functions/paddle-checkout/index.ts | wc -l)" -eq 2
+          git diff --check
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build with exact production Paddle env
+        env:
+          VITE_PADDLE_ENV: sandbox
+          VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9
+        run: npm run build
+
+      - name: Commit and publish corrected ready branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/features/subscription/SubscriptionView.tsx supabase/functions/paddle-checkout/index.ts
+          git diff --cached --quiet && { echo 'No changes staged'; exit 1; }
+          git commit -m 'Disable Academy recurring checkout until product launch'
+          git push origin HEAD:paddle-subscription-lifecycle-v1-ready
