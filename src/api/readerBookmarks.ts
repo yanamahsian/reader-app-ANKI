@@ -66,10 +66,10 @@ export async function fetchBookmarks(editionId: string): Promise<Bookmark[]> {
 
 }
 
-// One bookmark per page is enforced by the database unique constraint on
-// (user_id, edition_id, page_index). Merge-duplicates makes this operation
-// idempotent across fast repeated clicks or two devices bookmarking the same
-// page. The client-generated UUID remains the canonical row id after an upsert.
+// The database owns the persistent row id. We intentionally do NOT send the
+// optimistic client UUID in this composite-key upsert: otherwise PostgREST's
+// merge-duplicates path can rewrite an existing row's primary key when two
+// tabs/devices bookmark the same page with different local UUIDs.
 export async function saveBookmark(bookmark: Bookmark): Promise<void> {
 
   const session = getSession();
@@ -84,7 +84,6 @@ export async function saveBookmark(bookmark: Bookmark): Promise<void> {
       method: "POST",
       headers,
       body: JSON.stringify({
-        id: bookmark.id,
         user_id: session.user.id,
         edition_id: bookmark.bookId,
         page_index: bookmark.pageIndex,
@@ -101,15 +100,22 @@ export async function saveBookmark(bookmark: Bookmark): Promise<void> {
 
 }
 
-export async function deleteBookmark(id: string): Promise<void> {
+// Delete by the same stable uniqueness key used for the upsert, not by a
+// possibly-optimistic client UUID. This also makes save -> immediate delete
+// safe while the serialized background write chain is still resolving.
+export async function deleteBookmark(editionId: string, pageIndex: number): Promise<void> {
 
   const headers = await authHeaders({ "Prefer": "return=minimal" });
   if (!headers) return;
 
-  const response = await fetch(`${TABLE_ENDPOINT}?id=eq.${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers
-  });
+  const response = await fetch(
+    `${TABLE_ENDPOINT}?edition_id=eq.${encodeURIComponent(editionId)}` +
+    `&page_index=eq.${encodeURIComponent(String(pageIndex))}`,
+    {
+      method: "DELETE",
+      headers
+    }
+  );
 
   if (!response.ok) {
     throw new Error(`reader_bookmarks delete failed: ${response.status} ${await response.text().catch(() => "")}`);
