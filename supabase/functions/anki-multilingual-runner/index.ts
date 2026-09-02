@@ -33,7 +33,60 @@ async function addWorkLanguage(sb: any, workId: string, language: string) {
   await sb.from("works").update({ available_languages: Array.from(languages) }).eq("id", workId);
 }
 
-async function finalizeStoredShortWork(sb: any, candidate: any, message: string) {
+async function getAuditedRights(sb: any, candidate: any) {
+  const { data, error } = await sb
+    .from("catalog_rights_import_audit")
+    .select("source_id,external_id,jurisdiction,rights_status,author_name,translator_name,translator_death_year,basis,evidence_url,audited_at")
+    .eq("source_id", candidate.source_id)
+    .eq("external_id", candidate.external_id)
+    .eq("jurisdiction", "DE")
+    .eq("rights_status", "public-domain")
+    .maybeSingle();
+  if (error) throw new Error(`rights audit lookup failed: ${error.message}`);
+  return data ?? null;
+}
+
+async function persistAuditedRights(sb: any, editionId: string, audit: any) {
+  if (!audit) return;
+
+  const { data: existing, error: existingError } = await sb
+    .from("rights_assertions")
+    .select("id")
+    .eq("edition_id", editionId)
+    .eq("status", audit.rights_status)
+    .eq("jurisdiction", audit.jurisdiction)
+    .limit(1);
+  if (existingError) throw new Error(`rights assertion lookup failed: ${existingError.message}`);
+  if ((existing ?? []).length > 0) return;
+
+  const { error } = await sb.from("rights_assertions").insert({
+    edition_id: editionId,
+    book_file_id: null,
+    status: audit.rights_status,
+    jurisdiction: audit.jurisdiction,
+    license_uri: null,
+    rights_metadata: {
+      audit_source: "catalog_rights_import_audit",
+      source_id: audit.source_id,
+      external_id: audit.external_id,
+      author_name: audit.author_name,
+      translator_name: audit.translator_name,
+      translator_death_year: audit.translator_death_year,
+      basis: audit.basis,
+      evidence_url: audit.evidence_url,
+      audited_at: audit.audited_at
+    }
+  });
+  if (error) throw new Error(`audited rights assertion insert failed: ${error.message}`);
+}
+
+function candidateRights(audit: any) {
+  return audit
+    ? { rights_status: audit.rights_status, jurisdiction: audit.jurisdiction }
+    : { rights_status: "public-domain", jurisdiction: "US" };
+}
+
+async function finalizeStoredShortWork(sb: any, candidate: any, message: string, audit: any) {
   if (!message.startsWith("reader-tested check failed:")) return null;
 
   const editionId = `${candidate.work_id}-gutenberg-${candidate.external_id}`;
@@ -59,6 +112,8 @@ async function finalizeStoredShortWork(sb: any, candidate: any, message: string)
   const hasPublicDomainUS = (rights ?? []).some((r: any) => r.status === "public-domain" && r.jurisdiction === "US");
   if (!hasPublicDomainUS) return null;
 
+  await persistAuditedRights(sb, editionId, audit);
+
   await sb.from("editions").update({ ingestion_status: "ready" }).eq("id", editionId);
   await sb.from("book_files").update({ ingestion_status: "ready" }).eq("edition_id", editionId);
   await sb.from("ingestion_jobs").update({ status: "ready", last_error: null }).eq("source_id", "gutenberg").eq("external_id", candidate.external_id);
@@ -66,8 +121,7 @@ async function finalizeStoredShortWork(sb: any, candidate: any, message: string)
   await sb.from("multilingual_candidates").update({
     status: "ready",
     edition_id: editionId,
-    rights_status: "public-domain",
-    jurisdiction: "US",
+    ...candidateRights(audit),
     last_error: null,
     processing_started_at: null,
     next_attempt_at: null,
@@ -82,6 +136,7 @@ async function finalizeStoredShortWork(sb: any, candidate: any, message: string)
     editionId,
     language: candidate.language,
     title: candidate.title,
+    jurisdiction: audit?.jurisdiction ?? "US",
     readerReady: readiness?.reader_ready ?? null,
     catalogReady: readiness?.catalog_ready ?? null
   };
@@ -94,7 +149,6 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-omnia-run-token") ?? url.searchParams.get("token") ?? "";
   const runId = url.searchParams.get("runId") ?? "";
   const authorId = url.searchParams.get("authorId") ?? "";
-  // Runner batches must stay small (1-3 full books per HTTP request).
   const requestedLimit = Number(url.searchParams.get("limit") ?? "3");
   const limit = Math.max(1, Math.min(3, Number.isFinite(requestedLimit) ? requestedLimit : 3));
   if ((!token && !runId) || !authorId) return json({ error: "Missing run access or authorId" }, 400);
@@ -114,7 +168,6 @@ Deno.serve(async (req: Request) => {
     updated_at: new Date().toISOString()
   }).eq("author_id", authorId).eq("source_id", "gutenberg").eq("status", "processing").lt("processing_started_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
 
-  // Enforce the retry backoff stored in next_attempt_at.
   const nowIso = new Date().toISOString();
   const { data: candidates, error: candidatesError } = await sb
     .from("multilingual_candidates")
@@ -139,6 +192,8 @@ Deno.serve(async (req: Request) => {
     if (!claimed) continue;
 
     try {
+      const audit = await getAuditedRights(sb, candidate);
+
       const { data: sameSourceEditions, error: existingError } = await sb
         .from("editions")
         .select("id,work_id,language,ingestion_status")
@@ -156,9 +211,18 @@ Deno.serve(async (req: Request) => {
 
       const alreadyReady = (sameSourceEditions ?? []).find((edition: any) => edition.work_id === candidate.work_id && edition.ingestion_status === "ready");
       if (alreadyReady) {
+        await persistAuditedRights(sb, alreadyReady.id, audit);
         await addWorkLanguage(sb, candidate.work_id, candidate.language);
-        await sb.from("multilingual_candidates").update({ status: "ready", edition_id: alreadyReady.id, rights_status: "public-domain", jurisdiction: "US", last_error: null, processing_started_at: null, next_attempt_at: null, updated_at: new Date().toISOString() }).eq("id", candidate.id);
-        results.push({ candidateId: candidate.id, status: "already_ready", workId: candidate.work_id, editionId: alreadyReady.id, language: candidate.language });
+        await sb.from("multilingual_candidates").update({
+          status: "ready",
+          edition_id: alreadyReady.id,
+          ...candidateRights(audit),
+          last_error: null,
+          processing_started_at: null,
+          next_attempt_at: null,
+          updated_at: new Date().toISOString()
+        }).eq("id", candidate.id);
+        results.push({ candidateId: candidate.id, status: "already_ready", workId: candidate.work_id, editionId: alreadyReady.id, language: candidate.language, jurisdiction: audit?.jurisdiction ?? "US" });
         continue;
       }
 
@@ -172,7 +236,7 @@ Deno.serve(async (req: Request) => {
       try { payload = JSON.parse(text); } catch { payload = { raw: text.slice(0, 1000) }; }
       if (!response.ok || payload?.ok !== true || typeof payload?.editionId !== "string") {
         const message = payload?.error ?? `omnia-ingest HTTP ${response.status}`;
-        const repaired = await finalizeStoredShortWork(sb, candidate, message);
+        const repaired = await finalizeStoredShortWork(sb, candidate, message, audit);
         if (repaired) {
           results.push(repaired);
           continue;
@@ -181,15 +245,21 @@ Deno.serve(async (req: Request) => {
       }
 
       const editionId = payload.editionId as string;
+      await persistAuditedRights(sb, editionId, audit);
       await addWorkLanguage(sb, candidate.work_id, candidate.language);
 
       await sb.from("multilingual_candidates").update({
-        status: "ready", edition_id: editionId, rights_status: "public-domain", jurisdiction: "US",
-        last_error: null, processing_started_at: null, next_attempt_at: null, updated_at: new Date().toISOString()
+        status: "ready",
+        edition_id: editionId,
+        ...candidateRights(audit),
+        last_error: null,
+        processing_started_at: null,
+        next_attempt_at: null,
+        updated_at: new Date().toISOString()
       }).eq("id", candidate.id);
 
       const { data: readiness } = await sb.from("work_readiness").select("reader_ready,catalog_ready,missing_requirements").eq("work_id", candidate.work_id).maybeSingle();
-      results.push({ candidateId: candidate.id, status: "ready", workId: candidate.work_id, editionId, language: candidate.language, title: candidate.title, readerReady: readiness?.reader_ready ?? null, catalogReady: readiness?.catalog_ready ?? null });
+      results.push({ candidateId: candidate.id, status: "ready", workId: candidate.work_id, editionId, language: candidate.language, title: candidate.title, jurisdiction: audit?.jurisdiction ?? "US", readerReady: readiness?.reader_ready ?? null, catalogReady: readiness?.catalog_ready ?? null });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await sb.from("multilingual_candidates").update({
