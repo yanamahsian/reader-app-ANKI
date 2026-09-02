@@ -47,10 +47,13 @@ function flattenForReveal(document: LoadedDocument): RevealFlatPage[] {
   );
 }
 
-function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: string): void {
+// Returns whether the match was actually located and visually marked, so
+// the caller can tell "found and highlighted" apart from "page opened, but
+// nothing to show for it" instead of both looking identical to the user.
+function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: string): boolean {
 
   const viewer = container?.querySelector<HTMLElement>(".viewer-text");
-  if (!viewer) return;
+  if (!viewer) return false;
 
   const exact = matchText.trim();
   const longestToken = exact
@@ -95,12 +98,12 @@ function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: s
             viewer.normalize();
           }, 2600);
 
-          return;
+          return true;
         } catch {
           // If the current rendered HTML makes wrapping unsafe, fall back
           // to focusing the page rather than mutating the Reader DOM.
           viewer.focus();
-          return;
+          return false;
         }
       }
 
@@ -111,6 +114,7 @@ function highlightVisibleSearchMatch(container: HTMLElement | null, matchText: s
   }
 
   viewer.focus();
+  return false;
 
 }
 
@@ -143,6 +147,29 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
   const [revealAnswer, setRevealAnswer] = useState("");
   const [revealLoading, setRevealLoading] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
+
+  // A background bookmark save/delete failing after the fact -- the
+  // optimistic UI already showed it as done. Reuses the app's existing
+  // .toast primitive (same one the reader engine's own bookmark
+  // add/remove confirmations use) rather than a bespoke status region, so
+  // this doesn't need a permanent home in the layout.
+  const [bookmarkSyncError, setBookmarkSyncError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bookmarkSyncError) return;
+    const timer = setTimeout(() => setBookmarkSyncError(null), 4000);
+    return () => clearTimeout(timer);
+  }, [bookmarkSyncError]);
+
+  // Search navigation to a result page always succeeds; only the visual
+  // highlight can fail to land (e.g. the match spans a saved-highlight
+  // boundary surroundContents can't wrap). Same transient-toast treatment,
+  // so a silent miss doesn't read as "nothing happened."
+  const [searchHighlightNotice, setSearchHighlightNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!searchHighlightNotice) return;
+    const timer = setTimeout(() => setSearchHighlightNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [searchHighlightNotice]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -334,7 +361,9 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
 
       const session = getSession();
       const progressStore = session
-        ? createSupabaseProgressStore(book.id, await fetchProgress(book.id))
+        ? createSupabaseProgressStore(book.id, await fetchProgress(book.id), message => {
+            if (activeBookIdRef.current === book.id) setBookmarkSyncError(message);
+          })
         : createLocalStorageStore();
 
       const annotationStore = session && book.workId
@@ -490,7 +519,21 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
     setSearchOpen(false);
 
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => highlightVisibleSearchMatch(container, result.matchText));
+      requestAnimationFrame(() => {
+        if (highlightVisibleSearchMatch(container, result.matchText)) return;
+
+        // The freshly rendered page's DOM may still have been settling on
+        // the first attempt (pagination/reflow just after the slider jump).
+        // One retry after render has had a moment to finish costs nothing
+        // when the first attempt already succeeded (this code doesn't run),
+        // and recovers the common transient case; only report a miss to
+        // the user if it still fails.
+        window.setTimeout(() => {
+          if (containerRef.current !== container) return;
+          if (highlightVisibleSearchMatch(container, result.matchText)) return;
+          setSearchHighlightNotice("Страница открыта, но выделить совпадение не удалось.");
+        }, 200);
+      });
     });
 
   }
@@ -502,6 +545,22 @@ export function ReaderView({ book, onExit, navigationTarget }: ReaderViewProps) 
         aria-label="Режим чтения"
         ref={containerRef}
       />
+
+      <div
+        className={`toast${bookmarkSyncError ? " visible" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        {bookmarkSyncError}
+      </div>
+
+      <div
+        className={`toast${searchHighlightNotice ? " visible" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        {searchHighlightNotice}
+      </div>
 
       {searchOpen && (
         <div

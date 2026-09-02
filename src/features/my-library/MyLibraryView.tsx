@@ -109,7 +109,11 @@ export function MyLibraryView({
   const [personalStatus, setPersonalStatus] = useState<PersonalStatus>("loading");
   const [personalError, setPersonalError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-  const [deletingPersonalId, setDeletingPersonalId] = useState<string | null>(null);
+  // A Set (not a single id) so deleting two different personal books at the
+  // same time each track their own in-flight state correctly -- a single
+  // scalar here would have the second delete's start/finish clobber the
+  // first one's disabled/"Удаление…" state on its card.
+  const [deletingPersonalIds, setDeletingPersonalIds] = useState<Set<string>>(() => new Set());
 
   const requestIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -216,7 +220,8 @@ export function MyLibraryView({
     const title = item.summary.title;
     if (!window.confirm(`Удалить «${title}» с этого устройства?`)) return;
 
-    setDeletingPersonalId(`${item.kind}:${item.id}`);
+    const deletionKey = `${item.kind}:${item.id}`;
+    setDeletingPersonalIds(current => new Set(current).add(deletionKey));
     setPersonalError(null);
 
     try {
@@ -234,7 +239,11 @@ export function MyLibraryView({
       console.error("personal book delete failed:", error);
       setPersonalError(personalImportErrorMessage(error));
     } finally {
-      setDeletingPersonalId(null);
+      setDeletingPersonalIds(current => {
+        const next = new Set(current);
+        next.delete(deletionKey);
+        return next;
+      });
     }
   }
 
@@ -309,10 +318,10 @@ export function MyLibraryView({
                     <button
                       type="button"
                       className="personal-epub-delete"
-                      disabled={deletingPersonalId === deletionKey}
+                      disabled={deletingPersonalIds.has(deletionKey)}
                       onClick={() => void handleDeletePersonalItem(item)}
                     >
-                      {deletingPersonalId === deletionKey ? "Удаление…" : "Удалить с устройства"}
+                      {deletingPersonalIds.has(deletionKey) ? "Удаление…" : "Удалить с устройства"}
                     </button>
                   </div>
                 </article>

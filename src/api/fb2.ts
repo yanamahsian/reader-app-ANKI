@@ -77,9 +77,18 @@ function chapterTitle(section: Element): string | null {
   return elementText(title);
 }
 
+// A real FB2's body/section nesting is at most a few levels deep (title
+// page, body, a handful of nested sections for parts/chapters). This cap
+// is two orders of magnitude above that -- real books never come close --
+// but keeps a pathologically/maliciously deep personal FB2 import (an
+// untrusted file the user picked from their device) from blowing the call
+// stack. Past the limit, that branch is simply not descended into further
+// rather than throwing, so the rest of the document still parses.
+const MAX_WALK_DEPTH = 500;
+
 function collectReadableText(root: Element): string {
   const blocks: string[] = [];
-  const walk = (node: Element): void => {
+  const walk = (node: Element, depth: number): void => {
     const name = localName(node);
 
     if (name === "binary" || name === "image") return;
@@ -95,10 +104,11 @@ function collectReadableText(root: Element): string {
       return;
     }
 
-    for (const child of Array.from(node.children)) walk(child);
+    if (depth >= MAX_WALK_DEPTH) return;
+    for (const child of Array.from(node.children)) walk(child, depth + 1);
   };
 
-  walk(root);
+  walk(root, 0);
   return blocks.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
