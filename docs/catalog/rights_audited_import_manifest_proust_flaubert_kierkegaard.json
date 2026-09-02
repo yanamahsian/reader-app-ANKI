@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "jurisdiction": "DE/EU",
+  "generated_at": "2026-09-02",
+  "legal_rule": "life_plus_70",
+  "entries": [
+    {"author":"Marcel Proust","work":"Du côté de chez Swann","language":"fr","source_id":"gutenberg","external_id":"2650","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Marcel Proust","work":"Les plaisirs et les jours","language":"fr","source_id":"gutenberg","external_id":"58698","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Marcel Proust","work":"Pastiches et mélanges","language":"fr","source_id":"gutenberg","external_id":"64145","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Marcel Proust","work":"La Prisonnière","language":"fr","source_id":"gutenberg","external_id":"60720","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Marcel Proust","work":"Du côté de chez Swann","edition_title":"Swann's Way","language":"en","source_id":"gutenberg","external_id":"7178","status":"IMPORT_NOW","translator":"C. K. Scott Moncrieff","translator_death_year":1930},
+    {"author":"Marcel Proust","work":"À l’ombre des jeunes filles en fleurs","edition_title":"Within a Budding Grove","language":"en","source_id":"gutenberg","external_id":"63532","status":"IMPORT_NOW","translator":"C. K. Scott Moncrieff","translator_death_year":1930},
+    {"author":"Marcel Proust","work":"Le Côté de Guermantes","edition_title":"The Guermantes Way","language":"en","source_id":"gutenberg","external_id":"73425","status":"IMPORT_NOW","translator":"C. K. Scott Moncrieff","translator_death_year":1930},
+    {"author":"Marcel Proust","work":"À l’ombre des jeunes filles en fleurs","language":"fr","source_id":"gutenberg","external_ids":["2998","2999","3000"],"status":"COMBINE_REQUIRED"},
+    {"author":"Marcel Proust","work":"Le Côté de Guermantes","language":"fr","source_id":"gutenberg","external_ids":["8946","12999","13743"],"status":"COMBINE_REQUIRED"},
+    {"author":"Marcel Proust","work":"Sodome et Gomorrhe","language":"fr","source_id":"gutenberg","external_ids":["15288","15075"],"status":"COMBINE_REQUIRED"},
+    {"author":"Marcel Proust","work":"Albertine disparue","language":"fr","source_id":"gutenberg","external_ids":["64427","64428"],"status":"COMBINE_REQUIRED"},
+    {"author":"Marcel Proust","work":"Le Temps retrouvé","language":"fr","source_id":"gutenberg","external_ids":["74090","74091"],"status":"COMBINE_REQUIRED"},
+    {"author":"Marcel Proust","work":"Le Temps retrouvé","edition_title":"Time Regained","language":"en","source_id":"wikisource_or_ia","status":"SOURCE_READY_NO_IMPORTER","translator":"Stephen Hudson (Sydney Schiff)","translator_death_year":1944},
+
+    {"author":"Gustave Flaubert","work":"Madame Bovary","language":"fr","source_id":"gutenberg","external_id":"14155","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Gustave Flaubert","work":"Madame Bovary","language":"en","source_id":"gutenberg","external_id":"2413","status":"IMPORT_NOW","translator":"Eleanor Marx-Aveling","translator_death_year":1898},
+    {"author":"Gustave Flaubert","work":"Madame Bovary","edition_title":"Frau Bovary","language":"de","source_id":"gutenberg","external_id":"15711","status":"IMPORT_NOW","translator":"Arthur Schurig","translator_death_year":1929},
+    {"author":"Gustave Flaubert","work":"Bouvard et Pécuchet","language":"fr","source_id":"gutenberg","external_id":"14157","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Gustave Flaubert","work":"Dictionnaire des idées reçues","language":"fr","source_id":"gutenberg","external_id":"14156","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Gustave Flaubert","work":"Un cœur simple","language":"fr","source_id":"gutenberg","external_id":"26812","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Gustave Flaubert","work":"Trois contes","language":"fr","source_id":"gutenberg","external_id":"12065","status":"IMPORT_NOW","translator":null,"translator_death_year":null},
+    {"author":"Gustave Flaubert","work":"Salammbô","edition_title":"Salambó","language":"es","source_id":"gutenberg","external_id":"66285","status":"IMPORT_NOW","translator":"Ciro Bayo","translator_death_year":1939},
+    {"author":"Gustave Flaubert","work":"Salammbô","edition_title":"Salambo: Ein Roman aus Alt-Karthago","language":"de","source_id":"gutenberg","external_id":"15995","status":"IMPORT_NOW","translator":"Arthur Schurig","translator_death_year":1929},
+    {"author":"Gustave Flaubert","work":"La Tentation de saint Antoine","edition_title":"The Temptation of St. Anthony","language":"en","source_id":"gutenberg","external_id":"52225","status":"IMPORT_NOW","translator":"Lafcadio Hearn","translator_death_year":1904},
+    {"author":"Gustave Flaubert","work":"Salammbô","language":"en","source_id":"gutenberg","external_id":"1290","status":"VERIFY_TRANSLATOR"},
+    {"author":"Gustave Flaubert","work":"Un cœur simple","edition_title":"A Simple Soul","language":"en","source_id":"gutenberg","external_id":"1253","status":"VERIFY_TRANSLATOR"},
+    {"author":"Gustave Flaubert","work":"Hérodias","edition_title":"Herodias","language":"en","source_id":"gutenberg","external_id":"1291","status":"VERIFY_TRANSLATOR"},
+    {"author":"Gustave Flaubert","work":"Par les champs et par les grèves","edition_title":"Over Strand and Field","language":"en","source_id":"gutenberg","external_id":"14233","status":"VERIFY_TRANSLATOR"},
+
+    {"author":"Søren Kierkegaard","work":"Enten — Eller","edition_title":"Enten — Eller. Første Deel","language":"da","source_id":"wikisource","status":"SOURCE_READY_NO_IMPORTER","translator":null,"translator_death_year":null},
+    {"author":"Søren Kierkegaard","work":"Enten — Eller","edition_title":"Enten — Eller. Anden Deel","language":"da","source_id":"wikisource","status":"SOURCE_READY_NO_IMPORTER","translator":null,"translator_death_year":null},
+    {"author":"Søren Kierkegaard","work":"Til Selvprøvelse Samtiden anbefalet","language":"da","source_id":"wikisource","status":"SOURCE_READY_NO_IMPORTER","translator":null,"translator_death_year":null},
+    {"author":"Søren Kierkegaard","work":"Selections from the Writings of Kierkegaard","language":"en","source_id":"gutenberg","external_id":"60333","status":"BLOCKED","translator":"Lee M. Hollander","translator_death_year":1972,"public_domain_from":"2043-01-01"},
+    {"author":"Søren Kierkegaard","work":"multiple","language":"en","source_id":"manual_scan_match_required","status":"SOURCE_READY_NO_IMPORTER","translator":"David F. Swenson","translator_death_year":1940},
+    {"author":"Søren Kierkegaard","work":"multiple","language":"en","source_id":"manual_scan_match_required","status":"BLOCKED","translator":"Walter Lowrie","translator_death_year":1959,"public_domain_from":"2030-01-01"},
+
+    {"author":"Emil Cioran","work":"ALL_FULL_TEXTS_BY_DEFAULT","language":"*","source_id":null,"status":"BLOCKED","author_death_year":1995,"public_domain_from":"2066-01-01"}
+  ]
+}
