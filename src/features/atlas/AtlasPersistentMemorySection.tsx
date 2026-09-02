@@ -3,6 +3,7 @@ import type { Annotation } from "../../api/annotations";
 import { getBookById } from "../../catalog";
 import { GuestNotice } from "../shared/GuestNotice";
 import { AtlasConceptGraphSection } from "./AtlasConceptGraphSection";
+import { AtlasIntellectualTrajectorySection } from "./AtlasIntellectualTrajectorySection";
 
 interface AtlasPersistentMemorySectionProps {
   signals: AtlasMemorySignal[];
@@ -183,6 +184,12 @@ export function AtlasPersistentMemorySection({
       )}
 
       <AtlasConceptGraphSection
+        annotationById={annotationById}
+        unavailableAnnotationId={unavailableAnnotationId}
+        onOpenAnnotation={onOpenAnnotation}
+      />
+
+      <AtlasIntellectualTrajectorySection
         annotationById={annotationById}
         unavailableAnnotationId={unavailableAnnotationId}
         onOpenAnnotation={onOpenAnnotation}
