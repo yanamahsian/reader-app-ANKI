@@ -16,6 +16,8 @@ import type { ReadableEdition } from "../../catalog/toReaderBook";
 import { useReaderJurisdiction } from "./readerJurisdiction";
 import { CoverFallback } from "../shared/CoverFallback";
 import { LANGUAGE_OPTIONS } from "../../catalog/languages";
+import { getEffectivePreferredBookLanguages } from "../../i18n/bookLanguagePreference";
+import { resolveDefaultBookLanguage } from "../../catalog/defaultEditionLanguage";
 import { useAuth } from "../../auth/supabaseAuth";
 import {
   addToLibrary,
@@ -442,15 +444,14 @@ export function BookDetailView({
   // keeps every one of them.
   const availableLanguages = Array.from(new Set(readableEditions.map(re => re.edition.language)));
 
-  // Default language: the visitor's own explicit pick, if it's still a
-  // real option for this book; otherwise the original language, if
-  // it's actually readable; otherwise whichever readable language
-  // happens to come first. Never invented, never a blind
-  // highest-quality-source guess across languages the way the old
-  // resolver worked.
-  const effectiveLanguage = selectedLanguage && availableLanguages.includes(selectedLanguage)
-    ? selectedLanguage
-    : (availableLanguages.includes(book.originalLanguage) ? book.originalLanguage : availableLanguages[0] ?? null);
+  // See resolveDefaultBookLanguage's own comment (module scope, above
+  // this component) for the full priority chain this applies.
+  const effectiveLanguage = resolveDefaultBookLanguage({
+    availableLanguages,
+    originalLanguage: book.originalLanguage,
+    preferredBookLanguages: getEffectivePreferredBookLanguages(),
+    explicitSelection: selectedLanguage
+  });
 
   const editionsForLanguage: ReadableEdition[] = effectiveLanguage
     ? readableEditions.filter(re => re.edition.language === effectiveLanguage)

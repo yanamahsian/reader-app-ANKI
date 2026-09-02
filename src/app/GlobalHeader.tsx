@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n";
+
 interface GlobalHeaderProps {
   onNavigateHome: () => void;
   onNavigateLibrary: () => void;
@@ -13,11 +15,13 @@ interface GlobalHeaderProps {
 // HomeView rendered — Library/Collections/Book Detail/etc. previously
 // had no header at all once you left Home.
 //
-// Interface-language is shown as a static "RU" badge, not a working
-// switcher: this app has no i18n system (every string is hardcoded
-// Russian), and building one is backend/architecture work outside a
-// visual pass — showing a badge that looks clickable but does nothing
-// would be worse than an honest static label.
+// Internationalization v1: nav labels/aria-labels now come from the
+// shared src/i18n layer (useI18n) instead of hardcoded Russian, and the
+// language badge reflects the real active locale (SUPPORTED_LOCALES,
+// uppercased) rather than a frozen "RU". It stays a plain indicator,
+// not a switcher, here -- the actual control lives in Settings
+// (SettingsView.tsx), same as the product spec's "Interface language"
+// setting is described as living in exactly one place.
 export function GlobalHeader({
   onNavigateHome,
   onNavigateLibrary,
@@ -27,6 +31,8 @@ export function GlobalHeader({
   onToggleAccountMenu
 }: GlobalHeaderProps) {
 
+  const { locale, t } = useI18n();
+
   return (
     <header className="global-header">
 
@@ -34,18 +40,18 @@ export function GlobalHeader({
         AN.KI
       </button>
 
-      <nav className="global-header-nav" aria-label="Основная навигация">
-        <button type="button" onClick={onNavigateLibrary}>Библиотека</button>
-        <button type="button" onClick={onNavigateCollections}>Подборки</button>
-        <button type="button" onClick={onOpenSearch}>Поиск</button>
+      <nav className="global-header-nav" aria-label={t("nav.ariaPrimary")}>
+        <button type="button" onClick={onNavigateLibrary}>{t("nav.library")}</button>
+        <button type="button" onClick={onNavigateCollections}>{t("nav.collections")}</button>
+        <button type="button" onClick={onOpenSearch}>{t("nav.search")}</button>
       </nav>
 
       <div className="global-header-actions">
-        <span className="global-header-lang" aria-hidden="true">RU</span>
+        <span className="global-header-lang" aria-hidden="true">{locale.toUpperCase()}</span>
         <button
           className="global-header-account"
           type="button"
-          aria-label="Аккаунт"
+          aria-label={t("nav.account")}
           aria-expanded={isAccountMenuOpen}
           onClick={onToggleAccountMenu}
         >
@@ -53,12 +59,12 @@ export function GlobalHeader({
         </button>
       </div>
 
-      <nav className="global-header-mobile-nav" aria-label="Навигация">
-        <button type="button" aria-label="Библиотека" onClick={onNavigateLibrary}>⌸</button>
-        <button type="button" aria-label="Поиск" onClick={onOpenSearch}>⌕</button>
+      <nav className="global-header-mobile-nav" aria-label={t("nav.ariaMobile")}>
+        <button type="button" aria-label={t("nav.library")} onClick={onNavigateLibrary}>⌸</button>
+        <button type="button" aria-label={t("nav.search")} onClick={onOpenSearch}>⌕</button>
         <button
           type="button"
-          aria-label="Аккаунт"
+          aria-label={t("nav.account")}
           aria-expanded={isAccountMenuOpen}
           onClick={onToggleAccountMenu}
         >

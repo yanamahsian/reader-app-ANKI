@@ -7,6 +7,8 @@ import { extractLanguageFacets, fetchLibraryCatalogPage, type LanguageFacet } fr
 import { useReaderJurisdiction } from "../book-detail/readerJurisdiction";
 import { BookGrid } from "../shared/BookGrid";
 import { LibraryBookCard } from "../shared/LibraryBookCard";
+import { getEffectivePreferredBookLanguages } from "../../i18n/bookLanguagePreference";
+import { applyPreferredLanguageRanking } from "../../catalog/languagePreferenceRanking";
 
 export interface LibraryRestoreState {
   query: string;
@@ -69,18 +71,19 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
   const isFirstRunRef = useRef(true);
 
   function runLocalFallback(trimmedQuery: string, activeLanguage: string): void {
+    const preferredLanguages = getEffectivePreferredBookLanguages();
     if (!trimmedQuery) {
       const all = getBooks().filter(book =>
         !activeLanguage || book.originalLanguage === activeLanguage || book.availableLanguages.includes(activeLanguage)
       );
-      setBooks(all);
+      setBooks(applyPreferredLanguageRanking(all, activeLanguage, preferredLanguages));
       setHasMore(false);
       setDataSource("local");
       setStatus(all.length ? "success" : "empty");
       return;
     }
     const { books: ranked } = searchCatalog(trimmedQuery, activeLanguage);
-    const localBooks = ranked.map(r => r.book);
+    const localBooks = applyPreferredLanguageRanking(ranked.map(r => r.book), activeLanguage, preferredLanguages);
     setBooks(localBooks);
     setHasMore(false);
     setDataSource("local");
@@ -133,9 +136,23 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
 
     try {
 
+      // preferredLanguages is sent to the server too (see
+      // supabase/sql/library_catalog_preferred_language_ranking_v1.sql) --
+      // once that migration is deployed, ranking happens on the FULL
+      // catalog before limit/offset, which is what actually makes
+      // "Spanish books first" true across the whole result set rather
+      // than only within whatever one page happened to come back.
+      // applyPreferredLanguageRanking below stays applied to the
+      // response regardless: it's a stable, idempotent no-op once the
+      // server has already ranked correctly, and is what provides
+      // correct (page-local) behavior in the meantime, before that
+      // migration is applied, or if it's ever rolled back.
+      const preferredLanguages = getEffectivePreferredBookLanguages();
+
       const page = await fetchLibraryCatalogPage({
         query: trimmedQuery,
         language: activeLanguage,
+        preferredLanguages,
         jurisdiction: readerJurisdiction ?? undefined,
         limit: pages * PAGE_SIZE,
         offset: 0,
@@ -149,7 +166,11 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
       // objects directly -- guarantees what's rendered here is exactly
       // what getBookById (and so Book Detail / Author Detail) will find
       // for the same id, with no possibility of drift between the two.
-      const merged = page.books.map(book => getBookById(book.id) ?? book);
+      const merged = applyPreferredLanguageRanking(
+        page.books.map(book => getBookById(book.id) ?? book),
+        activeLanguage,
+        preferredLanguages
+      );
 
       setBooks(merged);
       setHasMore(page.hasMore);
@@ -194,9 +215,23 @@ export function LibraryView({ onBack, restoreState, onOpenBookDetail }: LibraryV
 
     try {
 
+      // Same preferredLanguages as loadFromStart, and for the same
+      // reason it must be: the server orders the ENTIRE matching result
+      // set by (boost desc, w.id asc) before applying limit/offset (see
+      // library_catalog_preferred_language_ranking_v1.sql), so a
+      // continuation request has to pass the identical ranking signal --
+      // otherwise this offset would be read against a differently
+      // ordered result set than the one page 1 came from, producing
+      // duplicate or skipped Works instead of a clean continuation.
+      // Deliberately NOT re-applying applyPreferredLanguageRanking to
+      // the appended items client-side here (unlike loadFromStart): that
+      // would re-sort the combined list and visually jump cards that are
+      // already on screen, which is worse than trusting the server's
+      // already-consistent order for a continuation.
       const page = await fetchLibraryCatalogPage({
         query: query.trim(),
         language,
+        preferredLanguages: getEffectivePreferredBookLanguages(),
         jurisdiction: readerJurisdiction ?? undefined,
         limit: PAGE_SIZE,
         offset: books.length,
