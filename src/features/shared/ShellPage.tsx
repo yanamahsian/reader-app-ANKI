@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useI18n } from "../../i18n";
 
 interface ShellPageProps {
   onBack: () => void;
@@ -23,6 +24,8 @@ interface ShellPageProps {
 // copies of the same header markup.
 export function ShellPage({ onBack, backLabel, eyebrow, title, subtitle, children, wide }: ShellPageProps) {
 
+  const { t } = useI18n();
+
   return (
     <section
       className={wide ? "shell-page shell-page-wide" : "shell-page"}
@@ -30,7 +33,7 @@ export function ShellPage({ onBack, backLabel, eyebrow, title, subtitle, childre
     >
 
       <button className="text-link" type="button" onClick={onBack}>
-        {backLabel ?? "← Назад"}
+        {backLabel ?? t("common.back")}
       </button>
 
       <header className="shell-page-header">

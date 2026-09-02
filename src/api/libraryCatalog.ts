@@ -33,6 +33,16 @@ export interface LibraryCatalogParams {
   query?: string;
   language?: string;
   jurisdiction?: string;
+  // Internationalization v1, part 2: a RANKING signal, never a filter --
+  // see supabase/sql/library_catalog_preferred_language_ranking_v1.sql's
+  // own comment. Works with a qualifying edition in one of these
+  // languages sort first in the server's response; every other Work
+  // stays in the result set. `language` above is unaffected and remains
+  // the only hard filter -- passing both is meaningful (though the boost
+  // is moot once every result already matches an explicit `language`
+  // filter) and passing this alone with no `language` set is the normal
+  // "unfiltered browse, but my languages first" case.
+  preferredLanguages?: string[];
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
@@ -99,6 +109,9 @@ export async function fetchLibraryCatalogPage(params: LibraryCatalogParams): Pro
   if (params.query) url.searchParams.set("q", params.query);
   if (params.language) url.searchParams.set("language", params.language);
   if (params.jurisdiction) url.searchParams.set("jurisdiction", params.jurisdiction);
+  if (params.preferredLanguages && params.preferredLanguages.length > 0) {
+    url.searchParams.set("preferredLanguages", params.preferredLanguages.join(","));
+  }
   url.searchParams.set("limit", String(params.limit ?? 24));
   url.searchParams.set("offset", String(params.offset ?? 0));
 

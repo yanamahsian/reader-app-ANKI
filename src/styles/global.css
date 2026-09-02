@@ -3336,16 +3336,27 @@ mark.reader-highlight.reader-highlight-focus {
   margin-top: 14px;
 }
 
+.settings-lang-row-wrap {
+  flex-wrap: wrap;
+}
+
 .settings-lang-chip {
   padding: 7px 16px;
 
   border: 1px solid var(--home-border);
+  background: transparent;
+  cursor: pointer;
 
   color: var(--home-muted);
 
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  font-family: inherit;
+}
+
+.settings-lang-chip:hover {
+  color: rgba(246, 237, 224, 0.86);
 }
 
 .settings-lang-chip.active {

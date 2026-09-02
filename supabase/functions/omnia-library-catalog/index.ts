@@ -10,6 +10,7 @@ const BOOK_CONTENT_ENDPOINT =
   "https://prknybetxirzbzkvmovw.supabase.co/functions/v1/omnia-book-content";
 const FORMAT_PRIORITY = ["anki-json", "epub", "plaintext"];
 const MAX_WORK_IDS = 200;
+const MAX_PREFERRED_LANGUAGES = 10;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -260,6 +261,24 @@ Deno.serve(async (req: Request) => {
   );
   const searchQuery = rawQuery.length >= 2 ? rawQuery : null;
 
+  // Internationalization v1, part 2: an optional RANKING signal, never a
+  // filter -- see library_catalog_preferred_language_ranking_v1.sql's own
+  // comment for the full reasoning. `language` above stays the only hard
+  // filter, completely unaffected by this. Comma-separated, same
+  // convention as `workIds` above; trimmed, de-duplicated, capped, and
+  // empty entries dropped so a stray "," or trailing comma can't produce
+  // a spurious empty-string array element. Passed through as-is (real
+  // bound RPC array parameter, not interpolated SQL) -- an unrecognized
+  // code just never matches any edition's language and so never boosts
+  // anything, exactly like an unrecognized `language` filter value would
+  // simply match zero rows.
+  const preferredLanguagesParam = (url.searchParams.get("preferredLanguages") ?? "").trim();
+  const preferredLanguages = preferredLanguagesParam
+    ? Array.from(new Set(
+        preferredLanguagesParam.split(",").map(code => code.trim()).filter(Boolean)
+      )).slice(0, MAX_PREFERRED_LANGUAGES)
+    : [];
+
   const planResult = await resolveEffectivePlan(supabase, req);
   if ("errorResponse" in planResult) return planResult.errorResponse;
   const freeOnly = !PAID_PLANS.has(planResult.plan);
@@ -272,7 +291,8 @@ Deno.serve(async (req: Request) => {
         p_limit: limit,
         p_offset: offset,
         p_jurisdiction: jurisdiction || null,
-        p_free_only: freeOnly
+        p_free_only: freeOnly,
+        p_preferred_languages: preferredLanguages.length > 0 ? preferredLanguages : null
       }),
       supabase.rpc("library_language_facets", {
         p_query: searchQuery,
