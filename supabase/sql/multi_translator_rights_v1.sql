@@ -29,7 +29,7 @@ security definer
 set search_path = public, extensions
 as $$
 declare
-  e record; raw_name text; clean_name text; display_name text; matched_id text;
+  e record; raw_name text; clean_name text; v_display_name text; matched_id text;
   author_slug text; pos int; linked_count int := 0; scaffolded_count int := 0;
   enriched_count int := 0; confirmed_count int := 0; enrich_ids text[]; er record;
   current_year int := extract(year from now())::int;
@@ -61,15 +61,15 @@ begin
       end if;
 
       if matched_id is null then
-        display_name := public._translator_enrich_display_name(clean_name);
-        author_slug := public._translator_enrich_slug(display_name);
+        v_display_name := public._translator_enrich_display_name(clean_name);
+        author_slug := public._translator_enrich_slug(v_display_name);
         matched_id := 'translator-' || author_slug;
         if exists(select 1 from authors a where a.id=matched_id and not public._author_enrich_names_match(clean_name,a.name)) then
           matched_id := matched_id || '-' || substr(md5(clean_name),1,8);
         end if;
-        insert into authors(id,name,death_year) values(matched_id,display_name,null) on conflict(id) do nothing;
+        insert into authors(id,name,death_year) values(matched_id,v_display_name,null) on conflict(id) do nothing;
         insert into master_corpus_authors(display_name,search_names,sections,corpus_scope,original_language,priority,canonical_author_id,status,notes)
-        values(display_name,array[clean_name],array['rights-check'],'rights-check',e.language,999,matched_id,'rights-review','Scaffolded by multi_translator_rights_tick for deterministic translator death-year enrichment.')
+        values(v_display_name,array[clean_name],array['rights-check'],'rights-check',e.language,999,matched_id,'rights-review','Scaffolded by multi_translator_rights_tick for deterministic translator death-year enrichment.')
         on conflict(display_name) do nothing;
         scaffolded_count := scaffolded_count + 1;
       else
@@ -134,4 +134,6 @@ $$;
 revoke all on function public.multi_translator_rights_tick(int,int) from public,anon,authenticated;
 grant execute on function public.multi_translator_rights_tick(int,int) to service_role;
 
-select cron.schedule('multi-translator-rights-every-10-minutes','3,13,23,33,43,53 * * * *',$$select public.multi_translator_rights_tick(8,6);$$);
+-- Death-year lookup can retry external Wikidata calls; keep the scheduled
+-- batch deliberately small so one slow identity never blocks the whole tick.
+select cron.schedule('multi-translator-rights-every-10-minutes','3,13,23,33,43,53 * * * *',$$select public.multi_translator_rights_tick(8,1);$$);
