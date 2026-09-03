@@ -41,6 +41,14 @@ interface AtlasCanonSectionProps {
 
 type LoadState<T> = { kind: "loading" } | { kind: "loaded"; data: T } | { kind: "error"; text: string };
 
+// `path` carries `originCollectionId` -- the collection screen the path
+// was opened FROM, not a "parent" derived from the database (a path can
+// belong to more than one collection, so there is no single correct
+// parent to look up). Set when the path is opened via a collection's
+// path list; left `null` when a path is ever opened with no known origin
+// (not reachable from this component today, but kept correct for a
+// future direct-link entry point) so the back button below has an
+// explicit, safe fallback instead of guessing.
 type CanonView =
   | { kind: "index" }
   | { kind: "collection"; collectionId: string }
@@ -70,7 +78,9 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
         console.error("getCanonCollections failed:", error);
         if (!cancelled) setCollectionsState({ kind: "error", text: strings.errorCollections });
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -78,12 +88,16 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
     let cancelled = false;
     setPathsState({ kind: "loading" });
     getCanonPathsForCollection(view.collectionId)
-      .then(paths => { if (!cancelled) setPathsState({ kind: "loaded", data: paths }); })
+      .then(paths => {
+        if (!cancelled) setPathsState({ kind: "loaded", data: paths });
+      })
       .catch(error => {
         console.error("getCanonPathsForCollection failed:", error);
         if (!cancelled) setPathsState({ kind: "error", text: strings.errorPaths });
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [view]);
 
   useEffect(() => {
@@ -91,17 +105,22 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
     let cancelled = false;
     setPathDetailState({ kind: "loading" });
     getCanonPath(view.pathId)
-      .then(detail => { if (!cancelled) setPathDetailState({ kind: "loaded", data: detail }); })
+      .then(detail => {
+        if (!cancelled) setPathDetailState({ kind: "loaded", data: detail });
+      })
       .catch(error => {
         console.error("getCanonPath failed:", error);
         if (!cancelled) setPathDetailState({ kind: "error", text: strings.errorPath });
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [view]);
 
   function renderWorkRow(pathWork: CanonPathWork) {
     const book = pathWork.work;
     const metaParts: string[] = [];
+
     if (book) {
       if (book.authorName) metaParts.push(book.authorName);
       if (book.publicationYear) metaParts.push(String(book.publicationYear));
@@ -113,10 +132,14 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
     }
     if (pathWork.readingStage) metaParts.push(strings.stage[pathWork.readingStage]);
     if (pathWork.isCore) metaParts.push(strings.coreWork);
+
     const libraryStatus = book ? libraryStatusByWorkId.get(book.id) : undefined;
     if (libraryStatus === "finished") metaParts.push(strings.statusFinished);
     else if (libraryStatus === "reading") metaParts.push(strings.statusReading);
-    const rationaleText = pathWork.rationale ? resolveCanonText(pathWork.rationale, pathWork.rationaleI18n, locale) : null;
+
+    const rationaleText = pathWork.rationale
+      ? resolveCanonText(pathWork.rationale, pathWork.rationaleI18n, locale)
+      : null;
 
     return (
       <article key={pathWork.id} className="notes-card">
@@ -125,11 +148,15 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
         {metaParts.length > 0 && <p className="notes-card-edition">{metaParts.join(" · ")}</p>}
         {rationaleText && <p className="notes-card-note">{rationaleText}</p>}
         {pathWork.prerequisiteWork && (
-          <p className="settings-section-note">{strings.recommendedBefore} {pathWork.prerequisiteWork.title}</p>
+          <p className="settings-section-note">
+            {strings.recommendedBefore} {pathWork.prerequisiteWork.title}
+          </p>
         )}
         {book && (
           <div className="notes-card-actions">
-            <button type="button" className="text-link" onClick={() => onOpenBookDetail(book.id)}>{strings.open}</button>
+            <button type="button" className="text-link" onClick={() => onOpenBookDetail(book.id)}>
+              {strings.open}
+            </button>
           </div>
         )}
       </article>
@@ -140,9 +167,13 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
     return (
       <>
         <h3 className="plan-card-name">{resolveCanonText(path.title, path.titleI18n, locale)}</h3>
-        {path.description && <p className="settings-section-note">{resolveCanonText(path.description, path.descriptionI18n, locale)}</p>}
+        {path.description && (
+          <p className="settings-section-note">{resolveCanonText(path.description, path.descriptionI18n, locale)}</p>
+        )}
         {path.collections.length > 0 && (
-          <p className="notes-card-edition">{strings.partOf} {path.collections.map(c => resolveCanonText(c.title, c.titleI18n, locale)).join(" · ")}</p>
+          <p className="notes-card-edition">
+            {strings.partOf} {path.collections.map(c => resolveCanonText(c.title, c.titleI18n, locale)).join(" · ")}
+          </p>
         )}
         <div className="notes-group-items">{path.works.map(pathWork => renderWorkRow(pathWork))}</div>
       </>
@@ -150,13 +181,23 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
   }
 
   function renderPath(originCollectionId: string | null) {
-    const goBack = () => originCollectionId
-      ? setView({ kind: "collection", collectionId: originCollectionId })
-      : setView({ kind: "index" });
+    // Back goes to the collection this path was actually opened FROM
+    // (carried in view state -- see the CanonView type comment above),
+    // never a "parent" guessed from the database, since a path can
+    // belong to more than one collection. Only a path opened with no
+    // known origin (not reachable today, but kept correct for a future
+    // direct-link entry point) falls back to the Canon index.
+    const goBack = () =>
+      originCollectionId
+        ? setView({ kind: "collection", collectionId: originCollectionId })
+        : setView({ kind: "index" });
+
     return (
       <>
         <div className="notes-card-actions">
-          <button type="button" className="text-link" onClick={goBack}>{originCollectionId ? strings.back : strings.backToCanon}</button>
+          <button type="button" className="text-link" onClick={goBack}>
+            {originCollectionId ? strings.back : strings.backToCanon}
+          </button>
         </div>
         {!pathDetailState || pathDetailState.kind === "loading" ? (
           <p className="settings-section-note">{strings.loadingPath}</p>
@@ -164,22 +205,32 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
           <GuestNotice message={pathDetailState.text} />
         ) : !pathDetailState.data ? (
           <GuestNotice message={strings.pathUnavailable} />
-        ) : renderPathDetail(pathDetailState.data)}
+        ) : (
+          renderPathDetail(pathDetailState.data)
+        )}
       </>
     );
   }
 
   function renderCollection(collectionId: string) {
-    const collection = collectionsState.kind === "loaded" ? collectionsState.data.find(c => c.id === collectionId) : undefined;
+    const collection =
+      collectionsState.kind === "loaded" ? collectionsState.data.find(c => c.id === collectionId) : undefined;
+
     return (
       <>
         <div className="notes-card-actions">
-          <button type="button" className="text-link" onClick={() => setView({ kind: "index" })}>{strings.backToCanon}</button>
+          <button type="button" className="text-link" onClick={() => setView({ kind: "index" })}>
+            {strings.backToCanon}
+          </button>
         </div>
         {collection && (
           <>
             <h3 className="plan-card-name">{resolveCanonText(collection.title, collection.titleI18n, locale)}</h3>
-            {collection.description && <p className="settings-section-note">{resolveCanonText(collection.description, collection.descriptionI18n, locale)}</p>}
+            {collection.description && (
+              <p className="settings-section-note">
+                {resolveCanonText(collection.description, collection.descriptionI18n, locale)}
+              </p>
+            )}
           </>
         )}
         {!pathsState || pathsState.kind === "loading" ? (
@@ -193,9 +244,19 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
             {pathsState.data.map(path => (
               <article key={path.id} className="notes-card">
                 <h3 className="plan-card-name">{resolveCanonText(path.title, path.titleI18n, locale)}</h3>
-                {path.description && <p className="settings-section-note">{resolveCanonText(path.description, path.descriptionI18n, locale)}</p>}
+                {path.description && (
+                  <p className="settings-section-note">
+                    {resolveCanonText(path.description, path.descriptionI18n, locale)}
+                  </p>
+                )}
                 <div className="notes-card-actions">
-                  <button type="button" className="text-link" onClick={() => setView({ kind: "path", pathId: path.id, originCollectionId: collectionId })}>{strings.openPath}</button>
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() => setView({ kind: "path", pathId: path.id, originCollectionId: collectionId })}
+                  >
+                    {strings.openPath}
+                  </button>
                 </div>
               </article>
             ))}
@@ -206,18 +267,34 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
   }
 
   function renderIndex() {
-    if (collectionsState.kind === "loading") return <p className="settings-section-note">{strings.loadingIndex}</p>;
-    if (collectionsState.kind === "error") return <GuestNotice message={collectionsState.text} />;
-    if (collectionsState.data.length === 0) return <GuestNotice message={strings.emptyIndex} />;
+    if (collectionsState.kind === "loading") {
+      return <p className="settings-section-note">{strings.loadingIndex}</p>;
+    }
+    if (collectionsState.kind === "error") {
+      return <GuestNotice message={collectionsState.text} />;
+    }
+    if (collectionsState.data.length === 0) {
+      return <GuestNotice message={strings.emptyIndex} />;
+    }
     return (
       <div className="notes-group-items">
         {collectionsState.data.map(collection => (
           <article key={collection.id} className="notes-card">
             <h3 className="plan-card-name">{resolveCanonText(collection.title, collection.titleI18n, locale)}</h3>
-            {collection.description && <p className="settings-section-note">{resolveCanonText(collection.description, collection.descriptionI18n, locale)}</p>}
+            {collection.description && (
+              <p className="settings-section-note">
+                {resolveCanonText(collection.description, collection.descriptionI18n, locale)}
+              </p>
+            )}
             <p className="notes-card-edition">{strings.pathCount(collection.publishedPathCount)}</p>
             <div className="notes-card-actions">
-              <button type="button" className="text-link" onClick={() => setView({ kind: "collection", collectionId: collection.id })}>{strings.open}</button>
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => setView({ kind: "collection", collectionId: collection.id })}
+              >
+                {strings.open}
+              </button>
             </div>
           </article>
         ))}
@@ -234,6 +311,7 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
           <p className="notes-group-author">{strings.subtitle}</p>
         </div>
       </header>
+
       {view.kind === "index" && renderIndex()}
       {view.kind === "collection" && renderCollection(view.collectionId)}
       {view.kind === "path" && renderPath(view.originCollectionId)}
