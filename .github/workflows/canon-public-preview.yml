@@ -1,0 +1,96 @@
+name: Publish Canon isolated preview
+
+on:
+  push:
+    branches:
+      - atlas-the-canon-ui-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PAGES_ARTIFACT_ID: "9879338958"
+  PRODUCTION_INDEX_SHA256: "980041cbaca6403bcdf2fe8f2493368be147065b443054be97c5254cd446f5c7"
+
+jobs:
+  build-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Canon branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build Canon preview under isolated base path
+        env:
+          VITE_PADDLE_ENV: sandbox
+          VITE_PADDLE_CLIENT_TOKEN: test_e66a8f24d3ad650a9cd1de261a9
+        run: npx vite build --base=/reader-app-ANKI/canon-preview/
+
+      - name: Download exact current production Pages artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p production-download production-site combined-site
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PRODUCTION_PAGES_ARTIFACT_ID}/zip" \
+            > production-download/pages.zip
+          unzip -q production-download/pages.zip -d production-download
+          test -f production-download/artifact.tar
+          tar -xf production-download/artifact.tar -C production-site
+
+      - name: Prove production root is byte-identical before adding preview
+        run: |
+          actual="$(sha256sum production-site/index.html | awk '{print $1}')"
+          echo "production index sha256: $actual"
+          test "$actual" = "$PRODUCTION_INDEX_SHA256"
+
+      - name: Assemble production plus isolated Canon preview
+        run: |
+          cp -a production-site/. combined-site/
+          mkdir -p combined-site/canon-preview
+          cp -a dist/. combined-site/canon-preview/
+
+          after="$(sha256sum combined-site/index.html | awk '{print $1}')"
+          echo "combined root index sha256: $after"
+          test "$after" = "$PRODUCTION_INDEX_SHA256"
+          test -f combined-site/canon-preview/index.html
+
+      - name: Upload combined Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: combined-site
+
+  deploy-preview:
+    needs: build-preview
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy production root plus isolated Canon preview
+        id: deployment
+        uses: actions/deploy-pages@v4
