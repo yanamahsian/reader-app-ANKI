@@ -44,6 +44,11 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 export type CanonStatus = "draft" | "published" | "archived";
 export type CanonReadingStage = "entry" | "intermediate" | "advanced";
+
+// Open-ended on purpose -- not narrowed to the app's current
+// SUPPORTED_LOCALES, so a locale this jsonb map already has (added via a
+// plain UPDATE, no migration -- see the schema migration's own comment)
+// resolves correctly even before the interface-language list catches up.
 export type CanonI18nMap = Record<string, string>;
 
 export interface CanonCollection {
@@ -99,12 +104,28 @@ export interface CanonPathDetail {
   works: CanonPathWork[];
 }
 
+// Resolves a localized field with the same fallback chain the schema
+// migration documents: exact locale match in the *_i18n map, else the
+// required plain-text base column. Pure/no React -- callers pass in
+// whatever locale useI18n() currently reports, so this file stays a
+// plain data layer and the interface-language mechanism (src/i18n --
+// left untouched here, per instruction not to touch the separate i18n
+// branch or hardcode Russian) stays entirely the caller's concern.
 export function resolveCanonText(base: string, i18n: CanonI18nMap | null | undefined, locale: string): string {
   const localized = i18n?.[locale];
   return localized && localized.trim().length > 0 ? localized : base;
 }
 
 async function canonHeaders(): Promise<Record<string, string>> {
+  // Canon rows are readable by BOTH anon and authenticated per RLS --
+  // unlike userLibrary.ts's authHeaders(), this never throws when
+  // signed out: it just authenticates as anon (the publishable key
+  // doubles as the anon bearer token, the standard Supabase pattern for
+  // an unauthenticated PostgREST request). In practice Canon only ever
+  // mounts inside AtlasView's existing isAuthenticated gate today (see
+  // AtlasCanonSection's own comment), but this module makes no
+  // assumption about that so it keeps working correctly if Canon is
+  // ever exposed to guests later.
   const token = await getValidAccessToken().catch(() => null);
   return {
     "apikey": SUPABASE_PUBLISHABLE_KEY,
@@ -137,15 +158,22 @@ export function canonGenreLabels(book: Book): string[] {
   return book.genreIds.map(id => labelFor(genres, id)).filter((label): label is string => Boolean(label));
 }
 
+// ---- caching ----------------------------------------------------------
+
 let collectionsCache: CanonCollection[] | null = null;
 const pathsForCollectionCache = new Map<string, CanonPathSummary[]>();
 const pathDetailCache = new Map<string, CanonPathDetail>();
 
+// Not wired to any UI action today (Canon content never changes from
+// inside the client) -- exported so a future editorial-refresh action,
+// or a test, can force a clean re-read without a full page reload.
 export function invalidateCanonCache(): void {
   collectionsCache = null;
   pathsForCollectionCache.clear();
   pathDetailCache.clear();
 }
+
+// ---- reads --------------------------------------------------------------
 
 interface CanonCollectionRow {
   id: string;
@@ -265,6 +293,8 @@ export async function getCanonPath(pathId: string): Promise<CanonPathDetail | nu
   const pathRow = pathRows[0];
   if (!pathRow) return null;
 
+  // One batched fetch for every work_id this path needs (the works
+  // themselves plus any prerequisite pointers), never one call per row.
   const allWorkIds = Array.from(
     new Set([
       ...workRows.map(row => row.work_id),
@@ -275,6 +305,12 @@ export async function getCanonPath(pathId: string): Promise<CanonPathDetail | nu
     try {
       await fetchAndMergeWorksByIds(allWorkIds);
     } catch (error) {
+      // Not authenticated, or the batch lookup failed -- works simply
+      // resolve to undefined below (rendered as "unavailable" by the
+      // UI) rather than throwing the whole path detail away. See this
+      // module's header comment: today Canon only ever loads while
+      // signed in, so this is a defensive fallback, not the expected
+      // path.
       console.error("Canon work metadata fetch failed:", error);
     }
   }
