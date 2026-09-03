@@ -46,6 +46,7 @@ export interface CanonStrings {
   errorPath: string;
   emptyIndex: string;
   emptyCollectionPaths: string;
+  emptyPathWorks: string;
   pathUnavailable: string;
   workUnavailable: string;
 }
@@ -86,6 +87,7 @@ const CANON_STRINGS: Record<Locale, CanonStrings> = {
     errorPath: "Could not load this reading path.",
     emptyIndex: "The Canon has not been published yet — the editorial map is being prepared.",
     emptyCollectionPaths: "There are no published reading paths in this collection yet.",
+    emptyPathWorks: "This reading path does not have any works yet.",
     pathUnavailable: "This reading path is currently unavailable.",
     workUnavailable: "Work temporarily unavailable"
   },
@@ -110,6 +112,7 @@ const CANON_STRINGS: Record<Locale, CanonStrings> = {
     errorPath: "Не удалось загрузить маршрут чтения.",
     emptyIndex: "The Canon пока не опубликован — редакционная карта готовится.",
     emptyCollectionPaths: "В этой коллекции пока нет опубликованных маршрутов чтения.",
+    emptyPathWorks: "В этом маршруте чтения пока нет произведений.",
     pathUnavailable: "Этот маршрут чтения сейчас недоступен.",
     workUnavailable: "Работа временно недоступна"
   },
@@ -134,6 +137,7 @@ const CANON_STRINGS: Record<Locale, CanonStrings> = {
     errorPath: "Не вдалося завантажити маршрут читання.",
     emptyIndex: "The Canon ще не опубліковано — редакційна карта готується.",
     emptyCollectionPaths: "У цій колекції поки немає опублікованих маршрутів читання.",
+    emptyPathWorks: "У цьому маршруті читання поки немає творів.",
     pathUnavailable: "Цей маршрут читання зараз недоступний.",
     workUnavailable: "Твір тимчасово недоступний"
   },
@@ -158,6 +162,7 @@ const CANON_STRINGS: Record<Locale, CanonStrings> = {
     errorPath: "No se pudo cargar esta ruta de lectura.",
     emptyIndex: "The Canon aún no se ha publicado — el mapa editorial está en preparación.",
     emptyCollectionPaths: "Todavía no hay rutas de lectura publicadas en esta colección.",
+    emptyPathWorks: "Esta ruta de lectura todavía no tiene obras.",
     pathUnavailable: "Esta ruta de lectura no está disponible en este momento.",
     workUnavailable: "Obra temporalmente no disponible"
   },
@@ -182,6 +187,7 @@ const CANON_STRINGS: Record<Locale, CanonStrings> = {
     errorPath: "Dieser Leseweg konnte nicht geladen werden.",
     emptyIndex: "The Canon ist noch nicht veröffentlicht — die redaktionelle Landkarte wird vorbereitet.",
     emptyCollectionPaths: "In dieser Sammlung gibt es noch keine veröffentlichten Lesewege.",
+    emptyPathWorks: "Dieser Leseweg enthält noch keine Werke.",
     pathUnavailable: "Dieser Leseweg ist derzeit nicht verfügbar.",
     workUnavailable: "Werk vorübergehend nicht verfügbar"
   },
@@ -206,6 +212,7 @@ const CANON_STRINGS: Record<Locale, CanonStrings> = {
     errorPath: "Impossible de charger ce parcours de lecture.",
     emptyIndex: "The Canon n'est pas encore publié — la carte éditoriale est en préparation.",
     emptyCollectionPaths: "Cette collection ne contient encore aucun parcours de lecture publié.",
+    emptyPathWorks: "Ce parcours de lecture ne contient encore aucune œuvre.",
     pathUnavailable: "Ce parcours de lecture n'est pas disponible pour le moment.",
     workUnavailable: "Œuvre temporairement indisponible"
   }
