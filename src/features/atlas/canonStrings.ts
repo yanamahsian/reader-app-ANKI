@@ -50,6 +50,12 @@ export interface CanonStrings {
   workUnavailable: string;
 }
 
+// Russian/Ukrainian noun plurals need the same mod10/mod100 three-way
+// split AtlasOverview.tsx's own ruCount() helper already uses for its
+// stats line. Duplicated here in miniature (not imported) so this stays
+// a standalone, self-contained dictionary rather than reaching into an
+// unrelated component file for one helper -- consistent with keeping
+// Canon's i18n footprint local and small.
 function slavicCount(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
