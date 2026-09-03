@@ -24,6 +24,7 @@ import { buildAtlasConnections, type AtlasConnection } from "./buildAtlas";
 import { AtlasQuestionsSection } from "./AtlasQuestionsSection";
 import { AtlasContradictionsSection } from "./AtlasContradictionsSection";
 import { AtlasUnfinishedLinesSection } from "./AtlasUnfinishedLinesSection";
+import { AtlasCanonSection } from "./AtlasCanonSection";
 import { AtlasOverview, type AtlasSectionId } from "./AtlasOverview";
 import {
   AtlasPersistentMemorySection,
@@ -111,6 +112,7 @@ export function AtlasView({
   const [isLoadingLatestThread, setLoadingLatestThread] = useState(false);
 
   const overviewRef = useRef<HTMLDivElement | null>(null);
+  const canonRef = useRef<HTMLDivElement | null>(null);
   const threadsRef = useRef<HTMLDivElement | null>(null);
   const unfinishedRef = useRef<HTMLDivElement | null>(null);
   const questionsRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +122,7 @@ export function AtlasView({
 
   function scrollToSection(id: AtlasSectionId): void {
     const targets: Record<AtlasSectionId, RefObject<HTMLDivElement | null>> = {
+      canon: canonRef,
       threads: threadsRef,
       unfinished: unfinishedRef,
       questions: questionsRef,
@@ -480,6 +483,11 @@ export function AtlasView({
             />
           </div>
 
+          <div ref={canonRef}>
+            <AtlasCanonSection libraryEntries={atlas.entries} onOpenBookDetail={onOpenBookDetail} />
+            <AtlasBackToOverviewLink onClick={scrollToOverview} />
+          </div>
+
           <section ref={threadsRef} className="notes-group" aria-label="Нити мысли">
             <header className="notes-group-header">
               <div>
@@ -497,7 +505,6 @@ export function AtlasView({
             </header>
 
             {threadError && <p className="notes-card-error">{threadError}</p>}
-
             {atlas.annotations.length === 0 && (
               <GuestNotice message="Сначала сохраните несколько фрагментов во время чтения — из них можно будет собрать первую нить мысли." />
             )}
