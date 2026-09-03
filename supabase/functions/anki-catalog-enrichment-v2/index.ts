@@ -74,7 +74,9 @@ Deno.serve(async(req:Request)=>{
  if(!cands?.length) return json({ok:true,processed:0,note:"No eligible work needs v2 enrichment"});
  const c=cands[0]; const now=new Date().toISOString();
  const {data:oldRun}=await sb.from("catalog_ai_enrichment_runs").select("attempts").eq("work_id",c.work_id).maybeSingle();
- await sb.from("catalog_ai_enrichment_runs").upsert({work_id:c.work_id,edition_id:c.edition_id,prompt_version:PROMPT_VERSION,status:"processing",attempts:Number(oldRun?.attempts??0)+1,started_at:now,finished_at:null,last_error:null,updated_at:now},{onConflict:"work_id"});
+ const attemptsSoFar=Number(oldRun?.attempts??0);
+ // attempts is a content-specific retry budget; systemic/quota failures must not consume it.
+ await sb.from("catalog_ai_enrichment_runs").upsert({work_id:c.work_id,edition_id:c.edition_id,prompt_version:PROMPT_VERSION,status:"processing",attempts:attemptsSoFar,started_at:now,finished_at:null,last_error:null,updated_at:now},{onConflict:"work_id"});
  try{
   const {data:work,error:we}=await sb.from("works").select("*").eq("id",c.work_id).maybeSingle(); if(we||!work) throw new Error(we?.message??"Work missing");
   const {data:author}=await sb.from("authors").select("id,name").eq("id",work.author_id).maybeSingle();
@@ -93,8 +95,17 @@ Deno.serve(async(req:Request)=>{
   if(Object.keys(updates).length){ const {error}=await sb.from("works").update(updates).eq("id",work.id); if(error) throw new Error(`works update: ${error.message}`); }
   const sampleHash=await sha256Hex(sample); const taxonomyVersion=await sha256Hex(AXES.map(a=>`${a}:${vocab[a].map((x:any)=>`${x.id}=${x.label_en??x.label??x.id}`).sort().join(",")}`).join("|"));
   const prov:any[]=[]; for(const axis of AXES){ const field=FIELD_BY_AXIS[axis]; const selected=MULTI.has(axis)?(Array.isArray(p[field])?p[field]:[]).filter((x:any)=>vocab[axis].some((t:any)=>t.id===x)):(typeof p[field]==="string"&&vocab[axis].some((t:any)=>t.id===p[field])?[p[field]]:[]); prov.push({work_id:work.id,edition_id:c.edition_id,category:axis,model:MODEL,prompt_version:PROMPT_VERSION,sampler_version:"catalog-v2",sample_hash:sampleHash,taxonomy_version:taxonomyVersion,selected_ids:selected,applied_ids:Object.prototype.hasOwnProperty.call(updates,field)?selected:[],rejected_ids:[],evidence:p.evidence?.[axis]??null,confidence:conf[axis]??"low",provider_response_id:ai.responseId,created_at:new Date().toISOString()}); }
-  const {error:pe}=await sb.from("ai_classification_provenance").upsert(prov,{onConflict:"work_id,category"}); if(pe) console.error("provenance write failed",pe);
-  await sb.from("catalog_ai_enrichment_runs").update({status:"succeeded",completed_fields:completed,unresolved_fields:unresolved,model:MODEL,result:{written:updates,confidence:conf,evidence:p.evidence??{},provider_response_id:ai.responseId},last_error:null,finished_at:new Date().toISOString(),next_attempt_at:null,updated_at:new Date().toISOString()}).eq("work_id",work.id);
-  return json({ok:true,processed:1,workId:work.id,title:work.title,written:updates,completed,unresolved,model:MODEL});
- }catch(e){ const message=e instanceof Error?e.message:String(e); const {data:r}=await sb.from("catalog_ai_enrichment_runs").select("attempts").eq("work_id",c.work_id).maybeSingle(); const attempts=Number(r?.attempts??1); await sb.from("catalog_ai_enrichment_runs").update({status:"failed",last_error:message,finished_at:new Date().toISOString(),next_attempt_at:attempts>=3?null:new Date(Date.now()+30*60*1000).toISOString(),updated_at:new Date().toISOString()}).eq("work_id",c.work_id); return json({ok:false,processed:1,workId:c.work_id,error:message,attempts},500); }
+  const {error:pe}=await sb.from("ai_classification_provenance").upsert(prov,{onConflict:"work_id,category"});
+  const provenanceError=pe?`provenance write failed: ${pe.message}`:null;
+  if(pe) console.error("provenance write failed",pe);
+  await sb.from("catalog_ai_enrichment_runs").update({status:"succeeded",completed_fields:completed,unresolved_fields:unresolved,model:MODEL,result:{written:updates,confidence:conf,evidence:p.evidence??{},provider_response_id:ai.responseId,provenanceError},last_error:provenanceError,finished_at:new Date().toISOString(),next_attempt_at:null,updated_at:new Date().toISOString()}).eq("work_id",work.id);
+  return json({ok:true,processed:1,workId:work.id,title:work.title,written:updates,completed,unresolved,model:MODEL,provenanceError});
+ }catch(e){
+  const message=e instanceof Error?e.message:String(e);
+  const isSystemic=/^OpenAI 5\d\d|^OpenAI 429|credit_balance_exhausted|Missing OPENAI_API_KEY|Missing server secrets|Storage download failed/.test(message);
+  const attempts=isSystemic?attemptsSoFar:attemptsSoFar+1;
+  const nextAttemptAt=isSystemic?new Date(Date.now()+6*60*60*1000).toISOString():(attempts>=3?null:new Date(Date.now()+30*60*1000).toISOString());
+  await sb.from("catalog_ai_enrichment_runs").update({status:"failed",attempts,last_error:message,finished_at:new Date().toISOString(),next_attempt_at:nextAttemptAt,updated_at:new Date().toISOString()}).eq("work_id",c.work_id);
+  return json({ok:false,processed:1,workId:c.work_id,error:message,attempts,systemic:isSystemic},500);
+ }
 });
