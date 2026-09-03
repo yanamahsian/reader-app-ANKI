@@ -175,7 +175,11 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
             {strings.partOf} {path.collections.map(c => resolveCanonText(c.title, c.titleI18n, locale)).join(" · ")}
           </p>
         )}
-        <div className="notes-group-items">{path.works.map(pathWork => renderWorkRow(pathWork))}</div>
+        {path.works.length === 0 ? (
+          <GuestNotice message={strings.emptyPathWorks} />
+        ) : (
+          <div className="notes-group-items">{path.works.map(pathWork => renderWorkRow(pathWork))}</div>
+        )}
       </>
     );
   }
