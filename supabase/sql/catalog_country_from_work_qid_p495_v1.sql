@@ -93,6 +93,9 @@ begin
         on m.qid = (ent.value->'claims'->'P495'->0->'mainsnak'->'datavalue'->'value'->>'id')
       where ent.value->'claims'->'P495' is not null;
     exception when others then
+      -- A single chunk failure (network hiccup) must not abort the whole
+      -- pass -- those work_ids simply get no result this run and remain
+      -- eligible next time; nothing is guessed in their place.
       null;
     end;
     i := i + 50;
