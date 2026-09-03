@@ -6,7 +6,7 @@
 // presentational and never runs AI just to populate its index.
 import { useMemo } from "react";
 
-export type AtlasSectionId = "threads" | "unfinished" | "questions" | "contradictions" | "memory" | "connections";
+export type AtlasSectionId = "canon" | "threads" | "unfinished" | "questions" | "contradictions" | "memory" | "connections";
 
 export interface AtlasOverviewProps {
   booksCount: number;
@@ -73,6 +73,12 @@ export function AtlasOverview({
 
   const entries = useMemo<IndexEntry[]>(() => {
     return [
+      {
+        id: "canon",
+        eyebrow: "The Canon",
+        title: "The Canon",
+        description: "Кураторская карта ключевой мировой литературы — традиции, эпохи и маршруты чтения."
+      },
       {
         id: "threads",
         eyebrow: "Threads",
