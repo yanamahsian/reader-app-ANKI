@@ -2,6 +2,7 @@
 // not one more generic note-card buried in the section index. The remaining
 // personal-memory tools keep their existing compact index treatment.
 import { useMemo } from "react";
+import "./AtlasOverview.css";
 
 export type AtlasSectionId = "canon" | "threads" | "unfinished" | "questions" | "contradictions" | "memory" | "connections";
 
