@@ -1,0 +1,411 @@
+.canon-shell {
+  margin: 34px 0 56px;
+  padding: clamp(24px, 4vw, 54px);
+  border: 1px solid rgba(202, 160, 88, 0.32);
+  background:
+    linear-gradient(180deg, rgba(12, 9, 8, 0.985), rgba(9, 7, 7, 0.985)),
+    var(--home-bg);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+}
+
+.canon-hero {
+  max-width: 880px;
+  padding-bottom: 34px;
+  border-bottom: 1px solid rgba(202, 160, 88, 0.2);
+}
+
+.canon-hero h2,
+.canon-route-heading h3,
+.canon-tradition-copy strong,
+.canon-book-copy strong {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+}
+
+.canon-hero h2 {
+  margin: 0;
+  color: #f4e7d5;
+  font-size: clamp(54px, 7vw, 92px);
+  line-height: 0.92;
+  letter-spacing: -0.035em;
+}
+
+.canon-hero > p:last-child {
+  max-width: 760px;
+  margin: 24px 0 0;
+  color: rgba(244, 231, 213, 0.68);
+  font-family: "Cormorant Garamond", serif;
+  font-size: clamp(18px, 2vw, 23px);
+  line-height: 1.5;
+}
+
+.canon-index-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 24px 0 30px;
+  color: rgba(244, 231, 213, 0.62);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canon-index-summary span + span::before {
+  content: "·";
+  margin-right: 24px;
+  color: var(--home-gold);
+}
+
+.canon-tradition-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.canon-tradition-card {
+  position: relative;
+  min-width: 0;
+  min-height: 300px;
+  padding: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(202, 160, 88, 0.24);
+  border-radius: 0;
+  background: rgba(20, 15, 13, 0.95);
+  color: var(--home-text);
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.canon-tradition-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(202, 160, 88, 0.62);
+  background: rgba(27, 18, 16, 0.98);
+}
+
+.canon-tradition-number {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  color: rgba(202, 160, 88, 0.56);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.canon-tradition-books {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 154px;
+  margin: 2px 0 20px;
+}
+
+.canon-tradition-books span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 142px;
+  border: 1px solid rgba(202, 160, 88, 0.38);
+  background:
+    radial-gradient(circle at 50% 16%, rgba(119, 39, 48, 0.32), transparent 46%),
+    linear-gradient(180deg, #211817, #100d0c);
+  color: rgba(226, 192, 127, 0.82);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  box-shadow: inset 0 0 0 3px rgba(202, 160, 88, 0.04);
+}
+
+.canon-tradition-books span:nth-child(2) {
+  width: 67px;
+  height: 151px;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(103, 20, 31, 0.5), transparent 48%),
+    linear-gradient(180deg, #32151b, #130d0d);
+  font-size: 10px;
+}
+
+.canon-tradition-copy {
+  display: grid;
+  gap: 6px;
+  padding-right: 34px;
+}
+
+.canon-tradition-copy strong {
+  color: #f0e3d2;
+  font-size: clamp(24px, 2.5vw, 33px);
+  line-height: 1.05;
+}
+
+.canon-tradition-copy small {
+  color: rgba(240, 227, 210, 0.52);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canon-tradition-arrow {
+  position: absolute;
+  right: 20px;
+  bottom: 22px;
+  color: var(--home-gold);
+  font-size: 20px;
+}
+
+.canon-route-topbar {
+  margin: 26px 0 0;
+}
+
+.canon-back {
+  appearance: none;
+  padding: 0 0 5px;
+  border: 0;
+  border-bottom: 1px solid rgba(202, 160, 88, 0.54);
+  border-radius: 0;
+  background: transparent;
+  color: var(--home-gold);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canon-route-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  margin: 34px 0 38px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid rgba(202, 160, 88, 0.18);
+}
+
+.canon-route-heading h3 {
+  margin: 0;
+  color: #f4e7d5;
+  font-size: clamp(42px, 5vw, 70px);
+  line-height: 0.98;
+}
+
+.canon-route-heading > div:first-child > p:last-child {
+  max-width: 670px;
+  margin: 16px 0 0;
+  color: rgba(244, 231, 213, 0.6);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 19px;
+  line-height: 1.45;
+}
+
+.canon-route-count {
+  flex: 0 0 auto;
+  display: grid;
+  min-width: 145px;
+  gap: 3px;
+  padding-left: 24px;
+  border-left: 1px solid rgba(202, 160, 88, 0.28);
+}
+
+.canon-route-count strong {
+  color: var(--home-gold);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.canon-route-count span {
+  color: rgba(244, 231, 213, 0.48);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canon-route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+  gap: 38px 22px;
+}
+
+.canon-route-book {
+  position: relative;
+  min-width: 0;
+}
+
+.canon-route-index {
+  display: inline-block;
+  margin-bottom: 9px;
+  color: rgba(202, 160, 88, 0.56);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.canon-book-button {
+  appearance: none;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.canon-book-cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border: 1px solid rgba(202, 160, 88, 0.24);
+  background: #120e0d;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.canon-book-button:hover .canon-book-cover {
+  transform: translateY(-3px);
+  border-color: rgba(202, 160, 88, 0.64);
+}
+
+.canon-book-cover img,
+.canon-book-cover .cover-fallback {
+  width: 100%;
+  height: 100%;
+}
+
+.canon-book-cover img {
+  display: block;
+  object-fit: cover;
+}
+
+.canon-book-cover .cover-fallback {
+  min-height: 0;
+}
+
+.canon-book-copy {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+}
+
+.canon-book-copy strong {
+  color: #efe2d1;
+  font-size: 20px;
+  line-height: 1.08;
+}
+
+.canon-book-copy small {
+  overflow: hidden;
+  color: rgba(239, 226, 209, 0.55);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canon-book-meta {
+  color: rgba(202, 160, 88, 0.56);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.canon-route-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 42px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(202, 160, 88, 0.18);
+  color: rgba(244, 231, 213, 0.48);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canon-state-copy {
+  margin: 30px 0 0;
+  color: rgba(244, 231, 213, 0.58);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 20px;
+}
+
+@media (max-width: 1020px) {
+  .canon-tradition-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .canon-route-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .canon-shell {
+    margin: 20px 0 40px;
+    padding: 22px 16px 28px;
+  }
+
+  .canon-hero {
+    padding-bottom: 24px;
+  }
+
+  .canon-hero h2 {
+    font-size: clamp(48px, 18vw, 72px);
+  }
+
+  .canon-index-summary {
+    display: grid;
+    gap: 6px;
+  }
+
+  .canon-index-summary span + span::before {
+    content: none;
+  }
+
+  .canon-tradition-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .canon-tradition-card {
+    min-height: 250px;
+  }
+
+  .canon-tradition-books {
+    height: 120px;
+  }
+
+  .canon-tradition-books span {
+    width: 46px;
+    height: 108px;
+  }
+
+  .canon-tradition-books span:nth-child(2) {
+    width: 54px;
+    height: 116px;
+  }
+
+  .canon-route-heading {
+    display: grid;
+    gap: 22px;
+  }
+
+  .canon-route-count {
+    padding: 0;
+    border-left: 0;
+  }
+
+  .canon-route-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 14px;
+  }
+
+  .canon-book-copy strong {
+    font-size: 18px;
+  }
+
+  .canon-route-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
