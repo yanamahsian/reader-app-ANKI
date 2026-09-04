@@ -1,9 +1,6 @@
-// ATLAS PRODUCT INTEGRATION v1: the product shell that sits above Atlas's
-// already-working features (Thought Threads, Unfinished Lines, Cross-Book
-// Questions, Contradictions, Reading Memory, Automatic Connections).
-// Persistent Atlas Memory v1 adds a durable signal count sourced from the
-// server-side atlas_memory_signals substrate; this component remains purely
-// presentational and never runs AI just to populate its index.
+// ATLAS PRODUCT INTEGRATION v2: The Canon is a primary Atlas surface,
+// not one more generic note-card buried in the section index. The remaining
+// personal-memory tools keep their existing compact index treatment.
 import { useMemo } from "react";
 
 export type AtlasSectionId = "canon" | "threads" | "unfinished" | "questions" | "contradictions" | "memory" | "connections";
@@ -74,12 +71,6 @@ export function AtlasOverview({
   const entries = useMemo<IndexEntry[]>(() => {
     return [
       {
-        id: "canon",
-        eyebrow: "The Canon",
-        title: "The Canon",
-        description: "Кураторская карта ключевой мировой литературы — традиции, эпохи и маршруты чтения."
-      },
-      {
         id: "threads",
         eyebrow: "Threads",
         title: "Нити мысли",
@@ -137,9 +128,22 @@ export function AtlasOverview({
 
   return (
     <>
+      <section className="canon-overview-portal" aria-label="The Canon">
+        <div>
+          <p className="eyebrow">The Canon</p>
+          <h2>The Canon</h2>
+          <p>
+            Полноценная карта мировой литературы. Выберите традицию и пройдите через весь доступный корпус книг в автоматически выстроенном маршруте.
+          </p>
+        </div>
+        <button type="button" className="primary-button" onClick={() => onNavigate("canon")}>
+          Открыть The Canon
+        </button>
+      </section>
+
       <section className="notes-group" aria-label="Обзор Atlas">
         <p className="settings-section-note">
-          Atlas теперь опирается на постоянную память чтения: сервер сохраняет проверяемые сигналы из реального чтения, библиотеки, закладок, заметок и нитей мысли. Здесь нет фоновых догадок или автоматически выдуманных концептов — только то, что действительно произошло в AN.KI.
+          Atlas опирается на постоянную память чтения: сервер сохраняет проверяемые сигналы из реального чтения, библиотеки, закладок, заметок и нитей мысли. Здесь нет фоновых догадок или автоматически выдуманных концептов — только то, что действительно произошло в AN.KI.
         </p>
 
         <div className="subscription-blocks">
@@ -166,8 +170,8 @@ export function AtlasOverview({
         <header className="notes-group-header">
           <div>
             <p className="eyebrow">Index</p>
-            <h2 className="notes-group-title">Разделы Atlas</h2>
-            <p className="notes-group-author">Быстрый переход к каждой части вашего Atlas.</p>
+            <h2 className="notes-group-title">Личная часть Atlas</h2>
+            <p className="notes-group-author">Память, вопросы, связи и собственные линии мысли.</p>
           </div>
         </header>
 
