@@ -5,6 +5,11 @@
 -- every time the catalog grows. These two service-role-only RPCs derive
 -- Canon directly from catalog-ready, readable public-domain Works by the
 -- Work's ORIGINAL language/tradition.
+--
+-- Some Wikisource imports also materialize child pages such as
+-- "Collection/Story" as separate Work rows. Those are source-navigation
+-- artifacts, not standalone books in Canon, so slash-path rows are excluded
+-- here without deleting or changing the underlying catalog data.
 
 create or replace function public.canon_catalog_sections(
   p_jurisdiction text default null
@@ -28,6 +33,7 @@ as $$
     and w.publication_status is distinct from 'hidden'
     and w.original_language is not null
     and btrim(w.original_language) <> ''
+    and w.title not like '%/%'
     and exists (
       select 1
       from public.editions e
@@ -82,6 +88,7 @@ as $$
     wr.catalog_ready = true
     and w.publication_status is distinct from 'hidden'
     and w.original_language = p_original_language
+    and w.title not like '%/%'
     and exists (
       select 1
       from public.editions e
