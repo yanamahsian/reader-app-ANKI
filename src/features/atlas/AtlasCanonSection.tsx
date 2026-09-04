@@ -1,66 +1,129 @@
-// THE CANON v1 -- Atlas UI. A curated intellectual map of literature
-// (traditions -> collections -> reading paths -> works), NOT a "required
-// reading" list -- see src/api/canon.ts's header comment for the full
-// data-model rationale. This component owns its own small index ->
-// collection -> path sub-navigation (there is no router in this app --
-// see AtlasView.tsx's own comment on scroll-based section navigation --
-// so Canon's inherent hierarchy is handled entirely with local state,
-// never a new top-level route or a second Book Detail screen).
+// THE CANON v2 -- visual, catalog-backed Atlas subsection.
 //
-// Deliberately mounted only inside AtlasView's existing
-// isAuthenticated-gated branch, exactly like every other Atlas section
-// (Threads, Memory, Connections, ...) -- Canon does not introduce a
-// separate guest-vs-signed-in policy of its own. Reading-progress
-// display reuses whatever LibraryEntry[] AtlasView already loaded (no
-// second user_library fetch); clicking a work reuses the exact same
-// onOpenBookDetail callback every other Atlas surface uses -- there is
-// no Canon-specific Book Detail.
+// No hand-authored nine-book path lives here. A section is one original
+// literary language/tradition reported by omnia-canon-catalog; opening it
+// follows the server's deterministic chronological route through EVERY
+// readable public-domain Work in that tradition. The route is paged only
+// for rendering/performance -- later pages continue the same global order.
+
 import { useEffect, useMemo, useState } from "react";
-import { useI18n } from "../../i18n";
+import type { Book } from "../../catalog/types";
 import {
-  getCanonCollections,
-  getCanonPathsForCollection,
-  getCanonPath,
-  resolveCanonText,
-  canonEpochLabel,
-  canonMovementLabel,
-  canonGenreLabels,
-  type CanonCollection,
-  type CanonPathSummary,
-  type CanonPathDetail,
-  type CanonPathWork
+  fetchCanonPage,
+  fetchCanonSections,
+  type CanonSectionSummary
 } from "../../api/canon";
 import type { LibraryEntry, LibraryStatus } from "../../api/userLibrary";
+import { useI18n } from "../../i18n";
+import { useReaderJurisdiction } from "../book-detail/readerJurisdiction";
+import { CoverFallback } from "../shared/CoverFallback";
 import { GuestNotice } from "../shared/GuestNotice";
-import { getCanonStrings } from "./canonStrings";
+import "./AtlasCanonSection.css";
 
 interface AtlasCanonSectionProps {
   libraryEntries: LibraryEntry[];
   onOpenBookDetail: (workId: string) => void;
 }
 
-type LoadState<T> = { kind: "loading" } | { kind: "loaded"; data: T } | { kind: "error"; text: string };
-
-// `path` carries `originCollectionId` -- the collection screen the path
-// was opened FROM, not a "parent" derived from the database (a path can
-// belong to more than one collection, so there is no single correct
-// parent to look up). Set when the path is opened via a collection's
-// path list; left `null` when a path is ever opened with no known origin
-// (not reachable from this component today, but kept correct for a
-// future direct-link entry point) so the back button below has an
-// explicit, safe fallback instead of guessing.
 type CanonView =
   | { kind: "index" }
-  | { kind: "collection"; collectionId: string }
-  | { kind: "path"; pathId: string; originCollectionId: string | null };
+  | { kind: "section"; code: string };
+
+type SectionsState =
+  | { kind: "loading" }
+  | { kind: "loaded"; data: CanonSectionSummary[] }
+  | { kind: "error" };
+
+const PAGE_SIZE = 100;
+
+const LITERATURE_LABELS: Record<string, { ru: string; en: string }> = {
+  en: { ru: "Англоязычная литература", en: "English-language literature" },
+  "en-gb": { ru: "Английская литература", en: "English literature" },
+  ru: { ru: "Русская литература", en: "Russian literature" },
+  fr: { ru: "Французская литература", en: "French literature" },
+  de: { ru: "Немецкая литература", en: "German literature" },
+  es: { ru: "Испаноязычная литература", en: "Spanish-language literature" },
+  it: { ru: "Итальянская литература", en: "Italian literature" },
+  pt: { ru: "Португалоязычная литература", en: "Portuguese-language literature" },
+  ja: { ru: "Японская литература", en: "Japanese literature" },
+  hu: { ru: "Венгерская литература", en: "Hungarian literature" },
+  fi: { ru: "Финская литература", en: "Finnish literature" },
+  nl: { ru: "Нидерландская литература", en: "Dutch literature" },
+  pl: { ru: "Польская литература", en: "Polish literature" },
+  sv: { ru: "Шведская литература", en: "Swedish literature" },
+  da: { ru: "Датская литература", en: "Danish literature" },
+  no: { ru: "Норвежская литература", en: "Norwegian literature" },
+  zh: { ru: "Китайская литература", en: "Chinese literature" },
+  la: { ru: "Латинская литература", en: "Latin literature" },
+  el: { ru: "Греческая литература", en: "Greek literature" },
+  grc: { ru: "Древнегреческая литература", en: "Ancient Greek literature" },
+  uk: { ru: "Украинская литература", en: "Ukrainian literature" },
+  ro: { ru: "Румынская литература", en: "Romanian literature" },
+  cs: { ru: "Чешская литература", en: "Czech literature" },
+  oc: { ru: "Окситанская литература", en: "Occitan literature" }
+};
+
+function isRu(locale: string): boolean {
+  return locale.toLowerCase().startsWith("ru");
+}
+
+function literatureLabel(code: string, locale: string): string {
+  const known = LITERATURE_LABELS[code];
+  if (known) return isRu(locale) ? known.ru : known.en;
+
+  try {
+    const displayNames = new Intl.DisplayNames([locale], { type: "language" });
+    const language = displayNames.of(code);
+    if (language) return isRu(locale) ? `${language} литература` : `${language} literature`;
+  } catch {
+    // Fall through to the stable code label below.
+  }
+  return code.toUpperCase();
+}
+
+function worksLabel(count: number, locale: string): string {
+  if (!isRu(locale)) return `${count.toLocaleString()} works`;
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const word = mod10 === 1 && mod100 !== 11
+    ? "произведение"
+    : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)
+      ? "произведения"
+      : "произведений";
+  return `${count.toLocaleString("ru-RU")} ${word}`;
+}
+
+function routeSubtitle(locale: string): string {
+  return isRu(locale)
+    ? "Все доступные произведения традиции складываются в один живой маршрут автоматически."
+    : "Every available work in the tradition forms one live route automatically.";
+}
+
+function CanonBookCover({ book }: { book: Book }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = Boolean(book.cover) && !failed;
+
+  return (
+    <div className="canon-book-cover">
+      {showImage ? (
+        <img src={book.cover ?? undefined} alt="" loading="lazy" onError={() => setFailed(true)} />
+      ) : (
+        <CoverFallback title={book.title} />
+      )}
+    </div>
+  );
+}
 
 export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCanonSectionProps) {
   const { locale } = useI18n();
-  const strings = getCanonStrings(locale);
+  const [readerJurisdiction] = useReaderJurisdiction();
   const [view, setView] = useState<CanonView>({ kind: "index" });
-  const [collectionsState, setCollectionsState] = useState<LoadState<CanonCollection[]>>({ kind: "loading" });
-  const [pathsState, setPathsState] = useState<LoadState<CanonPathSummary[]> | null>(null);
-  const [pathDetailState, setPathDetailState] = useState<LoadState<CanonPathDetail | null> | null>(null);
+  const [sections, setSections] = useState<SectionsState>({ kind: "loading" });
+  const [books, setBooks] = useState<Book[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState(false);
 
   const libraryStatusByWorkId = useMemo(() => {
     const map = new Map<string, LibraryStatus>();
@@ -69,256 +132,231 @@ export function AtlasCanonSection({ libraryEntries, onOpenBookDetail }: AtlasCan
   }, [libraryEntries]);
 
   useEffect(() => {
-    let cancelled = false;
-    getCanonCollections()
-      .then(collections => {
-        if (!cancelled) setCollectionsState({ kind: "loaded", data: collections });
-      })
+    const controller = new AbortController();
+    setSections({ kind: "loading" });
+
+    fetchCanonSections({
+      jurisdiction: readerJurisdiction ?? undefined,
+      signal: controller.signal
+    })
+      .then(data => setSections({ kind: "loaded", data }))
       .catch(error => {
-        console.error("getCanonCollections failed:", error);
-        if (!cancelled) setCollectionsState({ kind: "error", text: strings.errorCollections });
+        if (controller.signal.aborted) return;
+        console.error("Canon sections failed:", error);
+        setSections({ kind: "error" });
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+
+    return () => controller.abort();
+  }, [readerJurisdiction]);
 
   useEffect(() => {
-    if (view.kind !== "collection") return;
-    let cancelled = false;
-    setPathsState({ kind: "loading" });
-    getCanonPathsForCollection(view.collectionId)
-      .then(paths => {
-        if (!cancelled) setPathsState({ kind: "loaded", data: paths });
+    if (view.kind !== "section") return;
+
+    const controller = new AbortController();
+    setBooks([]);
+    setTotal(0);
+    setHasMore(false);
+    setRouteError(false);
+    setRouteLoading(true);
+
+    fetchCanonPage({
+      originalLanguage: view.code,
+      jurisdiction: readerJurisdiction ?? undefined,
+      limit: PAGE_SIZE,
+      offset: 0,
+      signal: controller.signal
+    })
+      .then(page => {
+        setBooks(page.books);
+        setTotal(page.total);
+        setHasMore(page.hasMore);
       })
       .catch(error => {
-        console.error("getCanonPathsForCollection failed:", error);
-        if (!cancelled) setPathsState({ kind: "error", text: strings.errorPaths });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view]);
-
-  useEffect(() => {
-    if (view.kind !== "path") return;
-    let cancelled = false;
-    setPathDetailState({ kind: "loading" });
-    getCanonPath(view.pathId)
-      .then(detail => {
-        if (!cancelled) setPathDetailState({ kind: "loaded", data: detail });
+        if (controller.signal.aborted) return;
+        console.error("Canon route failed:", error);
+        setRouteError(true);
       })
-      .catch(error => {
-        console.error("getCanonPath failed:", error);
-        if (!cancelled) setPathDetailState({ kind: "error", text: strings.errorPath });
+      .finally(() => {
+        if (!controller.signal.aborted) setRouteLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [view]);
 
-  function renderWorkRow(pathWork: CanonPathWork) {
-    const book = pathWork.work;
-    const metaParts: string[] = [];
+    return () => controller.abort();
+  }, [view, readerJurisdiction]);
 
-    if (book) {
-      if (book.authorName) metaParts.push(book.authorName);
-      if (book.publicationYear) metaParts.push(String(book.publicationYear));
-      metaParts.push(...canonGenreLabels(book));
-      const movementLabel = canonMovementLabel(book);
-      if (movementLabel) metaParts.push(movementLabel);
-      const epochLabel = canonEpochLabel(book);
-      if (epochLabel) metaParts.push(epochLabel);
+  async function loadMore(): Promise<void> {
+    if (view.kind !== "section" || routeLoading || !hasMore) return;
+    setRouteLoading(true);
+    setRouteError(false);
+
+    try {
+      const page = await fetchCanonPage({
+        originalLanguage: view.code,
+        jurisdiction: readerJurisdiction ?? undefined,
+        limit: PAGE_SIZE,
+        offset: books.length
+      });
+      setBooks(current => [...current, ...page.books]);
+      setTotal(page.total);
+      setHasMore(page.hasMore);
+    } catch (error) {
+      console.error("Canon route continuation failed:", error);
+      setRouteError(true);
+    } finally {
+      setRouteLoading(false);
     }
-    if (pathWork.readingStage) metaParts.push(strings.stage[pathWork.readingStage]);
-    if (pathWork.isCore) metaParts.push(strings.coreWork);
-
-    const libraryStatus = book ? libraryStatusByWorkId.get(book.id) : undefined;
-    if (libraryStatus === "finished") metaParts.push(strings.statusFinished);
-    else if (libraryStatus === "reading") metaParts.push(strings.statusReading);
-
-    const rationaleText = pathWork.rationale
-      ? resolveCanonText(pathWork.rationale, pathWork.rationaleI18n, locale)
-      : null;
-
-    return (
-      <article key={pathWork.id} className="notes-card">
-        <p className="eyebrow">{String(pathWork.position).padStart(2, "0")}</p>
-        <h3 className="plan-card-name">{book?.title ?? strings.workUnavailable}</h3>
-        {metaParts.length > 0 && <p className="notes-card-edition">{metaParts.join(" · ")}</p>}
-        {rationaleText && <p className="notes-card-note">{rationaleText}</p>}
-        {pathWork.prerequisiteWork && (
-          <p className="settings-section-note">
-            {strings.recommendedBefore} {pathWork.prerequisiteWork.title}
-          </p>
-        )}
-        {book && (
-          <div className="notes-card-actions">
-            <button type="button" className="text-link" onClick={() => onOpenBookDetail(book.id)}>
-              {strings.open}
-            </button>
-          </div>
-        )}
-      </article>
-    );
   }
 
-  function renderPathDetail(path: CanonPathDetail) {
-    return (
-      <>
-        <h3 className="plan-card-name">{resolveCanonText(path.title, path.titleI18n, locale)}</h3>
-        {path.description && (
-          <p className="settings-section-note">{resolveCanonText(path.description, path.descriptionI18n, locale)}</p>
-        )}
-        {path.collections.length > 0 && (
-          <p className="notes-card-edition">
-            {strings.partOf} {path.collections.map(c => resolveCanonText(c.title, c.titleI18n, locale)).join(" · ")}
-          </p>
-        )}
-        {path.works.length === 0 ? (
-          <GuestNotice message={strings.emptyPathWorks} />
-        ) : (
-          <div className="notes-group-items">{path.works.map(pathWork => renderWorkRow(pathWork))}</div>
-        )}
-      </>
-    );
-  }
-
-  function renderPath(originCollectionId: string | null) {
-    // Back goes to the collection this path was actually opened FROM
-    // (carried in view state -- see the CanonView type comment above),
-    // never a "parent" guessed from the database, since a path can
-    // belong to more than one collection. Only a path opened with no
-    // known origin (not reachable today, but kept correct for a future
-    // direct-link entry point) falls back to the Canon index.
-    const goBack = () =>
-      originCollectionId
-        ? setView({ kind: "collection", collectionId: originCollectionId })
-        : setView({ kind: "index" });
-
-    return (
-      <>
-        <div className="notes-card-actions">
-          <button type="button" className="text-link" onClick={goBack}>
-            {originCollectionId ? strings.back : strings.backToCanon}
-          </button>
-        </div>
-        {!pathDetailState || pathDetailState.kind === "loading" ? (
-          <p className="settings-section-note">{strings.loadingPath}</p>
-        ) : pathDetailState.kind === "error" ? (
-          <GuestNotice message={pathDetailState.text} />
-        ) : !pathDetailState.data ? (
-          <GuestNotice message={strings.pathUnavailable} />
-        ) : (
-          renderPathDetail(pathDetailState.data)
-        )}
-      </>
-    );
-  }
-
-  function renderCollection(collectionId: string) {
-    const collection =
-      collectionsState.kind === "loaded" ? collectionsState.data.find(c => c.id === collectionId) : undefined;
-
-    return (
-      <>
-        <div className="notes-card-actions">
-          <button type="button" className="text-link" onClick={() => setView({ kind: "index" })}>
-            {strings.backToCanon}
-          </button>
-        </div>
-        {collection && (
-          <>
-            <h3 className="plan-card-name">{resolveCanonText(collection.title, collection.titleI18n, locale)}</h3>
-            {collection.description && (
-              <p className="settings-section-note">
-                {resolveCanonText(collection.description, collection.descriptionI18n, locale)}
-              </p>
-            )}
-          </>
-        )}
-        {!pathsState || pathsState.kind === "loading" ? (
-          <p className="settings-section-note">{strings.loadingCollectionPaths}</p>
-        ) : pathsState.kind === "error" ? (
-          <GuestNotice message={pathsState.text} />
-        ) : pathsState.data.length === 0 ? (
-          <GuestNotice message={strings.emptyCollectionPaths} />
-        ) : (
-          <div className="notes-group-items">
-            {pathsState.data.map(path => (
-              <article key={path.id} className="notes-card">
-                <h3 className="plan-card-name">{resolveCanonText(path.title, path.titleI18n, locale)}</h3>
-                {path.description && (
-                  <p className="settings-section-note">
-                    {resolveCanonText(path.description, path.descriptionI18n, locale)}
-                  </p>
-                )}
-                <div className="notes-card-actions">
-                  <button
-                    type="button"
-                    className="text-link"
-                    onClick={() => setView({ kind: "path", pathId: path.id, originCollectionId: collectionId })}
-                  >
-                    {strings.openPath}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </>
-    );
+  function openSection(code: string): void {
+    setView({ kind: "section", code });
   }
 
   function renderIndex() {
-    if (collectionsState.kind === "loading") {
-      return <p className="settings-section-note">{strings.loadingIndex}</p>;
+    if (sections.kind === "loading") {
+      return <p className="canon-state-copy">{isRu(locale) ? "Собираем мировую библиотеку…" : "Building the world library…"}</p>;
     }
-    if (collectionsState.kind === "error") {
-      return <GuestNotice message={collectionsState.text} />;
+    if (sections.kind === "error") {
+      return <GuestNotice message={isRu(locale) ? "Не удалось загрузить разделы Canon." : "Could not load Canon sections."} />;
     }
-    if (collectionsState.data.length === 0) {
-      return <GuestNotice message={strings.emptyIndex} />;
+    if (sections.data.length === 0) {
+      return <GuestNotice message={isRu(locale) ? "В Canon пока нет доступных произведений." : "No works are available in The Canon yet."} />;
     }
+
+    const totalWorks = sections.data.reduce((sum, section) => sum + section.count, 0);
+
     return (
-      <div className="notes-group-items">
-        {collectionsState.data.map(collection => (
-          <article key={collection.id} className="notes-card">
-            <h3 className="plan-card-name">{resolveCanonText(collection.title, collection.titleI18n, locale)}</h3>
-            {collection.description && (
-              <p className="settings-section-note">
-                {resolveCanonText(collection.description, collection.descriptionI18n, locale)}
-              </p>
-            )}
-            <p className="notes-card-edition">{strings.pathCount(collection.publishedPathCount)}</p>
-            <div className="notes-card-actions">
+      <>
+        <div className="canon-index-summary" aria-label="Canon summary">
+          <span>{worksLabel(totalWorks, locale)}</span>
+          <span>{sections.data.length} {isRu(locale) ? "литературных традиций" : "literary traditions"}</span>
+        </div>
+
+        <div className="canon-tradition-grid">
+          {sections.data.map((section, index) => {
+            const title = literatureLabel(section.code, locale);
+            const monogram = title.trim().charAt(0).toUpperCase();
+            return (
               <button
                 type="button"
-                className="text-link"
-                onClick={() => setView({ kind: "collection", collectionId: collection.id })}
+                className="canon-tradition-card"
+                key={section.code}
+                onClick={() => openSection(section.code)}
               >
-                {strings.open}
+                <span className="canon-tradition-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="canon-tradition-books" aria-hidden="true">
+                  <span>{monogram}</span>
+                  <span>{section.code.toUpperCase()}</span>
+                  <span>{monogram}</span>
+                </span>
+                <span className="canon-tradition-copy">
+                  <strong>{title}</strong>
+                  <small>{worksLabel(section.count, locale)}</small>
+                </span>
+                <span className="canon-tradition-arrow" aria-hidden="true">→</span>
               </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
+  function renderSection(code: string) {
+    const title = literatureLabel(code, locale);
+
+    return (
+      <>
+        <div className="canon-route-topbar">
+          <button type="button" className="canon-back" onClick={() => setView({ kind: "index" })}>
+            ← {isRu(locale) ? "Все литературы" : "All literatures"}
+          </button>
+        </div>
+
+        <div className="canon-route-heading">
+          <div>
+            <p className="eyebrow">The Canon · {code.toUpperCase()}</p>
+            <h3>{title}</h3>
+            <p>{routeSubtitle(locale)}</p>
+          </div>
+          {total > 0 && (
+            <div className="canon-route-count">
+              <strong>{total.toLocaleString(isRu(locale) ? "ru-RU" : "en-US")}</strong>
+              <span>{isRu(locale) ? "книг в маршруте" : "works in route"}</span>
             </div>
-          </article>
-        ))}
-      </div>
+          )}
+        </div>
+
+        {routeLoading && books.length === 0 ? (
+          <p className="canon-state-copy">{isRu(locale) ? "Строим маршрут…" : "Building route…"}</p>
+        ) : routeError && books.length === 0 ? (
+          <GuestNotice message={isRu(locale) ? "Не удалось построить маршрут." : "Could not build this route."} />
+        ) : books.length === 0 ? (
+          <GuestNotice message={isRu(locale) ? "В этом разделе пока нет доступных книг." : "No books are available in this section yet."} />
+        ) : (
+          <>
+            <div className="canon-route-grid">
+              {books.map((book, index) => {
+                const status = libraryStatusByWorkId.get(book.id);
+                return (
+                  <article className="canon-route-book" key={book.id}>
+                    <span className="canon-route-index">{String(index + 1).padStart(3, "0")}</span>
+                    <button
+                      type="button"
+                      className="canon-book-button"
+                      onClick={() => onOpenBookDetail(book.id)}
+                      aria-label={`${book.title}${book.authorName ? ` — ${book.authorName}` : ""}`}
+                    >
+                      <CanonBookCover book={book} />
+                      <span className="canon-book-copy">
+                        <strong>{book.title}</strong>
+                        {book.authorName && <small>{book.authorName}</small>}
+                        <span className="canon-book-meta">
+                          {book.publicationYear ? String(book.publicationYear) : (isRu(locale) ? "год не указан" : "year unknown")}
+                          {status === "reading" ? ` · ${isRu(locale) ? "читаю" : "reading"}` : ""}
+                          {status === "finished" ? ` · ${isRu(locale) ? "прочитано" : "finished"}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="canon-route-footer">
+              <span>
+                {isRu(locale) ? "Показано" : "Showing"} {books.length.toLocaleString()} / {total.toLocaleString()}
+              </span>
+              {hasMore && (
+                <button type="button" className="primary-button" onClick={loadMore} disabled={routeLoading}>
+                  {routeLoading
+                    ? (isRu(locale) ? "Загружаем…" : "Loading…")
+                    : (isRu(locale) ? "Продолжить маршрут" : "Continue route")}
+                </button>
+              )}
+              {routeError && books.length > 0 && (
+                <button type="button" className="text-link" onClick={loadMore}>
+                  {isRu(locale) ? "Повторить" : "Retry"}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </>
     );
   }
 
   return (
-    <section className="notes-group" aria-label="The Canon">
-      <header className="notes-group-header">
-        <div>
-          <p className="eyebrow">The Canon</p>
-          <h2 className="notes-group-title">THE CANON</h2>
-          <p className="notes-group-author">{strings.subtitle}</p>
-        </div>
+    <section className="canon-shell" aria-label="The Canon">
+      <header className="canon-hero">
+        <p className="eyebrow">Atlas · The Canon</p>
+        <h2>The Canon</h2>
+        <p>
+          {isRu(locale)
+            ? "Мировая классика как живая библиотека: выбирайте литературную традицию и идите по автоматически выстроенному маршруту через весь доступный корпус."
+            : "World literature as a living library: choose a tradition and follow an automatically built route through its entire available corpus."}
+        </p>
       </header>
 
-      {view.kind === "index" && renderIndex()}
-      {view.kind === "collection" && renderCollection(view.collectionId)}
-      {view.kind === "path" && renderPath(view.originCollectionId)}
+      {view.kind === "index" ? renderIndex() : renderSection(view.code)}
     </section>
   );
 }
