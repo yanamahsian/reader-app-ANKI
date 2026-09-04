@@ -1,0 +1,73 @@
+.canon-overview-portal {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 40px;
+  margin: 0 0 28px;
+  padding: clamp(28px, 4vw, 52px);
+  overflow: hidden;
+  border: 1px solid rgba(202, 160, 88, 0.48);
+  background:
+    radial-gradient(circle at 82% 18%, rgba(83, 23, 31, 0.34), transparent 34%),
+    linear-gradient(105deg, rgba(12, 9, 8, 0.99), rgba(21, 14, 13, 0.99));
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.28);
+}
+
+.canon-overview-portal::after {
+  content: "C";
+  position: absolute;
+  right: clamp(18px, 5vw, 72px);
+  top: 50%;
+  z-index: 0;
+  color: rgba(202, 160, 88, 0.055);
+  font-family: "Cormorant Garamond", serif;
+  font-size: clamp(180px, 24vw, 330px);
+  line-height: 0.7;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.canon-overview-portal > * {
+  position: relative;
+  z-index: 1;
+}
+
+.canon-overview-portal > div {
+  max-width: 760px;
+}
+
+.canon-overview-portal h2 {
+  margin: 0;
+  color: #f3e6d4;
+  font-family: "Cormorant Garamond", serif;
+  font-size: clamp(48px, 7vw, 88px);
+  font-weight: 500;
+  line-height: 0.92;
+  letter-spacing: -0.035em;
+}
+
+.canon-overview-portal p:last-child {
+  max-width: 680px;
+  margin: 20px 0 0;
+  color: rgba(243, 230, 212, 0.65);
+  font-family: "Cormorant Garamond", serif;
+  font-size: 20px;
+  line-height: 1.45;
+}
+
+.canon-overview-portal .primary-button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 760px) {
+  .canon-overview-portal {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 26px;
+  }
+
+  .canon-overview-portal .primary-button {
+    width: 100%;
+  }
+}
