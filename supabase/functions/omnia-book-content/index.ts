@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { parseCatalogScopeParam, resolveContentAccessScope } from "../_shared/catalogScope.ts";
 
-// omnia-book-content — rights/jurisdiction + Free/Library catalog boundary.
+// omnia-book-content — rights/jurisdiction + Free/Library/Aestesis catalog boundary.
 // Public endpoint by design; identity is optional and resolved inside the
 // function. Rights/jurisdiction always outrank subscription access.
 const CORS_HEADERS: Record<string, string> = {
@@ -8,8 +9,6 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, apikey, Authorization"
 };
-
-const PAID_PLANS = new Set(["library", "atlas", "academy"]);
 
 interface RightsAssertionRow {
   status: string;
@@ -43,6 +42,8 @@ Deno.serve(async (req: Request) => {
   const jurisdiction = (url.searchParams.get("jurisdiction") ?? "").trim();
   if (!jurisdiction) return jsonError("Missing required jurisdiction parameter", 400, "missing_jurisdiction");
 
+  const requestedCatalogScope = parseCatalogScopeParam(url.searchParams.get("catalogScope"));
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceRoleKey) {
@@ -52,6 +53,7 @@ Deno.serve(async (req: Request) => {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   let effectivePlan = "free";
+  let hasAestesis = false;
   if (req.headers.has("Authorization")) {
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
     if (!token) return jsonError("Invalid or expired session", 401, "unauthorized");
@@ -61,14 +63,20 @@ Deno.serve(async (req: Request) => {
       return jsonError("Invalid or expired session", 401, "unauthorized");
     }
 
-    const { data: planData, error: planError } = await supabase.rpc("effective_plan_for_user", {
-      p_user_id: userData.user.id
-    });
+    const [{ data: planData, error: planError }, { data: aestesisData, error: aestesisError }] = await Promise.all([
+      supabase.rpc("effective_plan_for_user", { p_user_id: userData.user.id }),
+      supabase.rpc("user_has_aestesis_entitlement", { p_user_id: userData.user.id })
+    ]);
     if (planError) {
       console.error(`omnia-book-content: effective_plan_for_user failed for user ${userData.user.id}`, planError);
       return jsonError("Failed to resolve subscription plan", 500, "plan_lookup_failed");
     }
+    if (aestesisError) {
+      console.error(`omnia-book-content: user_has_aestesis_entitlement failed for user ${userData.user.id}`, aestesisError);
+      return jsonError("Failed to resolve Aestesis entitlement", 500, "plan_lookup_failed");
+    }
     effectivePlan = typeof planData === "string" && planData ? planData : "free";
+    hasAestesis = aestesisData === true;
   }
 
   const { data: edition, error: editionError } = await supabase
@@ -111,7 +119,30 @@ Deno.serve(async (req: Request) => {
     return jsonError(`This edition's rights do not permit reading it in jurisdiction "${jurisdiction}"`, 403, "rights_not_permitted");
   }
 
-  if (!PAID_PLANS.has(effectivePlan)) {
+  const contentScope = resolveContentAccessScope(effectivePlan, hasAestesis, requestedCatalogScope);
+  if (!contentScope.ok) {
+    return jsonError(
+      "This account does not hold an active Aestesis entitlement",
+      403,
+      contentScope.errorCode
+    );
+  }
+
+  if (contentScope.mode === "aestesis") {
+    const { data: aestesisEntry, error: aestesisError } = await supabase
+      .from("aestesis_catalog_works")
+      .select("work_id")
+      .eq("work_id", edition.work_id)
+      .eq("enabled", true)
+      .maybeSingle();
+    if (aestesisError) {
+      console.error(`omnia-book-content: aestesis_catalog_works query failed for work ${edition.work_id}`, aestesisError);
+      return jsonError("Failed to look up Aestesis catalog membership", 500, "lookup_failed");
+    }
+    if (!aestesisEntry) {
+      return jsonError("This book is not part of the curated Aestesis catalog", 403, "aestesis_catalog_plan_required");
+    }
+  } else if (contentScope.mode === "free") {
     const { data: freeEntry, error: freeError } = await supabase
       .from("free_catalog_works")
       .select("work_id")
