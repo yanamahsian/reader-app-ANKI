@@ -18,8 +18,6 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, OPTIONS"
 };
 
-const PAID_PLANS = new Set(["library", "atlas", "academy"]);
-
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -33,6 +31,7 @@ function serverErrorResponse(): Response {
 
 // @ts-ignore -- resolved through deno.json import map.
 import { createClient } from "supabase";
+import { parseCatalogScopeParam, resolveDiscoveryCatalogScope } from "../_shared/catalogScope.ts";
 
 function buildQualifyingEditions(
   candidateEditions: any[],
@@ -100,28 +99,40 @@ function buildBookFromWork(row: any, qualifyingEditions: any[], authorNameById: 
   };
 }
 
-async function resolveEffectivePlan(supabase: any, req: Request): Promise<{ plan: string } | { errorResponse: Response }> {
-  if (!req.headers.has("Authorization")) return { plan: "free" };
-
+async function resolveEffectivePlan(
+  supabase: any,
+  req: Request
+): Promise<{ plan: string; hasAestesis: boolean } | { errorResponse: Response }> {
+  if (!req.headers.has("Authorization")) {
+    return { plan: "free", hasAestesis: false };
+  }
   const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   if (!token) {
     return { errorResponse: jsonResponse({ error: "Invalid or expired session", code: "unauthorized" }, 401) };
   }
-
   const { data: userData, error: userError } = await supabase.auth.getUser(token);
   if (userError || !userData?.user) {
     return { errorResponse: jsonResponse({ error: "Invalid or expired session", code: "unauthorized" }, 401) };
   }
 
-  const { data: planData, error: planError } = await supabase.rpc("effective_plan_for_user", {
-    p_user_id: userData.user.id
-  });
+  const [{ data: planData, error: planError }, { data: aestesisData, error: aestesisError }] = await Promise.all([
+    supabase.rpc("effective_plan_for_user", { p_user_id: userData.user.id }),
+    supabase.rpc("user_has_aestesis_entitlement", { p_user_id: userData.user.id })
+  ]);
+
   if (planError) {
     console.error(`omnia-library-catalog: effective_plan_for_user failed for user ${userData.user.id}`, planError);
     return { errorResponse: serverErrorResponse() };
   }
+  if (aestesisError) {
+    console.error(`omnia-library-catalog: user_has_aestesis_entitlement failed for user ${userData.user.id}`, aestesisError);
+    return { errorResponse: serverErrorResponse() };
+  }
 
-  return { plan: typeof planData === "string" && planData ? planData : "free" };
+  return {
+    plan: typeof planData === "string" && planData ? planData : "free",
+    hasAestesis: aestesisData === true
+  };
 }
 
 async function handleWorkIdsLookup(supabase: any, req: Request, workIdsParam: string): Promise<Response> {
@@ -260,18 +271,8 @@ Deno.serve(async (req: Request) => {
     Math.max(1, Number(url.searchParams.get("limit") ?? String(DEFAULT_LIMIT)) || DEFAULT_LIMIT)
   );
   const searchQuery = rawQuery.length >= 2 ? rawQuery : null;
+  const requestedCatalogScope = parseCatalogScopeParam(url.searchParams.get("catalogScope"));
 
-  // Internationalization v1, part 2: an optional RANKING signal, never a
-  // filter -- see library_catalog_preferred_language_ranking_v1.sql's own
-  // comment for the full reasoning. `language` above stays the only hard
-  // filter, completely unaffected by this. Comma-separated, same
-  // convention as `workIds` above; trimmed, de-duplicated, capped, and
-  // empty entries dropped so a stray "," or trailing comma can't produce
-  // a spurious empty-string array element. Passed through as-is (real
-  // bound RPC array parameter, not interpolated SQL) -- an unrecognized
-  // code just never matches any edition's language and so never boosts
-  // anything, exactly like an unrecognized `language` filter value would
-  // simply match zero rows.
   const preferredLanguagesParam = (url.searchParams.get("preferredLanguages") ?? "").trim();
   const preferredLanguages = preferredLanguagesParam
     ? Array.from(new Set(
@@ -281,7 +282,19 @@ Deno.serve(async (req: Request) => {
 
   const planResult = await resolveEffectivePlan(supabase, req);
   if ("errorResponse" in planResult) return planResult.errorResponse;
-  const freeOnly = !PAID_PLANS.has(planResult.plan);
+
+  const scopeResult = resolveDiscoveryCatalogScope(
+    planResult.plan,
+    planResult.hasAestesis,
+    requestedCatalogScope
+  );
+  if (!scopeResult.ok) {
+    return jsonResponse(
+      { error: "This account does not hold an active Aestesis entitlement", code: scopeResult.errorCode },
+      403
+    );
+  }
+  const { freeOnly, aestesisOnly } = scopeResult;
 
   try {
     const [searchResult, facetsResult] = await Promise.all([
@@ -292,12 +305,14 @@ Deno.serve(async (req: Request) => {
         p_offset: offset,
         p_jurisdiction: jurisdiction || null,
         p_free_only: freeOnly,
-        p_preferred_languages: preferredLanguages.length > 0 ? preferredLanguages : null
+        p_preferred_languages: preferredLanguages.length > 0 ? preferredLanguages : null,
+        p_aestesis_only: aestesisOnly
       }),
       supabase.rpc("library_language_facets", {
         p_query: searchQuery,
         p_jurisdiction: jurisdiction || null,
-        p_free_only: freeOnly
+        p_free_only: freeOnly,
+        p_aestesis_only: aestesisOnly
       })
     ]);
 
